@@ -1,6 +1,8 @@
-//! Production-entry replacement for
-//! `src/workers/__tests__/inference-worker-initialization.test.ts`
-//! (frozen SHA-256 `43a2ae04885b26904a0bd96c922f76ed381a0db5e6c09f2a79bbb30fadf52789`).
+//! Native initialization tests for the NLF-only inference worker.
+//!
+//! The pose model (NLF-L on DirectML) is a HARD requirement: a failure to create
+//! its session leaves the worker uninitialized and surfaces an actionable error.
+//! RTMDet still loads on the CPU with the frozen retry/backoff policy.
 
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
@@ -10,61 +12,27 @@ use slouch_domain::ported::messages::schemas::{
 };
 use slouch_domain::FeatureId;
 use slouch_vision::ported::inference_worker::{
-    retry_delay, InferenceWorker, SessionOutput, WorkerError, WorkerResponse,
+    retry_delay, ExecutionProvider, InferenceWorker, SessionOptions, SessionOutput, WorkerResponse,
 };
 
 use super::support::{
-    detector_outputs, image, pose_outputs, CreateOutcome, TestFactory, TestLogger, TestRuntime,
+    detector_outputs, image, nlf_outputs, CreateOutcome, TestFactory, TestLogger, TestRuntime,
 };
 
-/// Synthetic NLF-L outputs for a realistic upright seated pose. Only the coco_19
-/// posture joints consumed by `extract_nlf_depth_features` carry meaningful 3D
-/// coordinates (meters, box/root-relative, matching the pilot's observed
-/// magnitudes: z ~1.1-1.3, ~0.5 m torso); every other canonical joint stays zero.
-/// Upper-body uncertainty is low (~0.03) and lower-body higher (~0.10), mirroring
-/// the pilot's truncation signal so the extracted feature is non-degenerate.
-fn nlf_outputs() -> HashMap<String, SessionOutput> {
-    const NUM_CANONICAL: usize = 867;
-    let mut coords = vec![0.0_f32; NUM_CANONICAL * 3];
-    let mut set = |joint: usize, x: f32, y: f32, z: f32| {
-        coords[joint * 3] = x;
-        coords[joint * 3 + 1] = y;
-        coords[joint * 3 + 2] = z;
-    };
-    // coco_19 posture indices from models/nlf_joint_map.json.
-    set(75, 0.00, 0.60, 1.22); // neck
-    set(76, 0.00, 0.68, 1.15); // nose
-    set(77, -0.20, 0.50, 1.24); // lsho
-    set(83, 0.20, 0.50, 1.24); // rsho
-    set(80, -0.15, 0.00, 1.30); // lhip
-    set(86, 0.15, 0.00, 1.30); // rhip
-    set(90, -0.07, 0.72, 1.20); // lear
-    set(92, 0.07, 0.72, 1.20); // rear
-    set(89, -0.035, 0.74, 1.17); // leye
-    set(91, 0.035, 0.74, 1.17); // reye
-    set(93, 0.00, 0.00, 1.30); // pelvis
-    set(81, -0.16, -0.45, 1.10); // lkne
-    set(82, -0.16, -0.85, 1.05); // lank
-    set(87, 0.16, -0.45, 1.10); // rkne
-    set(88, 0.16, -0.85, 1.05); // rank
-
-    let mut uncertainty = vec![0.03_f32; NUM_CANONICAL];
-    for joint in [81, 82, 87, 88] {
-        uncertainty[joint] = 0.10;
+/// The DirectML session options every NLF-L create must use.
+fn nlf_options() -> SessionOptions {
+    SessionOptions {
+        execution_provider: ExecutionProvider::DirectMl,
+        ..SessionOptions::default()
     }
+}
 
-    HashMap::from([
-        (
-            "coords2d".into(),
-            SessionOutput::F32(vec![0.0; NUM_CANONICAL * 2]),
-        ),
-        ("coords3d_rel".into(), SessionOutput::F32(coords)),
-        ("uncertainty".into(), SessionOutput::F32(uncertainty)),
-    ])
+fn person_detector() -> HashMap<String, SessionOutput> {
+    detector_outputs(vec![40.0, 40.0, 280.0, 280.0, 0.9], vec![0], 0.25)
 }
 
 #[test]
-fn actual_worker_retries_with_frozen_options_and_backoff() {
+fn actual_worker_retries_rtmdet_then_loads_nlf_on_directml() {
     let (runtime, trace) = TestRuntime::new([
         CreateOutcome::Error("first".into()),
         CreateOutcome::Error("second".into()),
@@ -76,8 +44,7 @@ fn actual_worker_retries_with_frozen_options_and_backoff() {
     let responses = worker.handle_message(InferenceWorkerMessage::Initialize {
         payload: InitializePayload {
             rtmdet_path: "det.onnx".into(),
-            rtmw3d_path: "pose.onnx".into(),
-            nlf_path: None,
+            nlf_path: "nlf.onnx".into(),
         },
     });
 
@@ -92,10 +59,10 @@ fn actual_worker_retries_with_frozen_options_and_backoff() {
     assert_eq!(
         trace.creates,
         vec![
-            ("det.onnx".into(), "RTMDet".into(), Default::default(),),
-            ("det.onnx".into(), "RTMDet".into(), Default::default(),),
-            ("det.onnx".into(), "RTMDet".into(), Default::default(),),
-            ("pose.onnx".into(), "RTMPose-M".into(), Default::default(),),
+            ("det.onnx".into(), "RTMDet".into(), Default::default()),
+            ("det.onnx".into(), "RTMDet".into(), Default::default()),
+            ("det.onnx".into(), "RTMDet".into(), Default::default()),
+            ("nlf.onnx".into(), "NLF-L".into(), nlf_options()),
         ]
     );
     assert_eq!(
@@ -105,7 +72,7 @@ fn actual_worker_retries_with_frozen_options_and_backoff() {
 }
 
 #[test]
-fn actual_worker_returns_last_error_after_exactly_three_attempts() {
+fn actual_worker_returns_last_error_after_exactly_three_rtmdet_attempts() {
     let (runtime, trace) = TestRuntime::new([
         CreateOutcome::Error("first".into()),
         CreateOutcome::Error("second".into()),
@@ -116,10 +83,10 @@ fn actual_worker_returns_last_error_after_exactly_three_attempts() {
     let responses = worker.handle_message(InferenceWorkerMessage::Initialize {
         payload: InitializePayload {
             rtmdet_path: "bad.onnx".into(),
-            rtmw3d_path: "unused.onnx".into(),
-            nlf_path: None,
+            nlf_path: "nlf.onnx".into(),
         },
     });
+    // RTMDet fails all three attempts; NLF is never reached.
     assert_eq!(trace.lock().expect("trace").creates.len(), 3);
     assert_eq!(
         responses,
@@ -137,29 +104,30 @@ fn actual_worker_returns_last_error_after_exactly_three_attempts() {
 }
 
 #[test]
-fn failed_second_session_publishes_no_half_initialized_state_and_process_retries_paths() {
-    let detector = detector_outputs(vec![], vec![], 0.1);
+fn nlf_create_failure_returns_actionable_directml_error_and_reinitializes_on_next_frame() {
+    // RTMDet loads; the NLF-L DirectML session fails on its SINGLE attempt (no
+    // retry — a missing GPU is not transient). Initialization must return the
+    // actionable DirectML error and publish no half-initialized state. A later
+    // frame re-initializes from the stored paths (proving is_initialized was
+    // false), and this time NLF succeeds.
     let (runtime, trace) = TestRuntime::new([
         CreateOutcome::Session(VecDeque::new()),
-        CreateOutcome::Error("pose one".into()),
-        CreateOutcome::Error("pose two".into()),
-        CreateOutcome::Error("pose last".into()),
-        CreateOutcome::Session(VecDeque::from([Ok(detector)])),
-        CreateOutcome::Session(VecDeque::from([Ok(pose_outputs())])),
+        CreateOutcome::Error("DirectML device not available".into()),
+        CreateOutcome::Session(VecDeque::from([Ok(person_detector())])),
+        CreateOutcome::Session(VecDeque::from([Ok(nlf_outputs())])),
     ]);
     let mut worker =
         InferenceWorker::with_runtime(TestFactory::default(), TestLogger::default(), runtime);
     let initialized = worker.handle_message(InferenceWorkerMessage::Initialize {
         payload: InitializePayload {
             rtmdet_path: "det.onnx".into(),
-            rtmw3d_path: "pose.onnx".into(),
-            nlf_path: None,
+            nlf_path: "nlf.onnx".into(),
         },
     });
     assert_eq!(
         initialized,
         vec![WorkerResponse::Error {
-            error: "Failed to initialize models after 3 attempts: pose last. Please check your internet connection and reload the page.".into(),
+            error: "Posture detection requires a DirectX 12-capable GPU. The NLF pose model failed to initialize on DirectML: DirectML device not available".into(),
             request_id: None,
             details: None,
             success: None,
@@ -168,13 +136,20 @@ fn failed_second_session_publishes_no_half_initialized_state_and_process_retries
 
     let processed = worker.handle_message(InferenceWorkerMessage::Process {
         payload: ProcessPayload {
-            image_data: image(4, 4),
+            image_data: image(640, 480),
             request_id: 77,
         },
     });
-    assert!(
-        matches!(&processed[..], [WorkerResponse::Result { request_id: 77, result }] if !result.person_found)
-    );
+    let [WorkerResponse::Result {
+        request_id: 77,
+        result,
+    }] = &processed[..]
+    else {
+        panic!("expected a re-initialized result: {processed:?}")
+    };
+    assert!(result.person_found);
+    assert_eq!(result.keypoints.as_ref().expect("keypoints").len(), 17);
+
     let creates = &trace.lock().expect("trace").creates;
     assert_eq!(
         creates
@@ -183,11 +158,9 @@ fn failed_second_session_publishes_no_half_initialized_state_and_process_retries
             .collect::<Vec<_>>(),
         vec![
             ("det.onnx", "RTMDet", Default::default()),
-            ("pose.onnx", "RTMPose-M", Default::default()),
-            ("pose.onnx", "RTMPose-M", Default::default()),
-            ("pose.onnx", "RTMPose-M", Default::default()),
+            ("nlf.onnx", "NLF-L", nlf_options()),
             ("det.onnx", "RTMDet", Default::default()),
-            ("pose.onnx", "RTMPose-M", Default::default()),
+            ("nlf.onnx", "NLF-L", nlf_options()),
         ]
     );
 }
@@ -228,8 +201,7 @@ fn invalid_model_path_is_preserved_in_initialization_error() {
     let responses = worker.handle_message(InferenceWorkerMessage::Initialize {
         payload: InitializePayload {
             rtmdet_path: "/invalid/path.onnx".into(),
-            rtmw3d_path: "unused.onnx".into(),
-            nlf_path: None,
+            nlf_path: "nlf.onnx".into(),
         },
     });
 
@@ -266,52 +238,13 @@ fn worker_response_serializes_types_and_camel_case_request_id() {
     assert!(error.get("request_id").is_none());
 }
 
-fn person_detector() -> HashMap<String, SessionOutput> {
-    detector_outputs(vec![40.0, 40.0, 280.0, 280.0, 0.9], vec![0], 0.25)
-}
-
 #[test]
-fn nlf_session_failure_degrades_gracefully_and_omits_depth_feature() {
-    // The DirectML NLF session fails to create (no GPU / DML runtime). Overall
-    // initialization must still succeed, the worker must run frames normally, and
-    // the result must simply carry no NlfDepth feature.
+fn nlf_present_path_yields_seventeen_keypoints_and_depth_feature() {
+    // With RTMDet and a working NLF session, a person-found frame carries 17 COCO
+    // keypoints plus a valid 14-dim NlfDepth feature. A successful Result (never an
+    // Error) proves the native-result validation accepted them.
     let (runtime, _) = TestRuntime::new([
         CreateOutcome::Session(VecDeque::from([Ok(person_detector())])),
-        CreateOutcome::Session(VecDeque::from([Ok(pose_outputs())])),
-        CreateOutcome::Error("DirectML device not available".into()),
-    ]);
-    let mut worker =
-        InferenceWorker::with_runtime(TestFactory::default(), TestLogger::default(), runtime);
-    let init = worker.handle_message(InferenceWorkerMessage::Initialize {
-        payload: InitializePayload {
-            rtmdet_path: "det.onnx".into(),
-            rtmw3d_path: "pose.onnx".into(),
-            nlf_path: Some("nlf.onnx".into()),
-        },
-    });
-    assert!(matches!(&init[..], [WorkerResponse::Initialized { .. }]));
-
-    let response = worker.handle_message(InferenceWorkerMessage::Process {
-        payload: ProcessPayload {
-            image_data: image(640, 480),
-            request_id: 1,
-        },
-    });
-    let [WorkerResponse::Result { result, .. }] = &response[..] else {
-        panic!("expected result: {response:?}")
-    };
-    assert!(result.person_found);
-    assert!(!result.features.contains_key(&FeatureId::NlfDepth));
-}
-
-#[test]
-fn nlf_present_path_inserts_fourteen_dim_depth_feature() {
-    // With a working NLF session, a person-found frame gains a valid 14-dim
-    // NlfDepth feature. A successful Result (never an Error) proves the stricter
-    // native-result validation accepted the extra feature.
-    let (runtime, _) = TestRuntime::new([
-        CreateOutcome::Session(VecDeque::from([Ok(person_detector())])),
-        CreateOutcome::Session(VecDeque::from([Ok(pose_outputs())])),
         CreateOutcome::Session(VecDeque::from([Ok(nlf_outputs())])),
     ]);
     let mut worker =
@@ -319,8 +252,7 @@ fn nlf_present_path_inserts_fourteen_dim_depth_feature() {
     worker.handle_message(InferenceWorkerMessage::Initialize {
         payload: InitializePayload {
             rtmdet_path: "det.onnx".into(),
-            rtmw3d_path: "pose.onnx".into(),
-            nlf_path: Some("nlf.onnx".into()),
+            nlf_path: "nlf.onnx".into(),
         },
     });
 
@@ -334,42 +266,19 @@ fn nlf_present_path_inserts_fourteen_dim_depth_feature() {
         panic!("expected result: {response:?}")
     };
     assert!(result.person_found);
+    assert_eq!(result.keypoints.as_ref().expect("keypoints").len(), 17);
+    assert!(result
+        .keypoints
+        .as_ref()
+        .expect("keypoints")
+        .iter()
+        .all(|keypoint| {
+            keypoint.x.is_finite()
+                && keypoint.y.is_finite()
+                && (0.0..=1.0).contains(&keypoint.score)
+        }));
     assert_eq!(result.features[&FeatureId::NlfDepth].len(), 14);
     assert!(result.features[&FeatureId::NlfDepth]
         .iter()
         .all(|value| value.is_finite()));
-}
-
-#[test]
-fn nlf_forward_error_is_non_fatal_and_omits_depth_feature() {
-    // A working NLF session that errors on run must not fail the frame: the result
-    // is still emitted, just without the NlfDepth feature.
-    let (runtime, _) = TestRuntime::new([
-        CreateOutcome::Session(VecDeque::from([Ok(person_detector())])),
-        CreateOutcome::Session(VecDeque::from([Ok(pose_outputs())])),
-        CreateOutcome::Session(VecDeque::from([Err(WorkerError::Inference(
-            "injected NLF execution failure".into(),
-        ))])),
-    ]);
-    let mut worker =
-        InferenceWorker::with_runtime(TestFactory::default(), TestLogger::default(), runtime);
-    worker.handle_message(InferenceWorkerMessage::Initialize {
-        payload: InitializePayload {
-            rtmdet_path: "det.onnx".into(),
-            rtmw3d_path: "pose.onnx".into(),
-            nlf_path: Some("nlf.onnx".into()),
-        },
-    });
-
-    let response = worker.handle_message(InferenceWorkerMessage::Process {
-        payload: ProcessPayload {
-            image_data: image(640, 480),
-            request_id: 3,
-        },
-    });
-    let [WorkerResponse::Result { result, .. }] = &response[..] else {
-        panic!("expected result: {response:?}")
-    };
-    assert!(result.person_found);
-    assert!(!result.features.contains_key(&FeatureId::NlfDepth));
 }

@@ -11,7 +11,7 @@ use slouch_domain::ported::messages::schemas::{
 use slouch_vision::ported::inference_worker::{InferenceWorker, WorkerResponse};
 
 use super::support::{
-    detector_outputs, image, model, pose_outputs, CreateOutcome, TestFactory, TestLogger,
+    detector_outputs, image, model, nlf_outputs, CreateOutcome, TestFactory, TestLogger,
     TestRuntime,
 };
 
@@ -28,20 +28,19 @@ fn worker_with_frames(
             ))
         })
         .collect::<VecDeque<_>>();
-    let pose_runs = (0..frames)
-        .map(|_| Ok(pose_outputs()))
+    let nlf_runs = (0..frames)
+        .map(|_| Ok(nlf_outputs()))
         .collect::<VecDeque<_>>();
     let (runtime, _) = TestRuntime::new([
         CreateOutcome::Session(detector_runs),
-        CreateOutcome::Session(pose_runs),
+        CreateOutcome::Session(nlf_runs),
     ]);
     let mut worker = InferenceWorker::with_runtime(factory, TestLogger::default(), runtime);
     assert!(matches!(
         &worker.handle_message(InferenceWorkerMessage::Initialize {
             payload: InitializePayload {
                 rtmdet_path: "det".into(),
-                rtmw3d_path: "pose".into(),
-                nlf_path: None,
+                nlf_path: "nlf".into(),
             },
         })[..],
         [WorkerResponse::Initialized { .. }]
@@ -195,8 +194,7 @@ fn no_person_reports_away_without_running_presence_and_posture_only_emits_no_cla
         worker.handle_message(InferenceWorkerMessage::Initialize {
             payload: InitializePayload {
                 rtmdet_path: "det".into(),
-                rtmw3d_path: "pose".into(),
-                nlf_path: None,
+                nlf_path: "nlf".into(),
             },
         });
         if presence {
@@ -271,14 +269,13 @@ fn prediction_error_degrades_to_result_without_classification_and_logs() {
             vec![0],
             0.1,
         ))])),
-        CreateOutcome::Session(VecDeque::from([Ok(pose_outputs())])),
+        CreateOutcome::Session(VecDeque::from([Ok(nlf_outputs())])),
     ]);
     let mut worker = InferenceWorker::with_runtime(factory, logger, runtime);
     worker.handle_message(InferenceWorkerMessage::Initialize {
         payload: InitializePayload {
             rtmdet_path: "det".into(),
-            rtmw3d_path: "pose".into(),
-            nlf_path: None,
+            nlf_path: "nlf".into(),
         },
     });
     load_presence(&mut worker, 0.8);
@@ -313,14 +310,13 @@ fn prediction_error_degrades_to_result_without_classification_and_logs() {
             vec![0],
             0.1,
         ))])),
-        CreateOutcome::Session(VecDeque::from([Ok(pose_outputs())])),
+        CreateOutcome::Session(VecDeque::from([Ok(nlf_outputs())])),
     ]);
     let mut worker = InferenceWorker::with_runtime(factory, logger, runtime);
     worker.handle_message(InferenceWorkerMessage::Initialize {
         payload: InitializePayload {
             rtmdet_path: "det".into(),
-            rtmw3d_path: "pose".into(),
-            nlf_path: None,
+            nlf_path: "nlf".into(),
         },
     });
     load_posture(&mut worker, 0.7);
@@ -368,8 +364,7 @@ fn no_person_reports_away_even_when_presence_model_would_error() {
     worker.handle_message(InferenceWorkerMessage::Initialize {
         payload: InitializePayload {
             rtmdet_path: "det".into(),
-            rtmw3d_path: "pose".into(),
-            nlf_path: None,
+            nlf_path: "nlf".into(),
         },
     });
     load_presence(&mut worker, 0.2);

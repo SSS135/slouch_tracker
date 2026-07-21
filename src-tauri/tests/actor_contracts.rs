@@ -23,9 +23,9 @@ use std::time::{Duration, Instant};
 use tauri::ipc::{Channel, InvokeResponseBody};
 
 use actors::{
-    inference_result, initialize_message, raw_inference_message, validate_training_event_stream,
-    ActorHealth, ActorJoin, InferenceActor, InferenceCommand, TrainingActor, TrainingEvent,
-    TrainingStage,
+    inference_result, initialize_message, raw_inference_message, reservoir_sample_from_inference,
+    validate_training_event_stream, ActorHealth, ActorJoin, InferenceActor, InferenceCommand,
+    NativeTrainingStorage, TrainingActor, TrainingEvent, TrainingStage,
 };
 use errors::ApiError;
 use slouch_domain::ported::messages::schemas::{
@@ -36,10 +36,10 @@ use slouch_domain::ported::messages::schemas::{
 };
 use slouch_domain::{
     BoundingBox, ClassifierConfig, ClassifierId, DimensionalityReductionConfig,
-    DimensionalityReductionMethod, FeatureId, FeatureMap, FrameLabel, Keypoint, PostureFrame,
-    Thumbnail, TrainingSettings,
+    DimensionalityReductionMethod, ExpandedBbox, FeatureId, FeatureMap, FrameLabel, Keypoint,
+    PostureFrame, Thumbnail, TrainingSettings,
 };
-use slouch_ml::ported::training_worker::TrainingWorkerResponse;
+use slouch_ml::ported::training_worker::{TrainingStorage, TrainingWorkerResponse};
 use slouch_store::ported::storage::DatasetStorage;
 use slouch_vision::ported::inference_worker::{NativeInferenceResult, WorkerResponse};
 
@@ -302,14 +302,12 @@ fn publishing_models_accepts_valid_pairs_and_rejects_broken_ones_nonfatally() {
 fn worker_message_constructors_and_response_mapping_preserve_the_ipc_contract() {
     let message = initialize_message(
         PathBuf::from("C:/models/rtmdet.onnx"),
-        PathBuf::from("C:/models/rtmpose.onnx"),
-        Some(PathBuf::from("C:/models/nlf.onnx")),
+        PathBuf::from("C:/models/nlf.onnx"),
     );
     match message {
         InferenceWorkerMessage::Initialize { payload } => {
             assert_eq!(payload.rtmdet_path, "C:/models/rtmdet.onnx");
-            assert_eq!(payload.rtmw3d_path, "C:/models/rtmpose.onnx");
-            assert_eq!(payload.nlf_path.as_deref(), Some("C:/models/nlf.onnx"));
+            assert_eq!(payload.nlf_path, "C:/models/nlf.onnx");
         }
         _ => panic!("initialize_message must build an Initialize message"),
     }
@@ -595,4 +593,71 @@ fn event_stream_validator_rejects_duplicate_and_out_of_order_sequences() {
     // empty stream and missing terminal event
     assert!(validate_training_event_stream(&[]).is_err());
     assert!(validate_training_event_stream(&[started, progress(1, 5)]).is_err());
+}
+
+// The five stored features a person frame produces today; the reservoir must
+// capture exactly these (computed features are rederived at training time).
+const STORED_INFERENCE_FEATURES: [FeatureId; 5] = [
+    FeatureId::RtmDetExtracted,
+    FeatureId::NlfDepth,
+    FeatureId::NlfBackbone,
+    FeatureId::NlfBackboneMax,
+    FeatureId::NlfBackboneStd,
+];
+
+fn person_result_with_stored_features() -> NativeInferenceResult {
+    let mut features = FeatureMap::new();
+    for (index, id) in STORED_INFERENCE_FEATURES.iter().enumerate() {
+        let value = 0.1 * (index as f32 + 1.0);
+        features.insert(*id, vec![value; id.metadata().dimensions]);
+    }
+    let bbox = BoundingBox {
+        x1: 0.0,
+        y1: 0.0,
+        x2: 1.0,
+        y2: 1.0,
+        score: 0.9,
+        width: 1.0,
+        height: 1.0,
+    };
+    NativeInferenceResult {
+        person_found: true,
+        bbox: Some(ExpandedBbox {
+            original: bbox,
+            expanded: bbox,
+        }),
+        keypoints: Some((0..17).map(|_| Keypoint::new(0.4, 0.5, 0.9)).collect()),
+        features,
+        classification: None,
+    }
+}
+
+#[test]
+fn reservoir_captures_stored_features_and_store_to_ml_preserves_the_map() {
+    let result = person_result_with_stored_features();
+    let sample =
+        reservoir_sample_from_inference(&result).expect("person result yields a reservoir sample");
+
+    assert_eq!(sample.features.len(), STORED_INFERENCE_FEATURES.len());
+    for id in STORED_INFERENCE_FEATURES {
+        assert_eq!(
+            sample.features.get(&id).map(Vec::len),
+            Some(id.metadata().dimensions),
+            "stored feature {id} must be captured at full dimensionality"
+        );
+    }
+
+    let storage = empty_storage();
+    assert!(storage
+        .sample_reservoir(&sample, 1_000)
+        .expect("reservoir accepts the sample"));
+    let mut training_storage = NativeTrainingStorage::new(storage);
+    let loaded = training_storage
+        .load_reservoir_samples()
+        .expect("reservoir samples load");
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(
+        loaded[0].features, sample.features,
+        "store→ml mapping must preserve the stored feature map",
+    );
 }

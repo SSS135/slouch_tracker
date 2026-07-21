@@ -18,7 +18,7 @@ The frontend is a thin UI layer: it renders the native preview `<img>`, draws ke
 ```
 Webcam (nokhwa, MJPEG) → CameraActor (dedicated Rust thread)
 → DetectionDispatcher thread (~1 fps) → InferenceActor → RTMDet-nano (person detection) → crop
-→ RTMPose-M (pose estimation) → keypoints + feature extraction → presence + posture classifiers
+→ NLF-L (pose estimation, DirectML) → keypoints + feature extraction → presence + posture classifiers
 → MessagePack InferenceUiResult → Svelte UI (overlays, status, smoothing)
 
 Preview: CameraActor's freshest MJPEG frame is served over the custom `slouchcam://` URI scheme;
@@ -32,11 +32,11 @@ unfocused (the detection rate), off when the window is hidden/minimized.
 - `src-tauri/src/actors.rs` — `CameraActor`: owns the webcam on a dedicated "slouch-camera" thread (nokhwa, MJPEG capture); exposes the freshest raw/processed frames to the `slouchcam://` preview scheme; switches between `Foreground`/`Background` modes on window focus; runs a `DetectionDispatcher` thread that feeds frames to the `InferenceActor` at ~1 fps in all modes
 - `src-tauri/src/actors.rs` — `InferenceActor`: owns the ONNX sessions on a dedicated thread behind a command channel; caches recent inference results keyed by one-use tokens so `save_capture` persists exactly the frame that was inferred (checkout/restore/commit lifecycle); feeds reservoir samples to the feature reservoir
 - `src-tauri/src/power.rs` — Windows EcoQoS / idle-priority (efficiency mode) applied when the window is backgrounded, cleared when focused
-- `src-tauri/crates/slouch-vision` — ONNX session management, preprocessing, the ported inference worker (RTMDet + RTMPose-M)
+- `src-tauri/crates/slouch-vision` — ONNX session management, preprocessing, the ported inference worker (RTMDet + NLF-L)
 - `src-svelte/hooks/`, `src-svelte/components/` — pull the `slouchcam://` preview into a native `<img>`, draw keypoint overlays, and issue capture/training commands
 - `src-svelte/lib/native/client.ts` — the single frontend gateway to all native commands (argument validation + typed error unwrapping)
 
-**Model resources** (`src-tauri/resources/models/`): `rtmdet-nano.onnx`, `rtmpose-m.onnx`. RTMPose-M backbone output is `[1,768,8,6]` (pooled over spatial axes → 768 dims); GAU output is `[1,17,256]` (pooled over keypoints → 256 dims); std pooling uses `sqrt(population_variance + 1e-6)`.
+**Model resources** (`src-tauri/resources/models/`): `rtmdet-nano.onnx`, `nlf_l_crop_fp16.onnx`. NLF-L (Neural Localizer Fields) runs on the DirectML execution provider; the 17 COCO keypoints are assembled from its `coords2d` output (inverted through the un-expanded RTMDet square crop) and per-joint confidence is calibrated from its `uncertainty` output, while `coords3d_rel` supplies supplementary posture-depth features.
 
 ### ML Training Pipeline
 
@@ -94,14 +94,15 @@ Trained models are serialized as **model container v1** (`src-tauri/model-format
 - Metadata and parameter schemas: `src-tauri/crates/slouch-domain/src/classifier.rs` (`ClassifierId`, `ClassifierMetadata`)
 - The Svelte UI auto-generates parameter controls from `get_classifier_registry` — no frontend changes needed for new parameters.
 
-### Feature Types (17, registry-driven)
+### Feature Types (18, registry-driven)
 
 Defined in `src-tauri/crates/slouch-domain/src/feature.rs`; served via `get_feature_registry`.
 
 **Stored** (extracted at capture time, persisted in `frame_features`):
-- `backbone_features` / `_max` / `_std` — RTMPose-M backbone avg/max/std pooling (768 dims each)
-- `gau_features` / `_max` / `_std` — RTMPose-M GAU avg/max/std pooling (256 dims each)
 - `rtmdet_extracted` — pooled (avg/std/max) RTMDet cls_p5 + reg_p5 (384 dims, presence)
+- `nlf_depth` — body-intrinsic 3D depth/angle features from NLF-L separating forward-head posture from trunk lean (14 dims, posture)
+
+The 6 legacy RTMPose-M poolings (`backbone_features` / `_max` / `_std`, `gau_features` / `_max` / `_std`; 768 / 256 dims) remain as retired append-only registry entries — hidden from selection (`user_selectable: false`) since NLF-L no longer produces them, but kept so existing datasets stay valid.
 
 **Computed** (derived from keypoints/bbox on demand):
 - `rtmdet_engineered` — detection geometry (135 dims, presence)
@@ -133,7 +134,7 @@ src-tauri/
     slouch-store/    SQLite storage, archive export/import, model container format,
                      feature reservoir
   schema/            live-v1.sql, archive-v1.sql
-  resources/         models/ (rtmdet-nano.onnx, rtmpose-m.onnx), onnxruntime/ (dll + notices)
+  resources/         models/ (rtmdet-nano.onnx, nlf_l_crop_fp16.onnx), onnxruntime/ (dll + notices)
   model-format-v1.md model container specification
 
 src/generated/       bindings.generated.ts (machine-written — never hand-edit),

@@ -18,30 +18,32 @@ attribution, and modifications.
 
 ## 1. Machine-learning models (OpenMMLab)
 
-Two ONNX model files are bundled in every release under
-`src-tauri/resources/models/` and are loaded at runtime by the native ONNX
+One ONNX model file is bundled in every release under
+`src-tauri/resources/models/` and is loaded at runtime by the native ONNX
 Runtime:
 
 | File | Size | Role |
 | --- | --- | --- |
 | `rtmdet-nano.onnx` | ~4.1 MB | Person detection (RTMDet-nano) |
-| `rtmpose-m.onnx` | ~54 MB | 17-keypoint pose estimation (RTMPose-M) |
 
-Both derive from **OpenMMLab** projects:
+It derives from **OpenMMLab** projects:
 
-- **RTMDet** — https://github.com/open-mmlab/mmdetection (MMDetection)
-- **RTMPose** — https://github.com/open-mmlab/mmpose (MMPose, `projects/rtmpose`)
+- **RTMDet** — https://github.com/open-mmlab/mmdetection (MMDetection) — the
+  detection architecture the bundled person detector is built on.
+- **MMPose** — https://github.com/open-mmlab/mmpose (`projects/rtmpose`) — the
+  project that distributes the RTMDet-nano person detector (at
+  `projects/rtmpose/rtmdet/person/`) used by Slouch Tracker.
 
 **License:** Apache License, Version 2.0.
 **Attribution:** Copyright 2018-2020 OpenMMLab. All rights reserved.
 (as stated in the MMPose and MMDetection `LICENSE` files).
 
-> **Provenance.** Both models were exported from the Apache-2.0 OpenMMLab
-> projects **MMDetection** (RTMDet-nano person detector, the variant
-> distributed with MMPose's `projects/rtmpose` demo pipeline) and **MMPose**
-> (RTMPose-M). The maintainer has confirmed the export/re-export chain used
-> MMDetection + MMPose only and did not install or import MMYOLO (a separate
-> GPL-3.0 OpenMMLab project that also ships RTMDet configurations).
+> **Provenance.** The bundled model was exported from the Apache-2.0 OpenMMLab
+> project **MMDetection** (RTMDet-nano person detector, the variant distributed
+> with MMPose's `projects/rtmpose` demo pipeline). The maintainer has confirmed
+> the export/re-export chain used MMDetection + MMPose only and did not install
+> or import MMYOLO (a separate GPL-3.0 OpenMMLab project that also ships RTMDet
+> configurations).
 
 ### 1a. `rtmdet-nano.onnx` — RTMDet-nano person detector
 
@@ -62,39 +64,16 @@ Both derive from **OpenMMLab** projects:
   each) so the application can extract pooled RTMDet features. The ONNX file
   carries no `metadata_props`.
 
-### 1b. `rtmpose-m.onnx` — RTMPose-M pose estimator
+### 1c. Apache-2.0 obligations for the bundled model
 
-- **Upstream project:** MMPose (RTMPose-M), https://github.com/open-mmlab/mmpose
-  (`projects/rtmpose`).
-- **License:** Apache-2.0.
-- **Modifications (bundled file is a custom re-export, not an upstream
-  artifact):** the model was re-exported to ONNX (opset 11,
-  `producer_name = pytorch`, `producer_version = 2.4.1`) to expose
-  intermediate backbone and GAU feature tensors as additional graph outputs
-  beyond the standard SimCC coordinate heads. The bundled file has four named
-  graph outputs:
-  - `simcc_x` — shape `[batch, 17, 384]` (standard SimCC-x head)
-  - `simcc_y` — shape `[batch, 17, 512]` (standard SimCC-y head)
-  - `backbone_features` — shape `[batch, 768, 8, 6]` (exposed backbone tensor;
-    pooled to 768 dims in the application)
-  - `gau_features` — shape `[batch, 17, 256]` (exposed GAU tensor; pooled to
-    256 dims in the application)
-
-  The application derives its stored feature variants (backbone and GAU
-  average / max / std pooling) from these two exposed tensors. The ONNX file
-  carries no `metadata_props`.
-
-### 1c. Apache-2.0 obligations for the bundled models
-
-Redistribution of the modified model exports above is done under the Apache
+Redistribution of the modified model export above is done under the Apache
 License, Version 2.0. In accordance with that license this notices file:
 
 1. retains the OpenMMLab attribution (Copyright 2018-2020 OpenMMLab);
 2. provides the full text of the Apache License, Version 2.0 in Appendix A
    (also available at https://www.apache.org/licenses/LICENSE-2.0); and
-3. states prominently that the bundled `.onnx` files are **modified** exports
-   of the upstream RTMDet and RTMPose models (see the Modifications entries in
-   sections 1a and 1b).
+3. states prominently that the bundled `.onnx` file is a **modified** export
+   of the upstream RTMDet model (see the Modifications entry in section 1a).
 
 ---
 
@@ -144,8 +123,7 @@ on the DirectML execution provider:
   `onnxruntime_providers_shared.dll`), the native inference engine bundled with
   the Windows release. This is the **DirectML build** of ONNX Runtime: it adds
   the DirectML execution provider (used to run the NLF-L model on the GPU) while
-  retaining the CPU execution provider used — unchanged — for RTMDet and
-  RTMPose.
+  retaining the CPU execution provider used — unchanged — for RTMDet.
 - **Version:** ONNX Runtime 1.24.2 (DirectML build, per
   `src-tauri/resource-lock.json`). The staged binaries report file version
   `1.24.20260219.5.3ba85bd`.

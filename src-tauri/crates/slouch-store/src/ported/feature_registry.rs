@@ -9,11 +9,11 @@ use std::fmt;
 use slouch_domain::{BboxAccessor, ModelCategory};
 use slouch_ml::ported::constants::{
     ENGINEERED_1D_DIMS, JOINT_2D_DIMS, JOINT_3D_DIMS, JOINT_4D_DIMS, KEYPOINT_SCORES_DIMS,
-    NLF_DEPTH_DIMS, NLF_DEPTH_STORAGE_COST, POSTURE_GEOMETRY_DIMS, POSTURE_RAW_DIMS,
-    RAW_KEYPOINTS_DIMS, RTMDET_ENGINEERED_DIMS, RTMDET_EXTRACTED_DIMS,
-    RTMDET_EXTRACTED_STORAGE_COST, RTMPOSE_BACKBONE_POOLED_DIMS,
-    RTMPOSE_BACKBONE_POOLED_STORAGE_COST, RTMPOSE_GAU_POOLED_DIMS, RTMPOSE_GAU_POOLED_STORAGE_COST,
-    TORSO_INVARIANT_DIMS,
+    NLF_BACKBONE_POOLED_DIMS, NLF_BACKBONE_POOLED_STORAGE_COST, NLF_DEPTH_DIMS,
+    NLF_DEPTH_STORAGE_COST, POSTURE_GEOMETRY_DIMS, POSTURE_RAW_DIMS, RAW_KEYPOINTS_DIMS,
+    RTMDET_ENGINEERED_DIMS, RTMDET_EXTRACTED_DIMS, RTMDET_EXTRACTED_STORAGE_COST,
+    RTMPOSE_BACKBONE_POOLED_DIMS, RTMPOSE_BACKBONE_POOLED_STORAGE_COST, RTMPOSE_GAU_POOLED_DIMS,
+    RTMPOSE_GAU_POOLED_STORAGE_COST, TORSO_INVARIANT_DIMS,
 };
 use slouch_ml::ported::engineered_features::{
     extract_engineered_features, extract_joint_2d_features, extract_joint_3d_features,
@@ -51,10 +51,13 @@ pub const FEATURE_RAW_KEYPOINTS: FeatureType = FeatureType::RawKeypoints;
 pub const FEATURE_POSTURE_GEOMETRY: FeatureType = FeatureType::PostureGeometry;
 pub const FEATURE_TORSO_INVARIANT: FeatureType = FeatureType::TorsoInvariant;
 pub const FEATURE_NLF_DEPTH: FeatureType = FeatureType::NlfDepth;
+pub const FEATURE_NLF_BACKBONE: FeatureType = FeatureType::NlfBackbone;
+pub const FEATURE_NLF_BACKBONE_MAX: FeatureType = FeatureType::NlfBackboneMax;
+pub const FEATURE_NLF_BACKBONE_STD: FeatureType = FeatureType::NlfBackboneStd;
 
 /// Valid feature type identifiers, in the same insertion order as the source
 /// object registry.
-pub const FEATURE_TYPES: [FeatureType; 18] = FeatureType::ALL;
+pub const FEATURE_TYPES: [FeatureType; 21] = FeatureType::ALL;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExtractorKind {
@@ -109,6 +112,31 @@ impl FeatureDefinition {
         }
     }
 
+    /// A retired stored feature: the variant/dimensions/storage persist for
+    /// existing datasets, but it is hidden from user selection because RTMPose no
+    /// longer produces it (NLF is the sole pose model).
+    const fn stored_unavailable(
+        id: FeatureType,
+        name: &'static str,
+        description: &'static str,
+        dimensions: usize,
+        storage_cost: usize,
+        model_type: ModelCategory,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            description,
+            dimensions,
+            storage_cost,
+            computed: false,
+            model_type: Some(model_type),
+            user_selectable: false,
+            requires_fitting: None,
+            extractor: ExtractorKind::Stored,
+        }
+    }
+
     const fn computed(
         id: FeatureType,
         name: &'static str,
@@ -134,7 +162,7 @@ impl FeatureDefinition {
 
     const fn from_feature_type(id: FeatureType) -> Self {
         match id {
-            FeatureType::BackboneFeatures => Self::stored(
+            FeatureType::BackboneFeatures => Self::stored_unavailable(
                 id,
                 "Backbone Features (Avg Pool)",
                 "Average pooled backbone features from RTMPose",
@@ -142,7 +170,7 @@ impl FeatureDefinition {
                 RTMPOSE_BACKBONE_POOLED_STORAGE_COST,
                 ModelCategory::Posture,
             ),
-            FeatureType::BackboneFeaturesMax => Self::stored(
+            FeatureType::BackboneFeaturesMax => Self::stored_unavailable(
                 id,
                 "Backbone Features (Max Pool)",
                 "Max pooled backbone features from RTMPose - Captures peak spatial activations",
@@ -150,7 +178,7 @@ impl FeatureDefinition {
                 RTMPOSE_BACKBONE_POOLED_STORAGE_COST,
                 ModelCategory::Posture,
             ),
-            FeatureType::BackboneFeaturesStd => Self::stored(
+            FeatureType::BackboneFeaturesStd => Self::stored_unavailable(
                 id,
                 "Backbone Features (Std Pool)",
                 "Std pooled backbone features from RTMPose - Captures spatial variation",
@@ -158,7 +186,7 @@ impl FeatureDefinition {
                 RTMPOSE_BACKBONE_POOLED_STORAGE_COST,
                 ModelCategory::Posture,
             ),
-            FeatureType::GauFeatures => Self::stored(
+            FeatureType::GauFeatures => Self::stored_unavailable(
                 id,
                 "GAU Features (Avg Pool)",
                 "Average pooled GAU features from RTMPose",
@@ -166,7 +194,7 @@ impl FeatureDefinition {
                 RTMPOSE_GAU_POOLED_STORAGE_COST,
                 ModelCategory::Posture,
             ),
-            FeatureType::GauFeaturesMax => Self::stored(
+            FeatureType::GauFeaturesMax => Self::stored_unavailable(
                 id,
                 "GAU Features (Max Pool)",
                 "Max pooled GAU features from RTMPose - Captures peak keypoint activations",
@@ -174,7 +202,7 @@ impl FeatureDefinition {
                 RTMPOSE_GAU_POOLED_STORAGE_COST,
                 ModelCategory::Posture,
             ),
-            FeatureType::GauFeaturesStd => Self::stored(
+            FeatureType::GauFeaturesStd => Self::stored_unavailable(
                 id,
                 "GAU Features (Std Pool)",
                 "Std pooled GAU features from RTMPose - Captures keypoint variation",
@@ -288,6 +316,30 @@ impl FeatureDefinition {
                 NLF_DEPTH_STORAGE_COST,
                 ModelCategory::Posture,
             ),
+            FeatureType::NlfBackbone => Self::stored(
+                id,
+                "NLF Backbone Features (Avg Pool)",
+                "Average-pooled NLF-L backbone embedding (512 dims)",
+                NLF_BACKBONE_POOLED_DIMS,
+                NLF_BACKBONE_POOLED_STORAGE_COST,
+                ModelCategory::Posture,
+            ),
+            FeatureType::NlfBackboneMax => Self::stored(
+                id,
+                "NLF Backbone Features (Max Pool)",
+                "Max-pooled NLF-L backbone embedding - captures peak spatial activations (512 dims)",
+                NLF_BACKBONE_POOLED_DIMS,
+                NLF_BACKBONE_POOLED_STORAGE_COST,
+                ModelCategory::Posture,
+            ),
+            FeatureType::NlfBackboneStd => Self::stored(
+                id,
+                "NLF Backbone Features (Std Pool)",
+                "Std-pooled NLF-L backbone embedding - captures spatial variation (512 dims)",
+                NLF_BACKBONE_POOLED_DIMS,
+                NLF_BACKBONE_POOLED_STORAGE_COST,
+                ModelCategory::Posture,
+            ),
         }
     }
 
@@ -327,7 +379,7 @@ impl FeatureDefinition {
 }
 
 /// Registry of all available feature types.
-pub const FEATURE_REGISTRY: [FeatureDefinition; 18] = [
+pub const FEATURE_REGISTRY: [FeatureDefinition; 21] = [
     FeatureDefinition::from_feature_type(FEATURE_BACKBONE_AVG),
     FeatureDefinition::from_feature_type(FEATURE_BACKBONE_MAX),
     FeatureDefinition::from_feature_type(FEATURE_BACKBONE_STD),
@@ -346,6 +398,9 @@ pub const FEATURE_REGISTRY: [FeatureDefinition; 18] = [
     FeatureDefinition::from_feature_type(FEATURE_POSTURE_GEOMETRY),
     FeatureDefinition::from_feature_type(FEATURE_TORSO_INVARIANT),
     FeatureDefinition::from_feature_type(FEATURE_NLF_DEPTH),
+    FeatureDefinition::from_feature_type(FEATURE_NLF_BACKBONE),
+    FeatureDefinition::from_feature_type(FEATURE_NLF_BACKBONE_MAX),
+    FeatureDefinition::from_feature_type(FEATURE_NLF_BACKBONE_STD),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -417,7 +472,7 @@ pub fn get_feature_dimensions(feature_type: &str) -> Result<usize, UnknownFeatur
 }
 
 /// Return all feature identifiers in registry order.
-pub fn get_all_feature_types() -> [FeatureType; 18] {
+pub fn get_all_feature_types() -> [FeatureType; 21] {
     FEATURE_TYPES
 }
 

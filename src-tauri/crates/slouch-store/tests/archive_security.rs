@@ -17,7 +17,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use slouch_domain::{
     BoundingBox, ClassifierConfig, ClassifierId, DimensionalityReductionConfig,
-    DimensionalityReductionMethod, FeatureId, FrameLabel, Keypoint, NormalizationMode,
+    DimensionalityReductionMethod, FeatureId, FeatureMap, FrameLabel, Keypoint, NormalizationMode,
     PostureFrame, Thumbnail, TrainingSettings,
 };
 use slouch_store::ported::{
@@ -86,13 +86,16 @@ fn training_settings() -> TrainingSettings {
 
 fn reservoir_sample(seed: f32) -> ReservoirSample {
     ReservoirSample {
-        backbone_avg: vec![seed; FeatureId::BackboneFeatures.metadata().dimensions],
-        backbone_max: vec![seed + 0.1; FeatureId::BackboneFeaturesMax.metadata().dimensions],
-        backbone_std: vec![seed + 0.2; FeatureId::BackboneFeaturesStd.metadata().dimensions],
-        gau_avg: vec![seed; FeatureId::GauFeatures.metadata().dimensions],
-        gau_max: vec![seed + 0.1; FeatureId::GauFeaturesMax.metadata().dimensions],
-        gau_std: vec![seed + 0.2; FeatureId::GauFeaturesStd.metadata().dimensions],
-        rtmdet: vec![seed; FeatureId::RtmDetExtracted.metadata().dimensions],
+        features: FeatureMap::from([
+            (
+                FeatureId::NlfBackbone,
+                vec![seed; FeatureId::NlfBackbone.metadata().dimensions],
+            ),
+            (
+                FeatureId::RtmDetExtracted,
+                vec![seed; FeatureId::RtmDetExtracted.metadata().dimensions],
+            ),
+        ]),
         keypoints: (0..17)
             .map(|index| Keypoint::new(index as f64, index as f64 + 1.0, 0.9))
             .collect(),

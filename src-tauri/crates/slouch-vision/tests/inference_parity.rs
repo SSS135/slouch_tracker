@@ -4,8 +4,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use slouch_domain::ported::messages::schemas::ImageData;
 use slouch_vision::ported::inference_worker::{
-    compatibility_decode_simcc, compatibility_preprocess_rtmdet, compatibility_run_models,
-    compatibility_select_person_bbox, should_run_posture_for_presence,
+    compatibility_preprocess_rtmdet, compatibility_run_detector, compatibility_select_person_bbox,
+    should_run_posture_for_presence,
 };
 
 const VISION_ABSOLUTE_TOLERANCE: f64 = 2e-4;
@@ -161,22 +161,9 @@ fn synthetic_postprocessing_and_presence_boundaries_are_executable() {
                 }
             }
             "simcc-first-index-tie" => {
-                let mut simcc_x = vec![-1.0_f32; 17 * 384];
-                let mut simcc_y = vec![-1.0_f32; 17 * 512];
-                for keypoint in 0..17 {
-                    simcc_x[keypoint * 384 + 2] = 1.0;
-                    simcc_x[keypoint * 384 + 3] = 1.0;
-                    simcc_y[keypoint * 512 + 4] = 1.0;
-                    simcc_y[keypoint * 512 + 5] = 1.0;
-                }
-                let actual = compatibility_decode_simcc(&simcc_x, &simcc_y).unwrap();
-                let expected = case["keypoints"].as_array().unwrap();
-                assert_eq!(actual.len(), expected.len());
-                for (actual, expected) in actual.iter().zip(expected) {
-                    close(actual.x, expected["x"].as_f64().unwrap());
-                    close(actual.y, expected["y"].as_f64().unwrap());
-                    close(actual.score, expected["score"].as_f64().unwrap());
-                }
+                // RTMPose SimCC decoding is retired; keypoints now derive from NLF
+                // coords2d (covered by the worker's `assemble_nlf_keypoints` unit
+                // test). The fixture row is retained but no longer exercised here.
             }
             _ => panic!("unconsumed synthetic postprocessing case {id}"),
         }
@@ -204,12 +191,11 @@ fn synthetic_postprocessing_and_presence_boundaries_are_executable() {
 }
 
 #[test]
-fn every_synthetic_frame_runs_the_native_production_cascade() {
+fn every_synthetic_frame_runs_the_native_detector_cascade() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let dll = root.join("resources/onnxruntime/windows-x86_64/onnxruntime.dll");
     assert!(ort::init_from(&dll).unwrap().commit());
     let detector_path = root.join("resources/models/rtmdet-nano.onnx");
-    let pose_path = root.join("resources/models/rtmpose-m.onnx");
     let oracle = fixture();
     let expected_ids = oracle["cases"]
         .as_array()
@@ -219,12 +205,11 @@ fn every_synthetic_frame_runs_the_native_production_cascade() {
         .collect::<BTreeSet<_>>();
     let mut consumed_ids = BTreeSet::new();
     for case in oracle["cases"].as_array().unwrap() {
-        let output = compatibility_run_models(
-            detector_path.to_str().unwrap(),
-            pose_path.to_str().unwrap(),
-            &frame(case),
-        )
-        .unwrap();
+        // RTMDet runs on the CPU kernels, so this parity path needs no GPU/DirectML;
+        // the NLF-L pose model (keypoints/depth) is validated by the worker unit and
+        // integration tests instead.
+        let output =
+            compatibility_run_detector(detector_path.to_str().unwrap(), &frame(case)).unwrap();
         consumed_ids.insert(case["id"].as_str().unwrap().to_owned());
         assert_eq!(
             output.bbox.is_some(),
@@ -234,33 +219,16 @@ fn every_synthetic_frame_runs_the_native_production_cascade() {
             "{}",
             case["id"],
         );
-        assert_eq!(
-            output.pose_runs,
-            case["pipeline"]["poseRuns"].as_u64().unwrap() as usize,
-            "{}",
-            case["id"],
-        );
         compare_all(&output.rtmdet_pooled, &case["rtmdet"]["pooled"]);
 
-        if output.pose_runs == 0 {
-            assert!(output.keypoints.is_empty());
-            assert!(output.backbone_avg.is_empty());
+        let Some(actual_bbox) = output.bbox.as_ref() else {
             continue;
-        }
-        let pose = &case["rtmpose"];
-        compare_all(&output.backbone_avg, &pose["backboneAvg"]);
-        compare_all(&output.backbone_max, &pose["backboneMax"]);
-        compare_all(&output.backbone_std, &pose["backboneStd"]);
-        compare_all(&output.gau_avg, &pose["gauAvg"]);
-        compare_all(&output.gau_max, &pose["gauMax"]);
-        compare_all(&output.gau_std, &pose["gauStd"]);
+        };
         let expected_bbox = &case["pipeline"]["bbox"];
-        let actual_bbox = output.bbox.as_ref().unwrap();
         if matches!(
             case["id"].as_str().unwrap(),
             "edge-clipped-silhouette" | "boundary-crop-silhouette"
         ) {
-            assert_eq!(output.pose_runs, 1, "adversarial crop must run pose");
             assert!(
                 actual_bbox.expanded.x1 == 0.0 || actual_bbox.expanded.y1 == 0.0,
                 "adversarial crop must clip an expanded boundary"
@@ -303,16 +271,6 @@ fn every_synthetic_frame_runs_the_native_production_cascade() {
             ),
         ] {
             close(actual, expected.as_f64().unwrap());
-        }
-        assert_eq!(output.keypoints.len(), 17);
-        for (actual, expected) in output
-            .keypoints
-            .iter()
-            .zip(case["pipeline"]["keypoints"].as_array().unwrap())
-        {
-            close(actual.x, expected["x"].as_f64().unwrap());
-            close(actual.y, expected["y"].as_f64().unwrap());
-            close(actual.score, expected["score"].as_f64().unwrap());
         }
     }
     assert_eq!(

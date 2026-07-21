@@ -4,7 +4,8 @@ use slouch_domain::{
     BoundingBox, FeatureId, FrameLabel, Keypoint, ModelCategory, PostureFrame, Thumbnail,
 };
 use slouch_ml::ported::constants::{
-    NLF_DEPTH_DIMS, NLF_DEPTH_STORAGE_COST, RTMDET_EXTRACTED_DIMS, RTMPOSE_BACKBONE_POOLED_DIMS,
+    NLF_BACKBONE_POOLED_DIMS, NLF_BACKBONE_POOLED_STORAGE_COST, NLF_DEPTH_DIMS,
+    NLF_DEPTH_STORAGE_COST, RTMDET_EXTRACTED_DIMS, RTMPOSE_BACKBONE_POOLED_DIMS,
     RTMPOSE_GAU_POOLED_DIMS,
 };
 use slouch_store::ported::feature_registry::{
@@ -190,15 +191,82 @@ fn nlf_depth_is_a_stored_posture_feature_with_frozen_dimensions() {
 }
 
 #[test]
-fn selectable_features_are_derived_from_the_assigned_registry() {
-    // Oracle: every registry entry has userSelectable: true, so all 16 ids surface.
-    assert_eq!(get_user_selectable_feature_types(), FeatureId::ALL.to_vec());
-    assert!(get_user_selectable_feature_types().contains(&FeatureId::RtmDetExtracted));
+fn selectable_features_exclude_the_retired_backbone_and_gau_pools() {
+    // The 6 RTMPose backbone/gau stored features are retired now that NLF is the
+    // sole pose model: the variants persist (dimensions/storage unchanged) so old
+    // datasets keep working, but they no longer surface for user selection.
+    // Every other registry entry stays selectable.
+    let retired = [
+        FeatureId::BackboneFeatures,
+        FeatureId::BackboneFeaturesMax,
+        FeatureId::BackboneFeaturesStd,
+        FeatureId::GauFeatures,
+        FeatureId::GauFeaturesMax,
+        FeatureId::GauFeaturesStd,
+    ];
+    let selectable = get_user_selectable_feature_types();
+    let expected = FeatureId::ALL
+        .into_iter()
+        .filter(|id| !retired.contains(id))
+        .collect::<Vec<_>>();
+    assert_eq!(selectable, expected);
+    assert_eq!(selectable.len(), FeatureId::ALL.len() - retired.len());
+    for id in retired {
+        assert!(!selectable.contains(&id), "{}", id.as_str());
+        assert!(
+            !require_feature_definition(id.as_str())
+                .unwrap()
+                .user_selectable,
+            "{}",
+            id.as_str()
+        );
+    }
+    assert!(selectable.contains(&FeatureId::RtmDetExtracted));
+    assert!(selectable.contains(&FeatureId::NlfDepth));
+    // The pooled NLF-L backbone embeddings are the revived, user-selectable
+    // posture features that replace the retired RTMPose pools.
+    assert!(selectable.contains(&FeatureId::NlfBackbone));
+    assert!(selectable.contains(&FeatureId::NlfBackboneMax));
+    assert!(selectable.contains(&FeatureId::NlfBackboneStd));
 
     // Oracle concrete metadata anchors for rtmdet_extracted (featureRegistry.test.ts:205-218).
     let rtmdet = require_feature_definition("rtmdet_extracted").unwrap();
     assert!(rtmdet.user_selectable);
     assert_eq!(rtmdet.model_type, Some(ModelCategory::Presence));
+}
+
+#[test]
+fn nlf_backbone_pools_are_stored_selectable_posture_features_at_512_dims() {
+    // The three pooled NLF-L backbone embeddings are 512-dim stored posture
+    // features (avg/max/std pooling), each dispatched through the Stored
+    // extractor and surfaced for user selection.
+    for (name, id) in [
+        ("nlf_backbone", FeatureId::NlfBackbone),
+        ("nlf_backbone_max", FeatureId::NlfBackboneMax),
+        ("nlf_backbone_std", FeatureId::NlfBackboneStd),
+    ] {
+        let definition = require_feature_definition(name).unwrap();
+        assert_eq!(definition.id, id);
+        assert_eq!(definition.dimensions, NLF_BACKBONE_POOLED_DIMS);
+        assert_eq!(definition.dimensions, 512);
+        assert_eq!(definition.storage_cost, NLF_BACKBONE_POOLED_STORAGE_COST);
+        assert_eq!(definition.storage_cost, 512 * 4);
+        assert!(!definition.computed);
+        assert!(!is_computed_feature(name).unwrap());
+        assert_eq!(definition.model_type, Some(ModelCategory::Posture));
+        assert!(definition.user_selectable);
+        assert_eq!(definition.requires_fitting, None);
+
+        // Stored extractor: absent from the map -> None; present -> returned verbatim.
+        assert_eq!(extract_feature(name, &valid_frame()).unwrap(), None);
+        let mut populated = valid_frame();
+        populated
+            .features
+            .insert(id, vec![0.375; NLF_BACKBONE_POOLED_DIMS]);
+        let extracted = extract_feature(name, &populated).unwrap().unwrap();
+        assert_eq!(extracted.len(), NLF_BACKBONE_POOLED_DIMS);
+        assert!(extracted.iter().all(|lane| *lane == 0.375));
+    }
 }
 
 #[test]

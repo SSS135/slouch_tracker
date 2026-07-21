@@ -12,9 +12,9 @@ Slouch Tracker watches your webcam, estimates your body pose in real time, and w
 
 ## Features
 
-- **Real-time posture detection** — RTMDet-nano (person detection) + RTMPose-M (17-keypoint pose estimation) running through native ONNX Runtime via the Rust `ort` crate.
+- **Real-time posture detection** — RTMDet-nano (person detection) + NLF-L (17-keypoint + 3D depth) pose estimation on DirectML, running through native ONNX Runtime via the Rust `ort` crate.
 - **Train your own models** — Collect and label your own frames, then train personalized classifiers in-app. Six registry-driven classifier types (`mlp`, `knn`, `svm`, `kmeans_prototype`, `gaussian_nb`, `kmeans_logistic`) with a UI that auto-generates parameter controls.
-- **Flexible features** — 16 registry-driven feature types (RTMPose backbone/GAU poolings, RTMDet features, and geometric/keypoint features) with normalization (`z_score`/`layer`/`none`) and dimensionality reduction (`pca`/`random_projection`/`none`).
+- **Flexible features** — 12 user-selectable feature types (RTMDet features, NLF-L 3D-depth features, and geometric/keypoint features) with normalization (`z_score`/`layer`/`none`) and dimensionality reduction (`pca`/`random_projection`/`none`).
 - **In-app data collection** — Capture frames with `G` (good), `B` (bad), and `A` (away) keys, plus global hotkeys `Ctrl+Win+G` / `Ctrl+Win+B` / `Ctrl+Win+A` that work even when the app is not focused.
 - **Cross-validated training** — One-click training with optional k-fold cross-validation and reported metrics; progress streams live over a Tauri channel.
 - **Local SQLite storage** — Frames, keypoints, feature vectors, thumbnails, settings, and trained models are stored in a local SQLite database.
@@ -38,7 +38,7 @@ Slouch Tracker watches your webcam, estimates your body pose in real time, and w
 ### Prerequisites
 
 - **Windows 10/11 (x64)**
-- **Git LFS — mandatory.** The ONNX models (`rtmdet-nano.onnx` ~4 MB, `rtmpose-m.onnx` ~54 MB) and the app icons are stored via Git LFS. Cloning **without** Git LFS installed produces pointer files instead of the real assets and the build will be broken.
+- **Git LFS — mandatory.** The ONNX models (`rtmdet-nano.onnx` ~4 MB, `nlf_l_crop_fp16.onnx` ~233 MB) and the app icons are stored via Git LFS. Cloning **without** Git LFS installed produces pointer files instead of the real assets and the build will be broken.
 - **Rust 1.88+** (with the `x86_64-pc-windows-msvc` toolchain)
 - **Node.js 20+**
 - **Visual Studio 2022** with the *Desktop development with C++* workload (any edition — Community works)
@@ -100,7 +100,7 @@ The app tracks whether the model needs retraining as you add data, so you can ke
 
 ## Architecture
 
-Slouch Tracker is a Tauri 2 app with a Rust backend workspace and a deliberately thin Svelte 5 UI. The `src-tauri/` workspace splits into the `app` crate plus `slouch-domain` (DTOs, validation, registries), `slouch-ml` (classifiers, feature math, cross-validation, training), `slouch-vision` (ONNX sessions, preprocessing, the RTMDet + RTMPose inference worker), and `slouch-store` (SQLite storage, model container format, dataset archives). The camera is captured natively (nokhwa, MJPEG) and previewed in the webview through a custom `slouchcam://` URI scheme; detection runs on a dedicated Rust dispatcher thread. The frontend talks to Rust through generated [Specta](https://github.com/specta-rs/specta) bindings, with three raw-byte MessagePack commands reserved for moving bulk image data. See [specs.md](specs.md) for the full architecture.
+Slouch Tracker is a Tauri 2 app with a Rust backend workspace and a deliberately thin Svelte 5 UI. The `src-tauri/` workspace splits into the `app` crate plus `slouch-domain` (DTOs, validation, registries), `slouch-ml` (classifiers, feature math, cross-validation, training), `slouch-vision` (ONNX sessions, preprocessing, the RTMDet + NLF-L inference worker), and `slouch-store` (SQLite storage, model container format, dataset archives). The camera is captured natively (nokhwa, MJPEG) and previewed in the webview through a custom `slouchcam://` URI scheme; detection runs on a dedicated Rust dispatcher thread. The frontend talks to Rust through generated [Specta](https://github.com/specta-rs/specta) bindings, with three raw-byte MessagePack commands reserved for moving bulk image data. See [specs.md](specs.md) for the full architecture.
 
 ## Development
 
@@ -139,6 +139,7 @@ Third-party components and their licenses are listed in [THIRD-PARTY-NOTICES.md]
 
 ### Acknowledgments
 
-- [OpenMMLab](https://github.com/open-mmlab) — RTMDet and RTMPose models.
+- [OpenMMLab](https://github.com/open-mmlab) — RTMDet person-detection model.
+- [NLF (Neural Localizer Fields)](https://github.com/isarandi/nlf) — NLF-L 3D human-pose model (weights are for non-commercial research use only).
 - [Microsoft ONNX Runtime](https://github.com/microsoft/onnxruntime) — native inference runtime.
 - [Tauri](https://tauri.app) — the desktop application framework.

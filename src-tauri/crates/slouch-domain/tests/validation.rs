@@ -73,8 +73,8 @@ fn rejects_keypoint_count_and_nonfinite_score_but_accepts_activation_scores() {
         frame.keypoints.resize(count, Keypoint::new(0.0, 0.0, 1.0));
         assert!(has_code(&frame, ValidationCode::InvalidLength));
     }
-    // Keypoint scores are SimCC activation means, not probabilities: values outside
-    // [0, 1] are legitimate on real frames and must be accepted.
+    // Keypoint scores are NLF-calibrated confidences (normally in [0, 1]); validation
+    // deliberately never range-checks them, so any finite value is accepted verbatim.
     for score in [3.2, 1.0001, -0.0001, 42.0] {
         let mut frame = valid_frame();
         frame.keypoints[0].score = score;

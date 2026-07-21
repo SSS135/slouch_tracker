@@ -86,8 +86,7 @@ fn actual_worker_routes_configuration_initialization_and_processing_logs() {
         &worker.handle_message(InferenceWorkerMessage::Initialize {
             payload: InitializePayload {
                 rtmdet_path: "det".into(),
-                rtmw3d_path: "pose".into(),
-                nlf_path: None,
+                nlf_path: "nlf".into(),
             },
         })[..],
         [WorkerResponse::Initialized { .. }]
@@ -113,10 +112,8 @@ fn actual_worker_routes_configuration_initialization_and_processing_logs() {
     assert!(logs
         .iter()
         .any(|(level, message)| level == "info" && message.contains("Initializing ONNX Runtime")));
-    assert!(logs
-        .iter()
-        .any(|(level, message)| level == "info"
-            && message.contains("Both models loaded successfully")));
+    assert!(logs.iter().any(|(level, message)| level == "info"
+        && message.contains("RTMDet and NLF-L pose models loaded successfully")));
     assert!(logs.iter().any(
         |(level, message)| level == "error" && message.contains("Processing error: run failed")
     ));
@@ -135,8 +132,7 @@ fn actual_worker_logs_initialization_failure_without_publishing_initialized() {
     let response = worker.handle_message(InferenceWorkerMessage::Initialize {
         payload: InitializePayload {
             rtmdet_path: "bad".into(),
-            rtmw3d_path: "unused".into(),
-            nlf_path: None,
+            nlf_path: "nlf".into(),
         },
     });
     assert!(matches!(&response[..], [WorkerResponse::Error { .. }]));
@@ -200,9 +196,9 @@ fn set_log_level_mutates_configuration_before_logging_and_normalizes_empty_value
 fn logger_contract_accepts_objects_as_preformatted_messages_without_wall_clock_assumptions() {
     let logger = ConfigurableLogger::default();
     logger.set_from_url_param("worker:debug");
-    logger.debug("Model I/O: inputs=[input], outputs=[simcc_x,simcc_y]");
+    logger.debug("Model I/O: inputs=[image], outputs=[coords2d,coords3d_rel,uncertainty]");
     logger.info("Loading RTMDet attempt=1 maxRetries=3");
-    logger.warn("RTMPose backbone_features missing");
+    logger.warn("NLF coords2d missing");
     logger.error("ONNX inference failed");
 
     let records = logger.records.lock().expect("records");

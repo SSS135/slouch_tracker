@@ -41,16 +41,16 @@ export interface TrainingConfigContextValue {
   reload(): Promise<void>;
 }
 
-// Defaults selected by in-app cross-validated benchmarking (2026-07): posture features
-// [backbone_features_max, gau_features_max] + MLP logistic head (hiddenLayers 0) with class
-// weighting + PCA(30) + z-score scored best (posture balanced ~74%, slouch-recall ~0.88),
-// far above the old engineered_features/no-reduction default (~54% / 0.375 recall).
+// Default posture features: [nlf_backbone_max] — the max-pooled NLF-L backbone embedding
+// (512 dims), pinned as the app default for the backbone-embedding pipeline; the user can
+// change it in the Training tab. Classifier default stays the MLP logistic head
+// (hiddenLayers 0) with class weighting + PCA + z-score from in-app benchmarking.
 // classifierConfig.params holds only the deviations from the registry defaults;
 // applySettings overlays them onto the full registry parameter set.
 export const DEFAULT_CONFIG: TrainingConfig = {
   classifierConfig: { classifierId: 'mlp', params: { hiddenLayers: 0, useClassWeights: true } },
   dimReductionConfig: { method: 'pca', components: 30 },
-  postureFeatureTypes: ['backbone_features_max', 'gau_features_max'],
+  postureFeatureTypes: ['nlf_backbone_max'],
   presenceFeatureTypes: ['rtmdet_engineered', 'keypoint_scores'],
   normalizationMode: 'z_score',
   cvFolds: 5,

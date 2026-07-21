@@ -1,42 +1,16 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RtmposeModelConfig {
-    pub name: &'static str,
-    pub path: &'static str,
-    pub backbone_channels: usize,
-    pub gau_features: usize,
-}
-
-pub const RTMPOSE_MODEL_CONFIG: RtmposeModelConfig = RtmposeModelConfig {
-    name: "RTMPose-M",
-    path: "rtmpose-m.onnx",
-    backbone_channels: 768,
-    gau_features: 256,
-};
-
-pub const RTMPOSE_BACKBONE_SHAPE: [usize; 4] = [1, RTMPOSE_MODEL_CONFIG.backbone_channels, 8, 6];
-pub const RTMPOSE_GAU_SHAPE: [usize; 3] = [1, 17, RTMPOSE_MODEL_CONFIG.gau_features];
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImageSize {
     pub width: usize,
     pub height: usize,
 }
 
-pub const RTMPOSE_INPUT_SIZE: ImageSize = ImageSize {
-    width: 192,
-    height: 256,
-};
-
-pub const RTMPOSE_MEAN_RGB: [f32; 3] = [123.675, 116.28, 103.53];
-pub const RTMPOSE_STD_RGB: [f32; 3] = [58.395, 57.12, 57.375];
-pub const RTMPOSE_SIMCC_SPLIT_RATIO: f64 = 2.0;
-pub const RTMPOSE_NUM_KEYPOINTS: usize = 17;
-
-pub const RTMPOSE_BACKBONE_RAW_DIMS: usize =
-    RTMPOSE_BACKBONE_SHAPE[1] * RTMPOSE_BACKBONE_SHAPE[2] * RTMPOSE_BACKBONE_SHAPE[3];
-pub const RTMPOSE_BACKBONE_POOLED_DIMS: usize = RTMPOSE_BACKBONE_SHAPE[1];
-pub const RTMPOSE_GAU_RAW_DIMS: usize = RTMPOSE_GAU_SHAPE[1] * RTMPOSE_GAU_SHAPE[2];
-pub const RTMPOSE_GAU_POOLED_DIMS: usize = RTMPOSE_GAU_SHAPE[2];
+// Retired append-only feature dims. RTMPose-M was removed, so its backbone/GAU
+// pooled features are no longer produced, but the `FeatureId` variants persist
+// (append-only, stable discriminants) and the store registry still imports these
+// pooled-dim and storage-cost constants to keep already-stored vectors
+// dimension-checkable. Kept as literals now that the RTMPose tensor shapes are gone.
+pub const RTMPOSE_BACKBONE_POOLED_DIMS: usize = 768;
+pub const RTMPOSE_GAU_POOLED_DIMS: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RtmDetShape {
@@ -227,14 +201,57 @@ pub const NLF_JOINT_REAR: usize = 92;
 pub const NLF_JOINT_LEYE: usize = 89;
 pub const NLF_JOINT_REYE: usize = 91;
 pub const NLF_JOINT_PELV: usize = 93;
-// Lower-body joints used only for the truncation-uncertainty signal.
+// Arm joints used to assemble the COCO-17 keypoints from `coords2d`.
+pub const NLF_JOINT_LELB: usize = 78;
+pub const NLF_JOINT_LWRI: usize = 79;
+pub const NLF_JOINT_RELB: usize = 84;
+pub const NLF_JOINT_RWRI: usize = 85;
+// Lower-body joints used for the truncation-uncertainty signal and COCO-17 legs.
 pub const NLF_JOINT_LKNE: usize = 81;
 pub const NLF_JOINT_LANK: usize = 82;
 pub const NLF_JOINT_RKNE: usize = 87;
 pub const NLF_JOINT_RANK: usize = 88;
+
+/// Canonical NLF output indices for the 17 COCO keypoints, in standard COCO order
+/// (nose, l/r eye, l/r ear, l/r shoulder, l/r elbow, l/r wrist, l/r hip, l/r knee,
+/// l/r ankle). Used to assemble the COCO-17 keypoints from NLF `coords2d`.
+pub const NLF_COCO17_CANONICAL: [usize; 17] = [
+    NLF_JOINT_NOSE,
+    NLF_JOINT_LEYE,
+    NLF_JOINT_REYE,
+    NLF_JOINT_LEAR,
+    NLF_JOINT_REAR,
+    NLF_JOINT_LSHO,
+    NLF_JOINT_RSHO,
+    NLF_JOINT_LELB,
+    NLF_JOINT_RELB,
+    NLF_JOINT_LWRI,
+    NLF_JOINT_RWRI,
+    NLF_JOINT_LHIP,
+    NLF_JOINT_RHIP,
+    NLF_JOINT_LKNE,
+    NLF_JOINT_RKNE,
+    NLF_JOINT_LANK,
+    NLF_JOINT_RANK,
+];
 
 /// FROZEN feature width of the NLF depth feature. Changing it would make every
 /// already-stored `nlf_depth` frame fail the storage dimension check. Kept in sync
 /// with the literal `14` in `slouch_domain::FeatureId::NlfDepth` metadata.
 pub const NLF_DEPTH_DIMS: usize = 14;
 pub const NLF_DEPTH_STORAGE_COST: usize = NLF_DEPTH_DIMS * FLOAT32_BYTES;
+
+/// Shape of the NLF-L `backbone_feats` output: `[batch, channels, height, width]`.
+/// Pooling reduces over the spatial axes `[2, 3]` (the 12×12 grid), leaving one
+/// value per channel.
+pub const NLF_BACKBONE_SHAPE: [usize; 4] = [1, 512, 12, 12];
+
+/// Pooled width of an NLF-L backbone embedding (one value per channel). VISION pools
+/// `backbone_feats` to this width (avg/max/std); STORE imports it for the registry
+/// dimension and storage-cost checks. Changing it would fail every already-stored
+/// `nlf_backbone*` frame's dimension check, so it is frozen. Kept in sync with the
+/// literal `512` in `slouch_domain::FeatureId::NlfBackbone*` metadata.
+pub const NLF_BACKBONE_POOLED_DIMS: usize = NLF_BACKBONE_SHAPE[1];
+pub const NLF_BACKBONE_POOLED_STORAGE_COST: usize = NLF_BACKBONE_POOLED_DIMS * FLOAT32_BYTES;
+
+const _: () = assert!(NLF_BACKBONE_POOLED_STORAGE_COST == 2048);

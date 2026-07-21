@@ -22,47 +22,40 @@ use slouch_domain::ported::messages::schemas::{
 };
 use slouch_domain::{
     BoundingBox, ClassificationResult, ExpandedBbox, FeatureId, FeatureMap, Keypoint,
+    COCO_KEYPOINT_COUNT,
 };
 use slouch_ml::ported::constants::{
-    PERSON_DETECTION_CONFIDENCE, RTMDET_INPUT_SIZE, RTMDET_OUTPUT_NAMES, RTMDET_RAW_DIMS,
-    RTMPOSE_BACKBONE_RAW_DIMS, RTMPOSE_GAU_RAW_DIMS, RTMPOSE_INPUT_SIZE, RTMPOSE_MEAN_RGB,
-    RTMPOSE_NUM_KEYPOINTS, RTMPOSE_SIMCC_SPLIT_RATIO, RTMPOSE_STD_RGB,
+    NLF_BACKBONE_SHAPE, NLF_COCO17_CANONICAL, NLF_NUM_CANONICAL, PERSON_DETECTION_CONFIDENCE,
+    RTMDET_INPUT_SIZE, RTMDET_OUTPUT_NAMES,
 };
-use slouch_ml::ported::nlf_features::extract_nlf_depth_features;
+use slouch_ml::ported::nlf_features::{extract_nlf_depth_features, uncertainty_to_keypoint_score};
+use slouch_ml::ported::pooling::{pool_features_max, pool_features_mean, pool_features_std};
 use slouch_ml::ported::rtmdet_features::extract_rtm_det_features as extract_ported_rtmdet_features;
-use slouch_ml::ported::rtmpose_features::{
-    pool_backbone_features, pool_backbone_features_max, pool_backbone_features_std,
-    pool_gau_features, pool_gau_features_max, pool_gau_features_std,
-};
 
 const RTMDET_INPUT_WIDTH: usize = RTMDET_INPUT_SIZE.width;
 const RTMDET_INPUT_HEIGHT: usize = RTMDET_INPUT_SIZE.height;
 const RTMDET_CONFIDENCE: f64 = PERSON_DETECTION_CONFIDENCE;
-const RTMPOSE_INPUT_WIDTH: usize = RTMPOSE_INPUT_SIZE.width;
-const RTMPOSE_INPUT_HEIGHT: usize = RTMPOSE_INPUT_SIZE.height;
-const RTMPOSE_SIMCC_X_WIDTH: usize = RTMPOSE_INPUT_SIZE.width * 2;
-const RTMPOSE_SIMCC_Y_WIDTH: usize = RTMPOSE_INPUT_SIZE.height * 2;
-const RTMPOSE_SPLIT_RATIO: f64 = RTMPOSE_SIMCC_SPLIT_RATIO;
-const RTMPOSE_BACKBONE_VALUES: usize = RTMPOSE_BACKBONE_RAW_DIMS;
-const RTMPOSE_GAU_VALUES: usize = RTMPOSE_GAU_RAW_DIMS;
-const RTMDET_FEATURE_VALUES: usize = RTMDET_RAW_DIMS;
 const MARK_CLEANUP_INTERVAL: u64 = 100;
 const MODEL_RETRIES: usize = 3;
 
-// NLF-L's square crop side (proc_side). The supplementary depth model consumes a
+// NLF-L's square crop side (proc_side). The pose model consumes a
 // `[1,3,384,384]` RGB tensor; kept local like the other preprocessing geometry.
 const NLF_INPUT_SIZE: usize = 384;
 
-// Graph output names of the NLF-L model consumed by the depth-feature tap. The
-// third output (`coords2d`) is copied but not read here.
+// Graph output names of the NLF-L model. `coords2d` gives the 2D keypoints (crop
+// pixels), `coords3d_rel`/`uncertainty` drive the depth feature, and
+// `backbone_feats` is the pooled backbone embedding source — all four come from
+// the single NLF forward per frame.
+const NLF_COORDS2D_OUTPUT: &str = "coords2d";
 const NLF_COORDS3D_OUTPUT: &str = "coords3d_rel";
 const NLF_UNCERTAINTY_OUTPUT: &str = "uncertainty";
+const NLF_BACKBONE_FEATS_OUTPUT: &str = "backbone_feats";
 
 const RTMDET_CLS_P5: &str = RTMDET_OUTPUT_NAMES.cls_p5;
 const RTMDET_REG_P5: &str = RTMDET_OUTPUT_NAMES.reg_p5;
 
-// RTMDet's BGR normalization is worker-specific in the source oracle; the
-// centralized constants module only owns RTMPose's RGB normalization.
+// RTMDet's BGR normalization is worker-local: it is specific to the detector
+// preprocessing and not part of the centralized constants module.
 const RTMDET_MEAN_BGR: [f64; 3] = [103.53, 116.28, 123.675];
 const RTMDET_STD_BGR: [f64; 3] = [57.375, 57.12, 58.395];
 
@@ -175,9 +168,9 @@ pub struct NoopLogger;
 
 impl WorkerLogger for NoopLogger {}
 
-/// Execution provider a session is created on. RTMDet/RTMPose stay on the CPU
-/// kernels (byte-identical across the CPU and DirectML runtime builds); only the
-/// supplementary NLF-L depth session runs on DirectML.
+/// Execution provider a session is created on. RTMDet stays on the CPU kernels
+/// (byte-identical across the CPU and DirectML runtime builds); the NLF-L pose
+/// session is hard-required on DirectML.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ExecutionProvider {
     #[default]
@@ -214,6 +207,11 @@ pub enum SessionOutput {
 }
 
 pub type SessionOutputMap = HashMap<String, SessionOutput>;
+
+/// The four NLF-L output tensors read from a single forward: `coords2d`
+/// (crop-pixel keypoints), `coords3d_rel`, `uncertainty`, and `backbone_feats`
+/// (the `[1,512,12,12]` embedding pooled into the stored backbone features).
+type NlfForwardOutputs = (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>);
 
 /// Minimal session seam used by production and deterministic worker tests.
 pub trait InferenceSession: Send {
@@ -336,14 +334,13 @@ where
     logger: L,
     runtime: R,
     rtmdet_session: Option<Box<dyn InferenceSession>>,
-    rtmpose_session: Option<Box<dyn InferenceSession>>,
-    // Supplementary NLF-L depth session on DirectML. Absent whenever the GPU/DML
-    // runtime is unavailable; its absence never fails init or a frame.
+    // NLF-L pose session on DirectML. Hard-required: it is set together with the
+    // detector on a successful init, and `is_initialized` gates every frame, so
+    // the person-found path can always assume it is present.
     nlf_session: Option<Box<dyn InferenceSession>>,
     is_initialized: bool,
     last_rtmdet_path: String,
-    last_rtmpose_path: String,
-    last_nlf_path: Option<String>,
+    last_nlf_path: String,
     loaded_posture_model: Option<Box<dyn ClassifierModel>>,
     loaded_presence_model: Option<Box<dyn ClassifierModel>>,
     frame_counter: u64,
@@ -381,12 +378,10 @@ where
             logger,
             runtime,
             rtmdet_session: None,
-            rtmpose_session: None,
             nlf_session: None,
             is_initialized: false,
             last_rtmdet_path: String::new(),
-            last_rtmpose_path: String::new(),
-            last_nlf_path: None,
+            last_nlf_path: String::new(),
             loaded_posture_model: None,
             loaded_presence_model: None,
             frame_counter: 0,
@@ -397,11 +392,9 @@ where
     /// Handles one typed worker message and returns the emitted response(s).
     pub fn handle_message(&mut self, message: InferenceWorkerMessage) -> Vec<WorkerResponse> {
         let response = match message {
-            InferenceWorkerMessage::Initialize { payload } => self.initialize(
-                &payload.rtmdet_path,
-                &payload.rtmw3d_path,
-                payload.nlf_path.as_deref(),
-            ),
+            InferenceWorkerMessage::Initialize { payload } => {
+                self.initialize(&payload.rtmdet_path, &payload.nlf_path)
+            }
             InferenceWorkerMessage::Process { payload } => {
                 self.process_frame(payload.image_data, payload.request_id)
             }
@@ -447,95 +440,86 @@ where
         vec![response]
     }
 
-    fn initialize(
-        &mut self,
-        rtmdet_path: &str,
-        rtmpose_path: &str,
-        nlf_path: Option<&str>,
-    ) -> WorkerResponse {
+    fn initialize(&mut self, rtmdet_path: &str, nlf_path: &str) -> WorkerResponse {
         self.last_rtmdet_path = rtmdet_path.to_owned();
-        self.last_rtmpose_path = rtmpose_path.to_owned();
-        self.last_nlf_path = nlf_path.map(str::to_owned);
+        self.last_nlf_path = nlf_path.to_owned();
         self.logger
             .info("[Unified Worker] Initializing ONNX Runtime");
 
-        let result = (|| {
-            self.rtmdet_session = Some(load_model_with_retry(
-                &mut self.runtime,
-                &self.logger,
-                rtmdet_path,
-                "RTMDet",
-            )?);
-            self.rtmpose_session = Some(load_model_with_retry(
-                &mut self.runtime,
-                &self.logger,
-                rtmpose_path,
-                "RTMPose-M",
-            )?);
-            self.is_initialized = true;
-            Ok::<(), WorkerError>(())
-        })();
-
-        match result {
-            Ok(()) => {
-                self.logger
-                    .info("[Unified Worker] Both models loaded successfully");
-                // The NLF-L depth session is a supplementary tap: a failed load must
-                // never fail overall initialization. It is attempted only after the
-                // required detector/pose models are up.
-                self.nlf_session = self.try_load_nlf_session(nlf_path);
-                WorkerResponse::Initialized {
-                    provider: "native".to_owned(),
-                }
-            }
+        // RTMDet person detector on the CPU kernels (retried — a load can be
+        // transiently blocked by antivirus/first-run extraction).
+        let rtmdet = match load_model_with_retry(
+            &mut self.runtime,
+            &self.logger,
+            rtmdet_path,
+            "RTMDet",
+        ) {
+            Ok(session) => session,
             Err(error) => {
                 self.is_initialized = false;
                 self.rtmdet_session = None;
-                self.rtmpose_session = None;
                 self.nlf_session = None;
                 self.logger
                     .error(&format!("[Unified Worker] Initialization error: {error}"));
-                WorkerResponse::Error {
+                return WorkerResponse::Error {
+                        error: format!(
+                            "Failed to initialize models after 3 attempts: {error}. Please check your internet connection and reload the page."
+                        ),
+                        request_id: None,
+                        details: None,
+                        success: None,
+                    };
+            }
+        };
+
+        // NLF-L pose model on DirectML — a HARD requirement with no fallback. A
+        // single attempt: a missing/incapable GPU is not a transient failure, so
+        // retrying only delays the actionable error the UI must surface.
+        let nlf = match self.load_nlf_session(nlf_path) {
+            Ok(session) => session,
+            Err(error) => {
+                self.is_initialized = false;
+                self.rtmdet_session = None;
+                self.nlf_session = None;
+                self.logger.error(&format!(
+                    "[Unified Worker] NLF-L pose model failed to initialize on DirectML: {error}"
+                ));
+                return WorkerResponse::Error {
                     error: format!(
-                        "Failed to initialize models after 3 attempts: {error}. Please check your internet connection and reload the page."
+                        "Posture detection requires a DirectX 12-capable GPU. The NLF pose model failed to initialize on DirectML: {error}"
                     ),
                     request_id: None,
                     details: None,
                     success: None,
-                }
+                };
             }
+        };
+
+        self.rtmdet_session = Some(rtmdet);
+        self.nlf_session = Some(nlf);
+        self.is_initialized = true;
+        self.logger
+            .info("[Unified Worker] RTMDet and NLF-L pose models loaded successfully");
+        WorkerResponse::Initialized {
+            provider: "native".to_owned(),
         }
     }
 
-    /// Attempts a single DirectML session load for the optional NLF-L depth model.
-    /// Any failure (no path, empty path, absent GPU/DML runtime, load error) yields
-    /// `None` with a warning and never propagates — the depth feature is a
-    /// best-effort supplementary tap. No retry: a missing GPU is not transient.
-    fn try_load_nlf_session(
+    /// Loads the NLF-L pose session on DirectML with a single attempt. No retry:
+    /// an absent or DirectX 12-incapable GPU is not a transient condition, so the
+    /// caller surfaces the failure immediately as an actionable error.
+    fn load_nlf_session(
         &mut self,
-        nlf_path: Option<&str>,
-    ) -> Option<Box<dyn InferenceSession>> {
-        let path = nlf_path?;
-        if path.is_empty() {
-            return None;
-        }
+        nlf_path: &str,
+    ) -> Result<Box<dyn InferenceSession>, WorkerError> {
         let options = SessionOptions {
             execution_provider: ExecutionProvider::DirectMl,
             ..SessionOptions::default()
         };
-        match self.runtime.create_session(path, "NLF-L", options) {
-            Ok(session) => {
-                self.logger
-                    .info("[Unified Worker] NLF-L depth session initialized on DirectML");
-                Some(session)
-            }
-            Err(error) => {
-                self.logger.warn(&format!(
-                    "[Unified Worker] NLF-L depth session unavailable ({error}); depth features disabled"
-                ));
-                None
-            }
-        }
+        let session = self.runtime.create_session(nlf_path, "NLF-L", options)?;
+        self.logger
+            .info("[Unified Worker] NLF-L pose session initialized on DirectML");
+        Ok(session)
     }
 
     fn load_posture_model(&mut self, serialized: SerializedModel) -> Result<(), WorkerError> {
@@ -695,8 +679,8 @@ where
         let frame_start = self.mark("total-start");
         self.frame_counter = self.frame_counter.saturating_add(1);
 
-        if !self.is_initialized || self.rtmdet_session.is_none() || self.rtmpose_session.is_none() {
-            if self.last_rtmdet_path.is_empty() || self.last_rtmpose_path.is_empty() {
+        if !self.is_initialized || self.rtmdet_session.is_none() || self.nlf_session.is_none() {
+            if self.last_rtmdet_path.is_empty() || self.last_nlf_path.is_empty() {
                 self.cleanup_performance_if_due();
                 return WorkerResponse::Error {
                     error: "Models failed to initialize. Please reload the page.".to_owned(),
@@ -706,9 +690,8 @@ where
                 };
             }
             let rtmdet_path = self.last_rtmdet_path.clone();
-            let rtmpose_path = self.last_rtmpose_path.clone();
             let nlf_path = self.last_nlf_path.clone();
-            let init = self.initialize(&rtmdet_path, &rtmpose_path, nlf_path.as_deref());
+            let init = self.initialize(&rtmdet_path, &nlf_path);
             if !matches!(init, WorkerResponse::Initialized { .. }) {
                 self.cleanup_performance_if_due();
                 return WorkerResponse::Error {
@@ -846,116 +829,89 @@ where
             });
         };
 
-        let rtmpose_start = self.mark("rtmpose-start");
-        let expanded = expand_bbox(&bbox, 0.2, image_data.width, image_data.height)?;
-        let cropped = crop_image_data(image_data, &expanded.expanded)?;
-        let pose_tensor = preprocess_rtmpose(&cropped)?;
-        let pose_input = Array4::from_shape_vec(
-            (1, 3, RTMPOSE_INPUT_HEIGHT, RTMPOSE_INPUT_WIDTH),
-            pose_tensor,
-        )
-        .map_err(|error| WorkerError::Tensor(error.to_string()))?;
-        let (simcc_x, simcc_y, backbone, gau) = {
-            let session = self.rtmpose_session.as_mut().ok_or_else(|| {
-                WorkerError::Inference("RTMPose session is not loaded".to_owned())
-            })?;
-            let outputs = session.run(&pose_input)?;
-            (
-                take_f32_output(&outputs, "simcc_x")?,
-                take_f32_output(&outputs, "simcc_y")?,
-                take_f32_output(&outputs, "backbone_features")?,
-                take_f32_output(&outputs, "gau_features")?,
-            )
-        };
-
-        let keypoints = decode_simcc(&simcc_x, &simcc_y)?;
-        let mut features = FeatureMap::new();
-        features.insert(
-            FeatureId::BackboneFeatures,
-            pool_backbone_features(&backbone)
-                .map_err(|error| WorkerError::Feature(error.to_string()))?,
-        );
-        features.insert(
-            FeatureId::BackboneFeaturesMax,
-            pool_backbone_features_max(&backbone)
-                .map_err(|error| WorkerError::Feature(error.to_string()))?,
-        );
-        features.insert(
-            FeatureId::BackboneFeaturesStd,
-            pool_backbone_features_std(&backbone)
-                .map_err(|error| WorkerError::Feature(error.to_string()))?,
-        );
-        features.insert(
-            FeatureId::GauFeatures,
-            pool_gau_features(&gau).map_err(|error| WorkerError::Feature(error.to_string()))?,
-        );
-        features.insert(
-            FeatureId::GauFeaturesMax,
-            pool_gau_features_max(&gau).map_err(|error| WorkerError::Feature(error.to_string()))?,
-        );
-        features.insert(
-            FeatureId::GauFeaturesStd,
-            pool_gau_features_std(&gau).map_err(|error| WorkerError::Feature(error.to_string()))?,
-        );
-        features.insert(FeatureId::RtmDetExtracted, rtm_det_features);
-        let rtmpose_end = self.mark("rtmpose-end");
-        self.measure("rtmpose_total", &rtmpose_start, &rtmpose_end);
-
-        // Supplementary NLF-L depth tap. Uses the ORIGINAL (un-expanded) RTMDet
-        // bbox. Never fatal: any failure logs and skips the feature insert so the
-        // primary detection/pose pipeline always returns a valid result.
-        if self.nlf_session.is_some() {
-            match self.run_nlf_depth(image_data, &bbox) {
-                Ok(Some(values)) => {
-                    features.insert(FeatureId::NlfDepth, values);
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    self.logger.warn(&format!(
-                        "[Unified Worker] NLF depth features skipped for this frame: {error}"
-                    ));
-                }
-            }
-        }
-
-        let normalized_bbox =
-            normalize_expanded_bbox(&expanded, image_data.width, image_data.height)?;
-        let transformed_keypoints = transform_keypoints(
-            &keypoints,
-            &expanded.expanded,
-            cropped.width,
-            cropped.height,
+        let nlf_start = self.mark("nlf-start");
+        // ONE NLF-L forward per frame serves BOTH the 17 COCO keypoints (from
+        // `coords2d`) and the depth feature (from `coords3d_rel`/`uncertainty`).
+        // A forward error fails only this frame — the caller emits an Error
+        // response and the camera dispatcher continues to the next frame.
+        let (coords2d, coords3d, uncertainty, backbone_feats) = self.run_nlf(image_data, &bbox)?;
+        let keypoints = assemble_nlf_keypoints(
+            &coords2d,
+            &uncertainty,
+            &bbox,
             image_data.width,
             image_data.height,
         )?;
 
+        let mut features = FeatureMap::new();
+        features.insert(FeatureId::RtmDetExtracted, rtm_det_features);
+        // The depth extractor returns `None` for a degenerate pose; only skip the
+        // insert in that case. A length mismatch is a genuine output defect and
+        // fails the frame.
+        if let Some(values) = extract_nlf_depth_features(&coords3d, &uncertainty)
+            .map_err(|error| WorkerError::Feature(error.to_string()))?
+        {
+            features.insert(FeatureId::NlfDepth, values);
+        }
+        // Pool the `[1,512,12,12]` backbone embedding over its spatial axes into the
+        // three 512-dim stored features. Deliberately unlike NlfDepth's
+        // None-on-degeneracy: a pooling failure (wrong length or non-finite input)
+        // is a genuine output defect, so it fails the whole frame.
+        features.insert(
+            FeatureId::NlfBackbone,
+            pool_features_mean(&backbone_feats, &NLF_BACKBONE_SHAPE, &[2, 3])
+                .map_err(|error| WorkerError::Feature(error.to_string()))?,
+        );
+        features.insert(
+            FeatureId::NlfBackboneMax,
+            pool_features_max(&backbone_feats, &NLF_BACKBONE_SHAPE, &[2, 3])
+                .map_err(|error| WorkerError::Feature(error.to_string()))?,
+        );
+        features.insert(
+            FeatureId::NlfBackboneStd,
+            pool_features_std(&backbone_feats, &NLF_BACKBONE_SHAPE, &[2, 3])
+                .map_err(|error| WorkerError::Feature(error.to_string()))?,
+        );
+        let nlf_end = self.mark("nlf-end");
+        self.measure("nlf_total", &nlf_start, &nlf_end);
+
+        // `expand_bbox` is retained ONLY to populate the wire/stored `expanded`
+        // field the frontend still validates; the NLF crop uses the un-expanded box.
+        let expanded = expand_bbox(&bbox, 0.2, image_data.width, image_data.height)?;
+        let normalized_bbox =
+            normalize_expanded_bbox(&expanded, image_data.width, image_data.height)?;
+
         Ok(NativeInferenceResult {
             person_found: true,
             bbox: Some(normalized_bbox),
-            keypoints: Some(transformed_keypoints),
+            keypoints: Some(keypoints),
             features,
             classification: None,
         })
     }
 
-    /// Preprocesses the original-bbox square crop, runs the NLF-L depth session,
-    /// and derives the body-intrinsic depth features. Returns `Ok(None)` when the
-    /// pose is too degenerate for a meaningful feature (extractor's decision).
-    fn run_nlf_depth(
+    /// Runs the single NLF-L forward on the ORIGINAL-bbox square crop and returns
+    /// its `(coords2d, coords3d_rel, uncertainty, backbone_feats)` tensors.
+    /// `coords2d` is in crop pixels; the caller inverts the crop mapping to
+    /// assemble frame keypoints, and pools `backbone_feats` into the stored
+    /// backbone features.
+    fn run_nlf(
         &mut self,
         image_data: &ImageData,
         bbox: &BoundingBox,
-    ) -> Result<Option<Vec<f32>>, WorkerError> {
+    ) -> Result<NlfForwardOutputs, WorkerError> {
         let input = preprocess_nlf(image_data, bbox)?;
         let session = self
             .nlf_session
             .as_mut()
             .ok_or_else(|| WorkerError::Inference("NLF session is not loaded".to_owned()))?;
         let outputs = session.run(&input)?;
-        let coords3d = take_f32_output(&outputs, NLF_COORDS3D_OUTPUT)?;
-        let uncertainty = take_f32_output(&outputs, NLF_UNCERTAINTY_OUTPUT)?;
-        extract_nlf_depth_features(&coords3d, &uncertainty)
-            .map_err(|error| WorkerError::Feature(error.to_string()))
+        Ok((
+            take_f32_output(&outputs, NLF_COORDS2D_OUTPUT)?,
+            take_f32_output(&outputs, NLF_COORDS3D_OUTPUT)?,
+            take_f32_output(&outputs, NLF_UNCERTAINTY_OUTPUT)?,
+            take_f32_output(&outputs, NLF_BACKBONE_FEATS_OUTPUT)?,
+        ))
     }
 
     fn mark(&mut self, stage: &str) -> String {
@@ -1116,14 +1072,6 @@ pub fn compatibility_select_person_bbox(
     select_person_bbox(dets, labels, 1.0, 0.0, 0.0, image_width, image_height)
 }
 
-/// Executes production SimCC tie handling for synthetic compatibility rows.
-pub fn compatibility_decode_simcc(
-    simcc_x: &[f32],
-    simcc_y: &[f32],
-) -> Result<Vec<Keypoint>, WorkerError> {
-    decode_simcc(simcc_x, simcc_y)
-}
-
 /// Deterministic compatibility seam over the production RTMDet preprocessor.
 pub fn compatibility_preprocess_rtmdet(
     image: &ImageData,
@@ -1137,37 +1085,6 @@ pub fn compatibility_preprocess_rtmdet(
         pad_width: processed.pad_w,
         pad_height: processed.pad_h,
     })
-}
-
-fn preprocess_rtmpose(image: &ImageData) -> Result<Vec<f32>, WorkerError> {
-    validate_image(image)?;
-    let width = image.width as usize;
-    let height = image.height as usize;
-    let plane = RTMPOSE_INPUT_WIDTH * RTMPOSE_INPUT_HEIGHT;
-    let scale_x = width as f64 / RTMPOSE_INPUT_WIDTH as f64;
-    let scale_y = height as f64 / RTMPOSE_INPUT_HEIGHT as f64;
-    let mut tensor = vec![0.0_f32; plane * 3];
-
-    for h in 0..RTMPOSE_INPUT_HEIGHT {
-        for w in 0..RTMPOSE_INPUT_WIDTH {
-            let src_x = (w as f64 * scale_x).floor() as usize;
-            let src_y = (h as f64 * scale_y).floor() as usize;
-            let pixel = (src_y * width + src_x) * 4;
-            let index = h * RTMPOSE_INPUT_WIDTH + w;
-            tensor[index] =
-                (f32::from(image.data[pixel]) - RTMPOSE_MEAN_RGB[0]) / RTMPOSE_STD_RGB[0];
-            tensor[plane + index] =
-                (f32::from(image.data[pixel + 1]) - RTMPOSE_MEAN_RGB[1]) / RTMPOSE_STD_RGB[1];
-            tensor[2 * plane + index] =
-                (f32::from(image.data[pixel + 2]) - RTMPOSE_MEAN_RGB[2]) / RTMPOSE_STD_RGB[2];
-        }
-    }
-    Ok(tensor)
-}
-
-/// Deterministic compatibility seam over the production RTMPose preprocessor.
-pub fn compatibility_preprocess_rtmpose(image: &ImageData) -> Result<Vec<f32>, WorkerError> {
-    preprocess_rtmpose(image)
 }
 
 /// Builds the NLF-L input tensor: a square crop centered on the ORIGINAL RTMDet
@@ -1225,102 +1142,117 @@ fn preprocess_nlf(image: &ImageData, bbox: &BoundingBox) -> Result<Array4<f32>, 
         .map_err(|error| WorkerError::Tensor(error.to_string()))
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct CompatibilityCropOutputs {
-    pub expanded_pixels: ExpandedBbox,
-    pub cropped: ImageData,
-    pub normalized_bbox: ExpandedBbox,
-    pub normalized_keypoints: Vec<Keypoint>,
+/// Assembles the 17 COCO-17 keypoints from NLF-L's `coords2d` output — the exact
+/// inverse of [`preprocess_nlf`]'s crop geometry. For each canonical joint index
+/// in [`NLF_COCO17_CANONICAL`], the crop-pixel coordinate `(u, v)` maps back to
+/// the source frame via `origin + coord · side / NLF_INPUT_SIZE`, then normalizes
+/// by the image width/height. Scores are calibrated from `uncertainty` through
+/// [`uncertainty_to_keypoint_score`]. The origin/side math mirrors `preprocess_nlf`.
+fn assemble_nlf_keypoints(
+    coords2d: &[f32],
+    uncertainty: &[f32],
+    bbox: &BoundingBox,
+    image_width: u32,
+    image_height: u32,
+) -> Result<Vec<Keypoint>, WorkerError> {
+    let expected_coords = NLF_NUM_CANONICAL * 2;
+    if coords2d.len() != expected_coords {
+        return Err(WorkerError::Tensor(format!(
+            "NLF coords2d length mismatch: expected {expected_coords}, got {}",
+            coords2d.len()
+        )));
+    }
+    if uncertainty.len() != NLF_NUM_CANONICAL {
+        return Err(WorkerError::Tensor(format!(
+            "NLF uncertainty length mismatch: expected {NLF_NUM_CANONICAL}, got {}",
+            uncertainty.len()
+        )));
+    }
+    if image_width == 0 || image_height == 0 {
+        return Err(WorkerError::InvalidInput(
+            "image dimensions must be positive".to_owned(),
+        ));
+    }
+    let side = (bbox.x2 - bbox.x1).max(bbox.y2 - bbox.y1);
+    if !side.is_finite() || side <= 0.0 {
+        return Err(WorkerError::InvalidInput(
+            "NLF crop square has a non-positive side".to_owned(),
+        ));
+    }
+    let center_x = (bbox.x1 + bbox.x2) / 2.0;
+    let center_y = (bbox.y1 + bbox.y2) / 2.0;
+    let origin_x = center_x - side / 2.0;
+    let origin_y = center_y - side / 2.0;
+    let step = side / NLF_INPUT_SIZE as f64;
+    let width = f64::from(image_width);
+    let height = f64::from(image_height);
+
+    let keypoints = NLF_COCO17_CANONICAL
+        .iter()
+        .map(|&canon| {
+            let u = f64::from(coords2d[canon * 2]);
+            let v = f64::from(coords2d[canon * 2 + 1]);
+            Keypoint::new(
+                (origin_x + u * step) / width,
+                (origin_y + v * step) / height,
+                uncertainty_to_keypoint_score(f64::from(uncertainty[canon])),
+            )
+        })
+        .collect();
+    Ok(keypoints)
 }
 
-/// Exercises the same expansion, RGBA crop, keypoint transform, and output
-/// normalization used by the production detector-to-pose cascade.
-pub fn compatibility_crop_pipeline(
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompatibilityDetectorOutputs {
+    pub bbox: Option<ExpandedBbox>,
+    pub rtmdet_pooled: Vec<f32>,
+}
+
+/// Runs only the production RTMDet detector stage (preprocess → run → select →
+/// pooled features) with an independently loaded ORT session. The pose model is
+/// intentionally excluded so RTMDet parity can be verified without a GPU/DirectML.
+pub fn compatibility_run_detector(
+    rtmdet_path: &str,
     image: &ImageData,
-    bbox: &BoundingBox,
-    pose_keypoints: &[Keypoint],
-) -> Result<CompatibilityCropOutputs, WorkerError> {
-    let expanded_pixels = expand_bbox(bbox, 0.2, image.width, image.height)?;
-    let cropped = crop_image_data(image, &expanded_pixels.expanded)?;
-    let normalized_keypoints = transform_keypoints(
-        pose_keypoints,
-        &expanded_pixels.expanded,
-        cropped.width,
-        cropped.height,
+) -> Result<CompatibilityDetectorOutputs, WorkerError> {
+    let mut runtime = OrtRuntime;
+    let logger = NoopLogger;
+    let mut detector = load_model_with_retry(&mut runtime, &logger, rtmdet_path, "RTMDet")?;
+    let preprocessed = preprocess_rtmdet(image)?;
+    let rtmdet_input = Array4::from_shape_vec(
+        (1, 3, RTMDET_INPUT_HEIGHT, RTMDET_INPUT_WIDTH),
+        preprocessed.tensor,
+    )
+    .map_err(|error| WorkerError::Tensor(error.to_string()))?;
+    let outputs = detector.run(&rtmdet_input)?;
+    let dets = take_f32_output(&outputs, "dets")?;
+    let labels = take_i64_output(&outputs, "labels")?;
+    let raw_cls_p5 = take_f32_output(&outputs, RTMDET_CLS_P5)?;
+    let raw_reg_p5 = take_f32_output(&outputs, RTMDET_REG_P5)?;
+    let rtmdet_pooled = extract_rtm_det_features(&raw_cls_p5, &raw_reg_p5)?;
+    let selected = select_person_bbox(
+        &dets,
+        &labels,
+        preprocessed.scale,
+        preprocessed.pad_w,
+        preprocessed.pad_h,
         image.width,
         image.height,
     )?;
-    let normalized_bbox = normalize_expanded_bbox(&expanded_pixels, image.width, image.height)?;
-    Ok(CompatibilityCropOutputs {
-        expanded_pixels,
-        cropped,
-        normalized_bbox,
-        normalized_keypoints,
-    })
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct CompatibilityModelOutputs {
-    pub pose_runs: usize,
-    pub bbox: Option<ExpandedBbox>,
-    pub rtmdet_pooled: Vec<f32>,
-    pub keypoints: Vec<Keypoint>,
-    pub backbone_avg: Vec<f32>,
-    pub backbone_max: Vec<f32>,
-    pub backbone_std: Vec<f32>,
-    pub gau_avg: Vec<f32>,
-    pub gau_max: Vec<f32>,
-    pub gau_std: Vec<f32>,
-}
-
-struct CompatibilityModelFactory;
-
-impl ModelFactory for CompatibilityModelFactory {
-    fn load(&self, _serialized: SerializedModel) -> Result<Box<dyn ClassifierModel>, String> {
-        Err("compatibility model factory does not load classifiers".to_owned())
-    }
-}
-
-/// Runs the actual production frame-processing entry with independently loaded
-/// ORT sessions, then exposes its owned result buffers for fixture comparison.
-pub fn compatibility_run_models(
-    rtmdet_path: &str,
-    rtmpose_path: &str,
-    image: &ImageData,
-) -> Result<CompatibilityModelOutputs, WorkerError> {
-    let mut runtime = OrtRuntime;
-    let logger = NoopLogger;
-    let detector = load_model_with_retry(&mut runtime, &logger, rtmdet_path, "RTMDet")?;
-    let pose = load_model_with_retry(&mut runtime, &logger, rtmpose_path, "RTMPose-M")?;
-    let mut worker = InferenceWorker::new(CompatibilityModelFactory);
-    worker.rtmdet_session = Some(detector);
-    worker.rtmpose_session = Some(pose);
-    let result = worker.process_frame_inner(image)?;
-    let pose_runs = usize::from(result.person_found);
-    let mut features = result.features;
-    Ok(CompatibilityModelOutputs {
-        pose_runs,
-        bbox: result.bbox,
-        rtmdet_pooled: features
-            .remove(&FeatureId::RtmDetExtracted)
-            .unwrap_or_default(),
-        keypoints: result.keypoints.unwrap_or_default(),
-        backbone_avg: features
-            .remove(&FeatureId::BackboneFeatures)
-            .unwrap_or_default(),
-        backbone_max: features
-            .remove(&FeatureId::BackboneFeaturesMax)
-            .unwrap_or_default(),
-        backbone_std: features
-            .remove(&FeatureId::BackboneFeaturesStd)
-            .unwrap_or_default(),
-        gau_avg: features.remove(&FeatureId::GauFeatures).unwrap_or_default(),
-        gau_max: features
-            .remove(&FeatureId::GauFeaturesMax)
-            .unwrap_or_default(),
-        gau_std: features
-            .remove(&FeatureId::GauFeaturesStd)
-            .unwrap_or_default(),
+    let bbox = match selected {
+        Some(bbox) => {
+            let expanded = expand_bbox(&bbox, 0.2, image.width, image.height)?;
+            Some(normalize_expanded_bbox(
+                &expanded,
+                image.width,
+                image.height,
+            )?)
+        }
+        None => None,
+    };
+    Ok(CompatibilityDetectorOutputs {
+        bbox,
+        rtmdet_pooled,
     })
 }
 
@@ -1413,108 +1345,6 @@ fn expand_bbox(
     })
 }
 
-fn crop_image_data(image: &ImageData, bbox: &BoundingBox) -> Result<ImageData, WorkerError> {
-    validate_image(image)?;
-    let x1 = bbox.x1.max(0.0).floor() as usize;
-    let y1 = bbox.y1.max(0.0).floor() as usize;
-    let x2 = bbox.x2.min(image.width as f64).ceil() as usize;
-    let y2 = bbox.y2.min(image.height as f64).ceil() as usize;
-    if x2 <= x1 || y2 <= y1 {
-        return Err(WorkerError::InvalidInput(
-            "bounding box crop is empty".to_owned(),
-        ));
-    }
-    let width = x2 - x1;
-    let height = y2 - y1;
-    let mut data = vec![0_u8; width * height * 4];
-    for y in 0..height {
-        for x in 0..width {
-            let source = ((y1 + y) * image.width as usize + x1 + x) * 4;
-            let target = (y * width + x) * 4;
-            data[target..target + 4].copy_from_slice(&image.data[source..source + 4]);
-        }
-    }
-    Ok(ImageData {
-        data,
-        width: width as u32,
-        height: height as u32,
-    })
-}
-
-fn decode_simcc(simcc_x: &[f32], simcc_y: &[f32]) -> Result<Vec<Keypoint>, WorkerError> {
-    let expected_x = RTMPOSE_NUM_KEYPOINTS * RTMPOSE_SIMCC_X_WIDTH;
-    let expected_y = RTMPOSE_NUM_KEYPOINTS * RTMPOSE_SIMCC_Y_WIDTH;
-    if simcc_x.len() != expected_x || simcc_y.len() != expected_y {
-        return Err(WorkerError::Tensor(format!(
-            "invalid SimCC lengths: x={}, y={}, expected x={}, y={}",
-            simcc_x.len(),
-            simcc_y.len(),
-            expected_x,
-            expected_y
-        )));
-    }
-    let mut keypoints = Vec::with_capacity(RTMPOSE_NUM_KEYPOINTS);
-    for keypoint in 0..RTMPOSE_NUM_KEYPOINTS {
-        let x_lane =
-            &simcc_x[keypoint * RTMPOSE_SIMCC_X_WIDTH..(keypoint + 1) * RTMPOSE_SIMCC_X_WIDTH];
-        let y_lane =
-            &simcc_y[keypoint * RTMPOSE_SIMCC_Y_WIDTH..(keypoint + 1) * RTMPOSE_SIMCC_Y_WIDTH];
-        let (argmax_x, max_x) = argmax(x_lane);
-        let (argmax_y, max_y) = argmax(y_lane);
-        // SimCC lane maxima are raw model activations, not probabilities: real frames
-        // routinely exceed 1.0, and the oracle derived the keypoint score from them
-        // without any range restriction. Finiteness is already enforced when the
-        // tensor is read (take_f32_output).
-        keypoints.push(Keypoint::new(
-            argmax_x as f64 / RTMPOSE_SPLIT_RATIO,
-            argmax_y as f64 / RTMPOSE_SPLIT_RATIO,
-            (f64::from(max_x) + f64::from(max_y)) / 2.0,
-        ));
-    }
-    Ok(keypoints)
-}
-
-fn argmax(values: &[f32]) -> (usize, f32) {
-    values
-        .iter()
-        .copied()
-        .enumerate()
-        .fold((0, f32::NEG_INFINITY), |best, current| {
-            if current.1 > best.1 {
-                current
-            } else {
-                best
-            }
-        })
-}
-
-fn transform_keypoints(
-    keypoints: &[Keypoint],
-    crop_bbox: &BoundingBox,
-    crop_width: u32,
-    crop_height: u32,
-    image_width: u32,
-    image_height: u32,
-) -> Result<Vec<Keypoint>, WorkerError> {
-    if image_width == 0 || image_height == 0 {
-        return Err(WorkerError::InvalidInput(
-            "image dimensions must be positive".to_owned(),
-        ));
-    }
-    let scale_x = crop_width as f64 / RTMPOSE_INPUT_WIDTH as f64;
-    let scale_y = crop_height as f64 / RTMPOSE_INPUT_HEIGHT as f64;
-    Ok(keypoints
-        .iter()
-        .map(|keypoint| {
-            Keypoint::new(
-                (keypoint.x * scale_x + crop_bbox.x1) / image_width as f64,
-                (keypoint.y * scale_y + crop_bbox.y1) / image_height as f64,
-                keypoint.score,
-            )
-        })
-        .collect())
-}
-
 fn normalize_expanded_bbox(
     bbox: &ExpandedBbox,
     image_width: u32,
@@ -1605,9 +1435,9 @@ fn validate_native_result(result: &NativeInferenceResult) -> Result<(), WorkerEr
         (true, Some(bbox), Some(keypoints)) => {
             validate_normalized_bbox("original", &bbox.original, false)?;
             validate_normalized_bbox("expanded", &bbox.expanded, true)?;
-            if keypoints.len() != RTMPOSE_NUM_KEYPOINTS
-                // Keypoint scores are SimCC activation means and may exceed 1.0;
-                // only finiteness is part of the contract.
+            if keypoints.len() != COCO_KEYPOINT_COUNT
+                // The result contract validates only keypoint finiteness — not the
+                // position or score range — so an edge-of-frame joint is never rejected.
                 || keypoints.iter().any(|keypoint| {
                     !keypoint.x.is_finite()
                         || !keypoint.y.is_finite()
@@ -1696,8 +1526,8 @@ fn take_i64_output(outputs: &SessionOutputMap, name: &str) -> Result<Vec<i64>, W
 }
 
 fn copy_session_outputs(outputs: &SessionOutputs<'_>) -> Result<SessionOutputMap, WorkerError> {
-    // Copy every named output generically (f32 or i64), covering RTMDet/RTMPose and
-    // the NLF-L outputs (coords2d/coords3d_rel/uncertainty) without a per-model
+    // Copy every named output generically (f32 or i64), covering the RTMDet and
+    // NLF-L outputs (coords2d/coords3d_rel/uncertainty) without a per-model
     // allowlist. Outputs the worker never reads by name are simply carried along;
     // outputs of an unsupported dtype are skipped, and a missing/wrong-typed output
     // needed downstream still surfaces at the typed `take_*_output` read site.
@@ -1712,17 +1542,11 @@ fn copy_session_outputs(outputs: &SessionOutputs<'_>) -> Result<SessionOutputMap
     Ok(copied)
 }
 
-const _: () = {
-    assert!(RTMPOSE_BACKBONE_VALUES == 36_864);
-    assert!(RTMPOSE_GAU_VALUES == 4_352);
-    assert!(RTMDET_FEATURE_VALUES == 6_400);
-};
-
 #[cfg(test)]
 mod tests {
     use super::{
-        validate_native_result, ClassificationInput, ClassifierModel, InferenceWorker,
-        ModelFactory, NativeInferenceResult,
+        assemble_nlf_keypoints, validate_native_result, ClassificationInput, ClassifierModel,
+        InferenceWorker, ModelFactory, NativeInferenceResult, NLF_NUM_CANONICAL,
     };
     use slouch_domain::ported::messages::schemas::{
         DimensionalityReductionConfig, DimensionalityReductionMethod, NormalizationMode,
@@ -1730,6 +1554,8 @@ mod tests {
         SerializedGaussianNb, SerializedModel,
     };
     use slouch_domain::{BoundingBox, ExpandedBbox, Keypoint};
+    use slouch_ml::ported::constants::NLF_COCO17_CANONICAL;
+    use slouch_ml::ported::nlf_features::uncertainty_to_keypoint_score;
 
     struct FixedModel(f64);
 
@@ -1756,7 +1582,7 @@ mod tests {
     fn model(value: f64) -> SerializedModel {
         SerializedModel {
             feature_extractor: SerializedFeatureExtractor {
-                feature_types: vec!["gau_features".into()],
+                feature_types: vec!["nlf_depth".into()],
                 normalization_mode: NormalizationMode::None,
                 dim_reduction_config: DimensionalityReductionConfig {
                     method: DimensionalityReductionMethod::None,
@@ -1893,11 +1719,9 @@ mod tests {
 
     #[test]
     fn native_keypoint_beyond_unit_range_is_not_rejected() {
-        // The oracle's transformKeypoints (inference-worker.ts:602-624) performs no
-        // positional validation and can return a normalized coordinate marginally
-        // above 1.0 for an edge-of-frame pose. Boundary validation must not reject
-        // it: PORTING.md line 30 tightens score/probability ranges, not keypoint
-        // positions.
+        // An edge-of-frame pose can yield a normalized coordinate marginally above
+        // 1.0. Boundary validation must not reject it: the result contract validates
+        // only keypoint finiteness, not the position or score range.
         let unit_box = BoundingBox {
             x1: 0.1,
             y1: 0.1,
@@ -1909,8 +1733,7 @@ mod tests {
         };
         let mut keypoints = vec![Keypoint::new(0.5, 0.5, 0.9); 17];
         keypoints[0] = Keypoint::new(1.006, 0.5, 0.9);
-        // SimCC-derived scores are raw activation means and exceed 1.0 on real
-        // frames; only finiteness is validated.
+        // Only finiteness is validated, so an out-of-range score is still accepted.
         keypoints[7] = Keypoint::new(0.5, 0.5, 3.2);
         let result = NativeInferenceResult {
             person_found: true,
@@ -1923,5 +1746,74 @@ mod tests {
             classification: None,
         };
         assert!(validate_native_result(&result).is_ok());
+    }
+
+    #[test]
+    fn assemble_nlf_keypoints_inverts_the_crop_mapping_and_calibrates_scores() {
+        // Known bbox in a 640x480 frame: width 200, height 300 -> square side 300,
+        // centre (200, 250), origin (50, 100), step = 300 / 384.
+        let bbox = BoundingBox {
+            x1: 100.0,
+            y1: 100.0,
+            x2: 300.0,
+            y2: 400.0,
+            score: 0.9,
+            width: 200.0,
+            height: 300.0,
+        };
+        let (image_w, image_h) = (640_u32, 480_u32);
+        let side = 300.0_f64;
+        let origin_x = 50.0_f64;
+        let origin_y = 100.0_f64;
+        let step = side / 384.0;
+
+        let mut coords2d = vec![0.0_f32; NLF_NUM_CANONICAL * 2];
+        let mut uncertainty = vec![0.5_f32; NLF_NUM_CANONICAL];
+
+        // COCO index 0 (nose) at the crop centre; COCO index 16 (right ankle) at the
+        // far crop corner. Assembly returns joints in NLF_COCO17_CANONICAL order.
+        let nose_canon = NLF_COCO17_CANONICAL[0];
+        let rank_canon = NLF_COCO17_CANONICAL[16];
+        coords2d[nose_canon * 2] = 192.0;
+        coords2d[nose_canon * 2 + 1] = 192.0;
+        uncertainty[nose_canon] = 0.03; // confident -> score 1.0
+        coords2d[rank_canon * 2] = 384.0;
+        coords2d[rank_canon * 2 + 1] = 384.0;
+        uncertainty[rank_canon] = 0.15; // mid -> score 0.5
+
+        let keypoints = assemble_nlf_keypoints(&coords2d, &uncertainty, &bbox, image_w, image_h)
+            .expect("assembly succeeds");
+        assert_eq!(keypoints.len(), 17);
+
+        let close = |actual: f64, expected: f64| {
+            assert!(
+                (actual - expected).abs() <= 1e-9,
+                "actual {actual}, expected {expected}"
+            );
+        };
+
+        // Crop centre maps back to the bbox centre (200, 250).
+        let nose = keypoints[0];
+        close(nose.x, (origin_x + 192.0 * step) / 640.0);
+        close(nose.x, 200.0 / 640.0);
+        close(nose.y, (origin_y + 192.0 * step) / 480.0);
+        close(nose.y, 250.0 / 480.0);
+        close(
+            nose.score,
+            uncertainty_to_keypoint_score(f64::from(0.03_f32)),
+        );
+        assert_eq!(nose.score, 1.0);
+
+        // Far corner maps to (origin + side) = (350, 400).
+        let rank = keypoints[16];
+        close(rank.x, (origin_x + 384.0 * step) / 640.0);
+        close(rank.x, 350.0 / 640.0);
+        close(rank.y, (origin_y + 384.0 * step) / 480.0);
+        close(rank.y, 400.0 / 480.0);
+        close(
+            rank.score,
+            uncertainty_to_keypoint_score(f64::from(0.15_f32)),
+        );
+        assert!((rank.score - 0.5).abs() < 1e-3);
     }
 }

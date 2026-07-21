@@ -300,13 +300,10 @@ fn create_operations(storage: MockStorage) -> DatasetOperations<MockStorage> {
 fn seed_reservoir(reservoir: &FeatureReservoir) {
     reservoir
         .add(ReservoirSample {
-            backbone_avg: vec![0.0; FeatureId::BackboneFeatures.metadata().dimensions],
-            backbone_max: vec![0.0; FeatureId::BackboneFeaturesMax.metadata().dimensions],
-            backbone_std: vec![0.0; FeatureId::BackboneFeaturesStd.metadata().dimensions],
-            gau_avg: vec![0.0; FeatureId::GauFeatures.metadata().dimensions],
-            gau_max: vec![0.0; FeatureId::GauFeaturesMax.metadata().dimensions],
-            gau_std: vec![0.0; FeatureId::GauFeaturesStd.metadata().dimensions],
-            rtmdet: vec![0.0; FeatureId::RtmDetExtracted.metadata().dimensions],
+            features: FeatureMap::from([(
+                FeatureId::RtmDetExtracted,
+                vec![0.0; FeatureId::RtmDetExtracted.metadata().dimensions],
+            )]),
             keypoints: vec![Keypoint::new(0.5, 0.5, 1.0); 17],
             bbox: BoundingBox {
                 x1: 0.0,

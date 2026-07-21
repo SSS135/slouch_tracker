@@ -42,10 +42,16 @@ pub enum FeatureId {
     TorsoInvariant,
     #[serde(rename = "nlf_depth")]
     NlfDepth,
+    #[serde(rename = "nlf_backbone")]
+    NlfBackbone,
+    #[serde(rename = "nlf_backbone_max")]
+    NlfBackboneMax,
+    #[serde(rename = "nlf_backbone_std")]
+    NlfBackboneStd,
 }
 
 impl FeatureId {
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 21] = [
         Self::BackboneFeatures,
         Self::BackboneFeaturesMax,
         Self::BackboneFeaturesStd,
@@ -64,6 +70,9 @@ impl FeatureId {
         Self::PostureGeometry,
         Self::TorsoInvariant,
         Self::NlfDepth,
+        Self::NlfBackbone,
+        Self::NlfBackboneMax,
+        Self::NlfBackboneStd,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -86,17 +95,20 @@ impl FeatureId {
             Self::PostureGeometry => "posture_geometry",
             Self::TorsoInvariant => "torso_invariant",
             Self::NlfDepth => "nlf_depth",
+            Self::NlfBackbone => "nlf_backbone",
+            Self::NlfBackboneMax => "nlf_backbone_max",
+            Self::NlfBackboneStd => "nlf_backbone_std",
         }
     }
 
     pub const fn metadata(self) -> FeatureMetadata {
         match self {
-      Self::BackboneFeatures => FeatureMetadata::stored(self, "Backbone Features (Avg Pool)", "Average pooled backbone features from RTMPose", 768, ModelCategory::Posture),
-      Self::BackboneFeaturesMax => FeatureMetadata::stored(self, "Backbone Features (Max Pool)", "Max pooled backbone features from RTMPose - Captures peak spatial activations", 768, ModelCategory::Posture),
-      Self::BackboneFeaturesStd => FeatureMetadata::stored(self, "Backbone Features (Std Pool)", "Std pooled backbone features from RTMPose - Captures spatial variation", 768, ModelCategory::Posture),
-      Self::GauFeatures => FeatureMetadata::stored(self, "GAU Features (Avg Pool)", "Average pooled GAU features from RTMPose", 256, ModelCategory::Posture),
-      Self::GauFeaturesMax => FeatureMetadata::stored(self, "GAU Features (Max Pool)", "Max pooled GAU features from RTMPose - Captures peak keypoint activations", 256, ModelCategory::Posture),
-      Self::GauFeaturesStd => FeatureMetadata::stored(self, "GAU Features (Std Pool)", "Std pooled GAU features from RTMPose - Captures keypoint variation", 256, ModelCategory::Posture),
+      Self::BackboneFeatures => FeatureMetadata::stored_unavailable(self, "Backbone Features (Avg Pool)", "Average pooled backbone features from RTMPose", 768, ModelCategory::Posture),
+      Self::BackboneFeaturesMax => FeatureMetadata::stored_unavailable(self, "Backbone Features (Max Pool)", "Max pooled backbone features from RTMPose - Captures peak spatial activations", 768, ModelCategory::Posture),
+      Self::BackboneFeaturesStd => FeatureMetadata::stored_unavailable(self, "Backbone Features (Std Pool)", "Std pooled backbone features from RTMPose - Captures spatial variation", 768, ModelCategory::Posture),
+      Self::GauFeatures => FeatureMetadata::stored_unavailable(self, "GAU Features (Avg Pool)", "Average pooled GAU features from RTMPose", 256, ModelCategory::Posture),
+      Self::GauFeaturesMax => FeatureMetadata::stored_unavailable(self, "GAU Features (Max Pool)", "Max pooled GAU features from RTMPose - Captures peak keypoint activations", 256, ModelCategory::Posture),
+      Self::GauFeaturesStd => FeatureMetadata::stored_unavailable(self, "GAU Features (Std Pool)", "Std pooled GAU features from RTMPose - Captures keypoint variation", 256, ModelCategory::Posture),
       Self::RtmDetExtracted => FeatureMetadata::stored(self, "RTMDet Extracted Features", "Pooled (avg/std/max) cls_p5 + reg_p5 features", 384, ModelCategory::Presence),
       Self::RtmDetEngineered => FeatureMetadata::computed(self, "Detection Features", "Geometric features from detection bbox and keypoints (135 dims)", 135, Some(ModelCategory::Presence), None),
       Self::EngineeredFeatures => FeatureMetadata::computed(self, "Posture Features (1D)", "Body proportion ratios with 1D soft binning (54 dims)", 54, Some(ModelCategory::Posture), Some(false)),
@@ -111,6 +123,11 @@ impl FeatureId {
       // Dimension literal `14` must stay in lock-step with `slouch_ml::constants::NLF_DEPTH_DIMS`;
       // slouch-domain cannot depend on slouch-ml, so it is duplicated here (frozen at 14).
       Self::NlfDepth => FeatureMetadata::stored(self, "NLF Depth (3D)", "Body-intrinsic 3D depth and angle features from the NLF-L model that separate forward-head posture from trunk lean (14 dims)", 14, ModelCategory::Posture),
+      // Dimension literal `512` must stay in lock-step with `slouch_ml::constants::NLF_BACKBONE_POOLED_DIMS`;
+      // slouch-domain cannot depend on slouch-ml, so it is duplicated here (frozen at 512).
+      Self::NlfBackbone => FeatureMetadata::stored(self, "NLF Backbone Features (Avg Pool)", "Average-pooled NLF-L backbone embedding (512 dims)", 512, ModelCategory::Posture),
+      Self::NlfBackboneMax => FeatureMetadata::stored(self, "NLF Backbone Features (Max Pool)", "Max-pooled NLF-L backbone embedding - captures peak spatial activations (512 dims)", 512, ModelCategory::Posture),
+      Self::NlfBackboneStd => FeatureMetadata::stored(self, "NLF Backbone Features (Std Pool)", "Std-pooled NLF-L backbone embedding - captures spatial variation (512 dims)", 512, ModelCategory::Posture),
     }
     }
 }
@@ -189,6 +206,29 @@ impl FeatureMetadata {
         }
     }
 
+    // Retired stored feature: its variant, discriminant, and dimensions persist so
+    // older datasets/models keep deserializing, but the pose model that produced it
+    // is gone, so it is hidden from the selector (`user_selectable: false`).
+    const fn stored_unavailable(
+        id: FeatureId,
+        name: &'static str,
+        description: &'static str,
+        dimensions: usize,
+        model_type: ModelCategory,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            description,
+            dimensions,
+            storage_cost: dimensions * size_of::<f32>(),
+            computed: false,
+            model_type: Some(model_type),
+            user_selectable: false,
+            requires_fitting: None,
+        }
+    }
+
     const fn computed(
         id: FeatureId,
         name: &'static str,
@@ -211,6 +251,6 @@ impl FeatureMetadata {
     }
 }
 
-pub fn feature_registry() -> [FeatureMetadata; 18] {
+pub fn feature_registry() -> [FeatureMetadata; 21] {
     FeatureId::ALL.map(FeatureId::metadata)
 }

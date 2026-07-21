@@ -178,7 +178,7 @@ pub(crate) fn import_connection(
     let models = read_models(&archive)?;
     let reservoir_states = read_reservoir_states(&archive)?;
     let reservoir_samples = read_reservoir_samples(&archive)?;
-    validate_reservoir_rows(&reservoir_states, &reservoir_samples)?;
+    let import_reservoir = validate_reservoir_rows(&reservoir_states, &reservoir_samples)?;
     let archive_identity = super::storage::dataset_identity(&archive)?;
     validate_model_rows(&generations, &models, dataset.version, archive_identity)?;
 
@@ -218,18 +218,24 @@ pub(crate) fn import_connection(
             ],
         )?;
     }
-    for row in reservoir_states {
-        transaction.execute(
-            "INSERT INTO reservoir_state(singleton, capacity, seen_count, sample_count, rng_state, last_sampled_ms)
-             VALUES (?, ?, ?, ?, ?, ?)",
-            params![row.singleton, row.capacity, row.seen_count, row.sample_count, row.rng_state, row.last_sampled_ms],
-        )?;
-    }
-    for row in reservoir_samples {
-        transaction.execute(
-            "INSERT INTO reservoir_samples(slot, payload) VALUES (?, ?)",
-            params![row.slot, row.payload],
-        )?;
+    // When `import_reservoir` is false the archive carried a legacy (pre-NLF-EMBED)
+    // reservoir that no longer decodes into the current sample shape: the live
+    // reservoir tables were cleared above and are deliberately left empty, so the
+    // reservoir is dropped while the rest of the archive still imports.
+    if import_reservoir {
+        for row in reservoir_states {
+            transaction.execute(
+                "INSERT INTO reservoir_state(singleton, capacity, seen_count, sample_count, rng_state, last_sampled_ms)
+                 VALUES (?, ?, ?, ?, ?, ?)",
+                params![row.singleton, row.capacity, row.seen_count, row.sample_count, row.rng_state, row.last_sampled_ms],
+            )?;
+        }
+        for row in reservoir_samples {
+            transaction.execute(
+                "INSERT INTO reservoir_samples(slot, payload) VALUES (?, ?)",
+                params![row.slot, row.payload],
+            )?;
+        }
     }
     transaction.execute(
         "UPDATE app_meta SET dataset_version = ?, last_modified_ms = ? WHERE singleton = 1",
@@ -595,10 +601,19 @@ fn validate_model_rows(
     Ok(())
 }
 
+/// Validates the archive's reservoir rows and reports whether they are importable.
+///
+/// Returns `Ok(true)` when every payload decodes into the current
+/// `ReservoirSample` shape and passes validation. Returns `Ok(false)` for the one
+/// tolerated legacy case: a checksum-valid payload that no longer decodes into the
+/// reshaped struct (a pre-NLF-EMBED reservoir), so the caller drops the reservoir
+/// and imports the rest of the archive. Every other defect — oversized rows,
+/// invalid state, count mismatch, bad slots, a checksum MISMATCH, or a decoded but
+/// semantically invalid sample — remains a hard failure.
 fn validate_reservoir_rows(
     states: &[ReservoirStateRow],
     samples: &[ReservoirSampleRow],
-) -> Result<(), StorageError> {
+) -> Result<bool, StorageError> {
     if states.len() > 1 || samples.len() > 1_000 {
         return Err(StorageError::Validation(
             "archive reservoir exceeds native limits".into(),
@@ -623,6 +638,7 @@ fn validate_reservoir_rows(
             "archive reservoir sample count does not match".into(),
         ));
     }
+    let mut decodable = true;
     for (expected_slot, sample) in samples.iter().enumerate() {
         if sample.slot != expected_slot as i64
             || sample.payload.is_empty()
@@ -641,14 +657,13 @@ fn validate_reservoir_rows(
                 "archive reservoir checksum does not match".into(),
             ));
         }
-        let decoded: super::feature_reservoir::ReservoirSample =
-            rmp_serde::from_slice(&sample.payload).map_err(|error| {
-                StorageError::InvalidData(format!("archive reservoir sample is invalid: {error}"))
-            })?;
-        super::storage::validate_reservoir_sample(&decoded)
-            .map_err(|error| StorageError::InvalidData(error.to_string()))?;
+        match rmp_serde::from_slice::<super::feature_reservoir::ReservoirSample>(&sample.payload) {
+            Ok(decoded) => super::storage::validate_reservoir_sample(&decoded)
+                .map_err(|error| StorageError::InvalidData(error.to_string()))?,
+            Err(_) => decodable = false,
+        }
     }
-    Ok(())
+    Ok(decodable)
 }
 
 fn read_settings(connection: &Connection) -> Result<Vec<SettingRow>, StorageError> {

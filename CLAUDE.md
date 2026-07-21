@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Tauri 2 desktop application (Windows-first)
 - Rust backend workspace in `src-tauri/` (`app` crate + `slouch-domain`, `slouch-ml`, `slouch-vision`, `slouch-store`)
 - Svelte 5 (runes) + TypeScript frontend in `src-svelte/` — thin UI only
-- Native ONNX Runtime via `ort` (RTMDet-nano + RTMPose-M)
+- Native ONNX Runtime via `ort` (RTMDet-nano CPU person detection + NLF-L fp16 pose on DirectML — 17 keypoints + 3D depth; DirectX 12 GPU hard-required)
 - SQLite storage (STRICT schema) via `slouch-store`
 - IPC through generated Specta bindings (`src/generated/`) + 3 raw-byte MessagePack commands
 - Vitest (frontend) + `cargo test` (backend) + Playwright/WebdriverIO (e2e)
@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. Real-time posture tracking via webcam (capture/rendering in Svelte, inference in Rust)
 2. Multi-task detection: person presence and posture quality
 3. ML-based detection with user-trainable classifiers (6 registry-driven classifier types)
-4. Flexible feature selection (15 feature types: RTMPose backbone/GAU poolings, RTMDet features, geometric features)
+4. Flexible feature selection (18 registry feature types, 12 user-selectable: RTMDet features, NLF 3D depth, geometric features; the 6 retired RTMPose backbone/GAU poolings persist for old data but are hidden)
 5. In-app data collection and native model training (TrainingActor + progress channel)
 6. Global capture hotkeys (Ctrl+Win+G/B/A) that work while the app is unfocused
 

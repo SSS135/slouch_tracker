@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 /**
- * Tests for canvas drawing utilities - RTMPose-S
+ * Tests for canvas drawing utilities - NLF-L
  * All keypoints use 0-1 normalized coordinates
  */
 

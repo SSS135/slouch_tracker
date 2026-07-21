@@ -1,7 +1,7 @@
 [package]
 name = "slouch-vision"
 version = "0.1.0"
-description = "ONNX Runtime sessions, preprocessing, and the RTMDet + RTMPose inference worker for Slouch Tracker"
+description = "ONNX Runtime sessions, preprocessing, and the RTMDet + NLF-L inference worker for Slouch Tracker"
 license = "MIT"
 edition.workspace = true
 rust-version.workspace = true

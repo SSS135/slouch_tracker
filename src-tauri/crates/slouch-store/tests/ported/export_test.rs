@@ -101,6 +101,15 @@ fn create_mock_frame(id: &str, label: FrameLabel, include_all_features: bool) ->
 
 fn create_mock_reservoir_sample() -> ReservoirSample {
     ReservoirSample {
+        features: FeatureMap::from([
+            (FeatureId::BackboneFeatures, vec![0.1; 768]),
+            (FeatureId::BackboneFeaturesMax, vec![0.2; 768]),
+            (FeatureId::BackboneFeaturesStd, vec![0.3; 768]),
+            (FeatureId::GauFeatures, vec![0.4; 256]),
+            (FeatureId::GauFeaturesMax, vec![0.5; 256]),
+            (FeatureId::GauFeaturesStd, vec![0.6; 256]),
+            (FeatureId::RtmDetExtracted, vec![0.7; 384]),
+        ]),
         keypoints: (0..17)
             .map(|index| Keypoint::new(10.0 + index as f64, 20.0 + index as f64, 0.9))
             .collect(),
@@ -113,13 +122,6 @@ fn create_mock_reservoir_sample() -> ReservoirSample {
             width: 300.0,
             height: 400.0,
         },
-        backbone_avg: vec![0.1; 768],
-        backbone_max: vec![0.2; 768],
-        backbone_std: vec![0.3; 768],
-        gau_avg: vec![0.4; 256],
-        gau_max: vec![0.5; 256],
-        gau_std: vec![0.6; 256],
-        rtmdet: vec![0.7; 384],
     }
 }
 

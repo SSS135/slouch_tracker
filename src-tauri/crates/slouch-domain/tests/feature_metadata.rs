@@ -4,18 +4,36 @@ use serde_json::json;
 use slouch_domain::{feature_registry, FeatureId, ModelCategory};
 
 #[test]
-fn registry_contains_all_eighteen_unique_selectable_features() {
+fn registry_contains_all_twenty_one_unique_features_with_retired_pooling_hidden() {
     let registry = feature_registry();
-    assert_eq!(registry.len(), 18);
+    assert_eq!(registry.len(), 21);
     assert_eq!(
         registry
             .iter()
             .map(|item| item.id)
             .collect::<BTreeSet<_>>()
             .len(),
-        18
+        21
     );
-    assert!(registry.iter().all(|item| item.user_selectable));
+
+    // The 6 RTMPose backbone/GAU pooled features are retired: their variants and
+    // dimensions persist for deserialization, but they are hidden from the selector.
+    let retired = BTreeSet::from([
+        FeatureId::BackboneFeatures,
+        FeatureId::BackboneFeaturesMax,
+        FeatureId::BackboneFeaturesStd,
+        FeatureId::GauFeatures,
+        FeatureId::GauFeaturesMax,
+        FeatureId::GauFeaturesStd,
+    ]);
+    for item in &registry {
+        assert_eq!(
+            item.user_selectable,
+            !retired.contains(&item.id),
+            "unexpected user_selectable for {}",
+            item.id
+        );
+    }
 }
 
 #[test]
@@ -58,6 +76,9 @@ fn dimensions_storage_and_model_categories_match_current_registry() {
         (FeatureId::PostureGeometry, 10, 0, ModelCategory::Posture),
         (FeatureId::TorsoInvariant, 7, 0, ModelCategory::Posture),
         (FeatureId::NlfDepth, 14, 56, ModelCategory::Posture),
+        (FeatureId::NlfBackbone, 512, 2048, ModelCategory::Posture),
+        (FeatureId::NlfBackboneMax, 512, 2048, ModelCategory::Posture),
+        (FeatureId::NlfBackboneStd, 512, 2048, ModelCategory::Posture),
     ];
     for (id, dimensions, storage, model) in expected {
         let metadata = id.metadata();
@@ -100,6 +121,15 @@ fn optional_metadata_fields_match_typescript_omission_semantics() {
     assert_eq!(nlf_depth["storageCost"], 56);
     assert_eq!(nlf_depth["computed"], false);
     assert!(nlf_depth.get("requiresFitting").is_none());
+
+    let nlf_backbone_max = serde_json::to_value(FeatureId::NlfBackboneMax.metadata()).unwrap();
+    assert_eq!(nlf_backbone_max["id"], "nlf_backbone_max");
+    assert_eq!(nlf_backbone_max["modelType"], "posture");
+    assert_eq!(nlf_backbone_max["dimensions"], 512);
+    assert_eq!(nlf_backbone_max["storageCost"], 2048);
+    assert_eq!(nlf_backbone_max["computed"], false);
+    assert_eq!(nlf_backbone_max["userSelectable"], true);
+    assert!(nlf_backbone_max.get("requiresFitting").is_none());
 
     let engineered = serde_json::to_value(FeatureId::EngineeredFeatures.metadata()).unwrap();
     assert_eq!(

@@ -37,8 +37,10 @@
     "active": true,
     "resources": {
       "resources/models/rtmdet-nano.onnx": "resources/models/rtmdet-nano.onnx",
-      "resources/models/rtmpose-m.onnx": "resources/models/rtmpose-m.onnx",
+      "resources/models/nlf_l_crop_fp16.onnx": "resources/models/nlf_l_crop_fp16.onnx",
       "resources/onnxruntime/windows-x86_64/onnxruntime.dll": "resources/onnxruntime/windows-x86_64/onnxruntime.dll",
+      "resources/onnxruntime/windows-x86_64/DirectML.dll": "resources/onnxruntime/windows-x86_64/DirectML.dll",
+      "resources/onnxruntime/windows-x86_64/onnxruntime_providers_shared.dll": "resources/onnxruntime/windows-x86_64/onnxruntime_providers_shared.dll",
       "resources/onnxruntime/notices/LICENSE": "resources/onnxruntime/notices/LICENSE",
       "resources/onnxruntime/notices/Privacy.md": "resources/onnxruntime/notices/Privacy.md",
       "resources/onnxruntime/notices/ThirdPartyNotices.txt": "resources/onnxruntime/notices/ThirdPartyNotices.txt"

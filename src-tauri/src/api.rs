@@ -95,7 +95,6 @@ impl Drop for AppState {
 #[derive(Debug, Clone)]
 struct ModelPaths {
     rtmdet: Option<PathBuf>,
-    rtmpose: Option<PathBuf>,
     nlf: Option<PathBuf>,
 }
 
@@ -343,29 +342,19 @@ fn initialize_inference_state(state: &AppState) -> Result<(), ApiError> {
         .rtmdet
         .clone()
         .ok_or_else(|| ApiError::NotReady("RTMDet model resource is unavailable".into()))?;
-    let rtmpose = state
+    let nlf = state
         .model_paths
-        .rtmpose
+        .nlf
         .clone()
-        .ok_or_else(|| ApiError::NotReady("RTMPose model resource is unavailable".into()))?;
-    let responses = state.inference.send(actors::initialize_message(
-        rtmdet,
-        rtmpose,
-        state.model_paths.nlf.clone(),
-    ))?;
-    if !responses.iter().any(|response| {
-        matches!(
-            response,
-            slouch_vision::ported::inference_worker::WorkerResponse::Initialized { .. }
-        )
-    }) {
-        return Err(ApiError::Inference(
-            "native models failed to initialize".into(),
-        ));
-    }
+        .ok_or_else(|| ApiError::NotReady("NLF pose model resource is unavailable".into()))?;
+    ensure_worker_initialized(
+        state
+            .inference
+            .send(actors::initialize_message(rtmdet, nlf)),
+    )?;
 
     // A corrupt or incompatible active model must never take the whole app down
-    // at startup. Native detection (RTMDet/RTMPose) is already initialized above;
+    // at startup. Native detection (RTMDet + NLF pose) is already initialized above;
     // if the trained classifier pair cannot be loaded or published, surface it in
     // the log and continue with no active classifier so the user can retrain,
     // rather than aborting the setup hook (which crash-loops the application).
@@ -394,6 +383,35 @@ fn initialize_inference_state(state: &AppState) -> Result<(), ApiError> {
     }
     state.inference_ready.store(true, Ordering::Release);
     Ok(())
+}
+
+// Turns the worker's initialize responses into a ready/not-ready verdict while
+// preserving the actionable reason a failure carries (for example NLF/DirectML
+// hard-requiring a GPU) so the UI shows it verbatim instead of a generic
+// message. The InferenceActor already maps a `WorkerResponse::Error` onto
+// `ApiError::Inference` on the send path, so a genuine failure arrives as `Err`
+// with its text intact; the `Ok`-but-no-`Initialized` branch additionally
+// surfaces any `Error` response verbatim. The returned message must never
+// contain "busy" or "already initializing" — the frontend retry loop keys off
+// those and would crash-loop instead of showing the reason.
+fn ensure_worker_initialized(
+    responses: Result<Vec<slouch_vision::ported::inference_worker::WorkerResponse>, ApiError>,
+) -> Result<(), ApiError> {
+    use slouch_vision::ported::inference_worker::WorkerResponse;
+    let responses = responses?;
+    if responses
+        .iter()
+        .any(|response| matches!(response, WorkerResponse::Initialized { .. }))
+    {
+        return Ok(());
+    }
+    let actionable = responses.iter().find_map(|response| match response {
+        WorkerResponse::Error { error, .. } => Some(error.clone()),
+        _ => None,
+    });
+    Err(ApiError::Inference(actionable.unwrap_or_else(|| {
+        "native models failed to initialize".into()
+    })))
 }
 
 #[tauri::command]
@@ -1202,7 +1220,6 @@ pub fn initialize_state(data_dir: PathBuf, resource_dir: PathBuf) -> Result<AppS
     );
     let model_paths = ModelPaths {
         rtmdet: find_resource(&resource_dir, "rtmdet-nano.onnx"),
-        rtmpose: find_resource(&resource_dir, "rtmpose-m.onnx"),
         nlf: find_resource(&resource_dir, "nlf_l_crop_fp16.onnx"),
     };
     let training = TrainingActor::start(storage.clone())?;
@@ -1880,5 +1897,49 @@ mod tests {
             }
             other => panic!("expected a random-projection transformer, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn worker_initialize_error_reaches_the_ui_as_inference_with_the_same_actionable_text() {
+        use crate::errors::ApiError;
+        use slouch_vision::ported::inference_worker::WorkerResponse;
+
+        let actionable = "Posture detection requires a DirectX 12-capable GPU. The NLF pose \
+             model failed to initialize on DirectML: device removed";
+
+        // The InferenceActor maps a WorkerResponse::Error onto ApiError::Inference
+        // before it reaches this helper, so a real failure arrives as Err(...).
+        let mapped = super::ensure_worker_initialized(Err(ApiError::Inference(actionable.into())));
+        let Err(ApiError::Inference(message)) = mapped else {
+            panic!("actor-mapped error must stay an inference error: {mapped:?}");
+        };
+        assert_eq!(message, actionable);
+        assert!(!message.contains("busy") && !message.contains("already initializing"));
+
+        // Defensive path: an Error surfaced inside an Ok response vector is still
+        // reported verbatim rather than as the generic message.
+        let via_vec = super::ensure_worker_initialized(Ok(vec![WorkerResponse::Error {
+            error: actionable.into(),
+            request_id: None,
+            details: None,
+            success: None,
+        }]));
+        assert!(
+            matches!(&via_vec, Err(ApiError::Inference(message)) if message == actionable),
+            "{via_vec:?}"
+        );
+
+        // A successful initialization is ready; a response with neither Initialized
+        // nor Error falls back to the generic message.
+        assert!(
+            super::ensure_worker_initialized(Ok(vec![WorkerResponse::Initialized {
+                provider: "native".into(),
+            }]))
+            .is_ok()
+        );
+        assert!(matches!(
+            super::ensure_worker_initialized(Ok(vec![WorkerResponse::ClassifierUnloaded])),
+            Err(ApiError::Inference(_))
+        ));
     }
 }

@@ -16,13 +16,16 @@ const MIN_DENOMINATOR: f64 = 0.001;
 const MIN_KEYPOINTS_REQUIRED: usize = 7;
 const RAW_KEYPOINT_COUNT: usize = 17;
 
-/// Absent-keypoint guard for the torso-invariant feature. RTMPose emits all 17
-/// keypoints every frame, but occluded/out-of-frame joints (notably the hips of a
-/// seated user) come back with a near-zero SimCC activation score. A keypoint at or
-/// below this bar is treated as absent so it cannot fabricate a bogus torso axis;
-/// residual quality is still surfaced through the feature's `min_conf` dim rather
-/// than being filtered here. Kept low on purpose — this is an absence guard, not a
-/// quality threshold — so genuinely weak-but-present joints still inform the model.
+/// Absent-keypoint guard for the torso-invariant feature. NLF emits all 17 COCO
+/// keypoints every frame, each carrying a calibrated confidence in [0, 1] (see
+/// `nlf_features::uncertainty_to_keypoint_score`); an out-of-frame joint comes back
+/// with a low score. A keypoint at or below this bar is treated as absent so it
+/// cannot fabricate a bogus torso axis; residual quality is still surfaced through
+/// the feature's `min_conf` dim rather than being filtered here. Kept low on purpose
+/// — this is an absence guard, not a quality threshold — so genuinely weak-but-present
+/// joints still inform the model. Note: unlike SimCC, NLF reports confident
+/// coordinates for occluded hips, so `torso_reliable` is now often true for seated
+/// users (accepted).
 const MIN_KEYPOINT_CONFIDENCE: f64 = 0.1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]

@@ -591,22 +591,16 @@ fn import_reservoir_from_zip<A: ZipArchive + ?Sized>(
 
         let sample = match (buffer_to_keypoints(&keypoints), buffer_to_bbox(&bbox)) {
             (Ok(keypoints), Ok(bbox)) => ReservoirSample {
+                features: slouch_domain::FeatureMap::new(),
                 keypoints,
                 bbox,
-                backbone_avg: Vec::new(),
-                backbone_max: Vec::new(),
-                backbone_std: Vec::new(),
-                gau_avg: Vec::new(),
-                gau_max: Vec::new(),
-                gau_std: Vec::new(),
-                rtmdet: Vec::new(),
             },
             _ => continue,
         };
 
-        // Browser-exported reservoir samples intentionally carry empty feature
+        // Browser-exported reservoir samples intentionally carry no feature
         // vectors (features are excluded from export), which the native
-        // registry-sized validator always rejects. The TS oracle performs no
+        // validator (empty feature map) always rejects. The TS oracle performs no
         // dimension validation and skips per-sample failures, so treat an
         // invalid sample as a skip rather than failing the whole import.
         if super::storage::validate_reservoir_sample(&sample).is_err() {

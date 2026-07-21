@@ -33,18 +33,16 @@ const KEYPOINT_BASED_FEATURES: [FeatureId; 5] = [
     FeatureId::PostureRaw,
 ];
 
-/// A reservoir item in the native training boundary. The storage crate owns
-/// the actual reservoir implementation; this DTO is the worker's stable input
-/// contract and intentionally mirrors the browser sample shape.
+/// A reservoir item in the native training boundary. The storage crate owns the
+/// actual reservoir implementation; this DTO is the worker's stable input contract.
+/// It carries a generic `FeatureMap` so any stored feature (RTMPose/RTMDet pooled,
+/// NLF backbone/depth, future additions) flows through with no per-field wiring.
+/// The `features`/`keypoints`/`bbox` field names and `rmp_serde::to_vec_named`
+/// encoding must stay byte-identical to `slouch_store`'s twin struct for the
+/// cross-crate reservoir round-trip to hold.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReservoirSample {
-    pub backbone_avg: Vec<f32>,
-    pub backbone_max: Vec<f32>,
-    pub backbone_std: Vec<f32>,
-    pub gau_avg: Vec<f32>,
-    pub gau_max: Vec<f32>,
-    pub gau_std: Vec<f32>,
-    pub rtmdet: Vec<f32>,
+    pub features: slouch_domain::FeatureMap,
     pub keypoints: Vec<slouch_domain::Keypoint>,
     pub bbox: slouch_domain::BoundingBox,
 }
@@ -60,16 +58,8 @@ pub struct FeatureContainer {
 
 impl From<ReservoirSample> for FeatureContainer {
     fn from(sample: ReservoirSample) -> Self {
-        let mut features = slouch_domain::FeatureMap::new();
-        features.insert(FeatureId::BackboneFeatures, sample.backbone_avg);
-        features.insert(FeatureId::BackboneFeaturesMax, sample.backbone_max);
-        features.insert(FeatureId::BackboneFeaturesStd, sample.backbone_std);
-        features.insert(FeatureId::GauFeatures, sample.gau_avg);
-        features.insert(FeatureId::GauFeaturesMax, sample.gau_max);
-        features.insert(FeatureId::GauFeaturesStd, sample.gau_std);
-        features.insert(FeatureId::RtmDetExtracted, sample.rtmdet);
         Self {
-            features,
+            features: sample.features,
             keypoints: sample.keypoints,
             bbox: Some(sample.bbox),
         }
@@ -714,17 +704,20 @@ fn validate_training_reservoir(samples: &[ReservoirSample]) -> Result<(), Traini
         )));
     }
     for (index, sample) in samples.iter().enumerate() {
-        for (feature, values) in [
-            (FeatureId::BackboneFeatures, &sample.backbone_avg),
-            (FeatureId::BackboneFeaturesMax, &sample.backbone_max),
-            (FeatureId::BackboneFeaturesStd, &sample.backbone_std),
-            (FeatureId::GauFeatures, &sample.gau_avg),
-            (FeatureId::GauFeaturesMax, &sample.gau_max),
-            (FeatureId::GauFeaturesStd, &sample.gau_std),
-            (FeatureId::RtmDetExtracted, &sample.rtmdet),
-        ] {
-            if values.len() != feature.metadata().dimensions
-                || values.iter().any(|value| !value.is_finite())
+        if sample.features.is_empty() {
+            return Err(TrainingWorkerError::InvalidSettings(format!(
+                "reservoir sample {index} carries no features"
+            )));
+        }
+        for (feature, values) in &sample.features {
+            let metadata = feature.metadata();
+            if metadata.computed {
+                return Err(TrainingWorkerError::InvalidSettings(format!(
+                    "reservoir sample {index} feature {} is computed, not stored",
+                    feature.as_str(),
+                )));
+            }
+            if values.len() != metadata.dimensions || values.iter().any(|value| !value.is_finite())
             {
                 return Err(TrainingWorkerError::InvalidSettings(format!(
                     "reservoir sample {index} feature {} is invalid",
@@ -1152,14 +1145,15 @@ mod tests {
 
     #[test]
     fn reservoir_samples_preserve_all_feature_kinds() {
+        // `From` moves the generic feature map through verbatim, so any stored
+        // feature the reservoir captured survives the training-boundary conversion.
+        let mut features = slouch_domain::FeatureMap::new();
+        features.insert(FeatureId::RtmDetExtracted, vec![7.0]);
+        features.insert(FeatureId::NlfBackbone, vec![1.0]);
+        features.insert(FeatureId::NlfBackboneMax, vec![2.0]);
+        features.insert(FeatureId::NlfBackboneStd, vec![3.0]);
         let sample = ReservoirSample {
-            backbone_avg: vec![1.0],
-            backbone_max: vec![2.0],
-            backbone_std: vec![3.0],
-            gau_avg: vec![4.0],
-            gau_max: vec![5.0],
-            gau_std: vec![6.0],
-            rtmdet: vec![7.0],
+            features: features.clone(),
             keypoints: Vec::new(),
             bbox: slouch_domain::BoundingBox {
                 x1: 0.0,
@@ -1172,19 +1166,23 @@ mod tests {
             },
         };
         let container = FeatureContainer::from(sample);
-        assert_eq!(container.features.len(), 7);
+        assert_eq!(container.features, features);
         assert_eq!(container.features[&FeatureId::RtmDetExtracted], vec![7.0]);
     }
 
     fn full_reservoir_sample(bbox: slouch_domain::BoundingBox) -> ReservoirSample {
+        let mut features = slouch_domain::FeatureMap::new();
+        for feature in [
+            FeatureId::RtmDetExtracted,
+            FeatureId::NlfDepth,
+            FeatureId::NlfBackbone,
+            FeatureId::NlfBackboneMax,
+            FeatureId::NlfBackboneStd,
+        ] {
+            features.insert(feature, vec![0.0; feature.metadata().dimensions]);
+        }
         ReservoirSample {
-            backbone_avg: vec![0.0; FeatureId::BackboneFeatures.metadata().dimensions],
-            backbone_max: vec![0.0; FeatureId::BackboneFeaturesMax.metadata().dimensions],
-            backbone_std: vec![0.0; FeatureId::BackboneFeaturesStd.metadata().dimensions],
-            gau_avg: vec![0.0; FeatureId::GauFeatures.metadata().dimensions],
-            gau_max: vec![0.0; FeatureId::GauFeaturesMax.metadata().dimensions],
-            gau_std: vec![0.0; FeatureId::GauFeaturesStd.metadata().dimensions],
-            rtmdet: vec![0.0; FeatureId::RtmDetExtracted.metadata().dimensions],
+            features,
             keypoints: vec![slouch_domain::Keypoint::new(0.5, 0.5, 0.5); 17],
             bbox,
         }

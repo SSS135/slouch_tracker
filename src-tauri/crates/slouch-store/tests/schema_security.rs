@@ -17,7 +17,7 @@ use slouch_domain::{BoundingBox, FeatureId, FrameLabel, Keypoint, PostureFrame, 
 use slouch_store::ported::storage::{DatasetStorage, StorageError};
 
 const SLOUCH_APPLICATION_ID: i64 = 1_397_506_888;
-const SUPPORTED_USER_VERSION: i64 = 1;
+const SUPPORTED_USER_VERSION: i64 = 2;
 const GAU: FeatureId = FeatureId::GauFeatures;
 
 fn temp_database(name: &str) -> PathBuf {

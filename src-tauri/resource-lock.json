@@ -82,17 +82,10 @@
       "packagedPath": "resources/models/rtmdet-nano.onnx"
     },
     {
-      "id": "rtmpose-m",
-      "source": "public/rtmpose-m.onnx",
-      "bytes": 54369106,
-      "sha256": "4afb3ac968d37fa540b3b4d34acfdb0b054f3d534c9d9b7a417147036e7e9491",
-      "packagedPath": "resources/models/rtmpose-m.onnx"
-    },
-    {
       "id": "nlf-l-crop-fp16",
-      "source": "isarandi/nlf (github releases) — NLF-L crop model, fp16-converted export",
-      "bytes": 244721785,
-      "sha256": "801d6217f63a16eda4869b8b42d5bb70617e1d35cee2a8b2dfd9959decd350e7",
+      "source": "isarandi/nlf (github releases) — NLF-L crop model, fp16-converted export; v2 export adds backbone_feats output",
+      "bytes": 244722283,
+      "sha256": "33bd300cd5a65681a5d671debd82a63f842c7420443cd9bb7424ca7aef82cca8",
       "packagedPath": "resources/models/nlf_l_crop_fp16.onnx"
     }
   ]

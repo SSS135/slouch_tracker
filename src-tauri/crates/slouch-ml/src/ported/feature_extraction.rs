@@ -192,7 +192,10 @@ where
             | FeatureId::GauFeaturesMax
             | FeatureId::GauFeaturesStd
             | FeatureId::RtmDetExtracted
-            | FeatureId::NlfDepth => Ok(container.features().get(&feature_id).cloned()),
+            | FeatureId::NlfDepth
+            | FeatureId::NlfBackbone
+            | FeatureId::NlfBackboneMax
+            | FeatureId::NlfBackboneStd => Ok(container.features().get(&feature_id).cloned()),
             FeatureId::RtmDetEngineered => extract_rtm_det_engineered_features(
                 Some(container.keypoints()),
                 Some(container.bbox().original_bbox()),

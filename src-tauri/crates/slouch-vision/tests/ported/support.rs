@@ -8,6 +8,7 @@ use slouch_domain::ported::messages::schemas::{
     SerializedClassifier, SerializedClassifierState, SerializedFeatureExtractor,
     SerializedGaussianNb, SerializedModel,
 };
+use slouch_ml::ported::constants::{NLF_BACKBONE_SHAPE, NLF_COCO17_CANONICAL};
 use slouch_vision::ported::inference_worker::{
     ClassificationInput, ClassifierModel, InferenceRuntime, InferenceSession, ModelFactory,
     SessionOptions, SessionOutput, SessionOutputMap, WorkerError, WorkerLogger,
@@ -203,7 +204,7 @@ impl WorkerLogger for TestLogger {
 pub fn model(probability: f64) -> SerializedModel {
     SerializedModel {
         feature_extractor: SerializedFeatureExtractor {
-            feature_types: vec!["gau_features".into()],
+            feature_types: vec!["nlf_depth".into()],
             normalization_mode: NormalizationMode::None,
             dim_reduction_config: DimensionalityReductionConfig {
                 method: DimensionalityReductionMethod::None,
@@ -251,23 +252,55 @@ pub fn detector_outputs(dets: Vec<f32>, labels: Vec<i64>, feature_value: f32) ->
     ])
 }
 
-pub fn pose_outputs() -> SessionOutputMap {
-    let mut x = vec![0.0; 17 * 384];
-    let mut y = vec![0.0; 17 * 512];
-    for keypoint in 0..17 {
-        x[keypoint * 384 + 100 + keypoint] = 0.8;
-        y[keypoint * 512 + 120 + keypoint] = 0.6;
+/// Synthetic NLF-L outputs for a plausible upright seated pose. `coords3d_rel`
+/// carries the coco_19 posture joints (box/root-relative metres) so the depth
+/// extractor yields a valid non-degenerate 14-dim feature; `coords2d` carries
+/// crop-pixel positions for the 17 COCO joints so keypoint assembly yields 17
+/// finite keypoints; upper-body uncertainty is low, lower-body higher.
+/// `backbone_feats` is a full `[1,512,12,12]` (73728-element) finite tensor so
+/// the three pooled backbone features are produced on the person-found path.
+pub fn nlf_outputs() -> SessionOutputMap {
+    const NUM_CANONICAL: usize = 867;
+
+    let mut coords3d = vec![0.0_f32; NUM_CANONICAL * 3];
+    let mut set3d = |joint: usize, x: f32, y: f32, z: f32| {
+        coords3d[joint * 3] = x;
+        coords3d[joint * 3 + 1] = y;
+        coords3d[joint * 3 + 2] = z;
+    };
+    set3d(75, 0.00, 0.60, 1.22); // neck
+    set3d(76, 0.00, 0.68, 1.15); // nose
+    set3d(77, -0.20, 0.50, 1.24); // lsho
+    set3d(83, 0.20, 0.50, 1.24); // rsho
+    set3d(80, -0.15, 0.00, 1.30); // lhip
+    set3d(86, 0.15, 0.00, 1.30); // rhip
+    set3d(90, -0.07, 0.72, 1.20); // lear
+    set3d(92, 0.07, 0.72, 1.20); // rear
+    set3d(89, -0.035, 0.74, 1.17); // leye
+    set3d(91, 0.035, 0.74, 1.17); // reye
+    set3d(93, 0.00, 0.00, 1.30); // pelvis
+    set3d(81, -0.16, -0.45, 1.10); // lkne
+    set3d(82, -0.16, -0.85, 1.05); // lank
+    set3d(87, 0.16, -0.45, 1.10); // rkne
+    set3d(88, 0.16, -0.85, 1.05); // rank
+
+    let mut coords2d = vec![0.0_f32; NUM_CANONICAL * 2];
+    for (order, &joint) in NLF_COCO17_CANONICAL.iter().enumerate() {
+        coords2d[joint * 2] = 160.0 + order as f32;
+        coords2d[joint * 2 + 1] = 190.0 + order as f32;
     }
+
+    let mut uncertainty = vec![0.03_f32; NUM_CANONICAL];
+    for joint in [81, 82, 87, 88] {
+        uncertainty[joint] = 0.10;
+    }
+
+    let backbone_feats = vec![0.25_f32; NLF_BACKBONE_SHAPE.iter().product::<usize>()];
+
     HashMap::from([
-        ("simcc_x".into(), SessionOutput::F32(x)),
-        ("simcc_y".into(), SessionOutput::F32(y)),
-        (
-            "backbone_features".into(),
-            SessionOutput::F32(vec![0.25; 768 * 8 * 6]),
-        ),
-        (
-            "gau_features".into(),
-            SessionOutput::F32(vec![0.5; 17 * 256]),
-        ),
+        ("coords2d".into(), SessionOutput::F32(coords2d)),
+        ("coords3d_rel".into(), SessionOutput::F32(coords3d)),
+        ("uncertainty".into(), SessionOutput::F32(uncertainty)),
+        ("backbone_feats".into(), SessionOutput::F32(backbone_feats)),
     ])
 }

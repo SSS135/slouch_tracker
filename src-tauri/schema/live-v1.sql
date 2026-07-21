@@ -1,5 +1,5 @@
 PRAGMA application_id = 1397506888; -- SLCH
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 
 CREATE TABLE app_meta (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),

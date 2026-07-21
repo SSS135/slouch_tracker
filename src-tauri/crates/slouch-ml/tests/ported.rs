@@ -38,8 +38,6 @@ mod random_projection;
 mod rtmdet_engineered_features;
 #[path = "ported/rtmdet_features_test.rs"]
 mod rtmdet_features;
-#[path = "ported/rtmpose_features_test.rs"]
-mod rtmpose_features;
 #[path = "ported/sgd_test.rs"]
 mod sgd;
 #[path = "ported/training_worker_test.rs"]

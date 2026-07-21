@@ -15,7 +15,7 @@ use slouch_domain::FeatureId;
 use slouch_vision::ported::inference_worker::{InferenceWorker, WorkerResponse};
 
 use super::support::{
-    detector_outputs, image, pose_outputs, CreateOutcome, TestFactory, TestLogger, TestRuntime,
+    detector_outputs, image, nlf_outputs, CreateOutcome, TestFactory, TestLogger, TestRuntime,
 };
 
 #[test]
@@ -26,20 +26,19 @@ fn production_result_owns_all_native_feature_buffers_after_worker_drop() {
             vec![0],
             0.25,
         ))])),
-        CreateOutcome::Session(VecDeque::from([Ok(pose_outputs())])),
+        CreateOutcome::Session(VecDeque::from([Ok(nlf_outputs())])),
     ]);
     let mut worker =
         InferenceWorker::with_runtime(TestFactory::default(), TestLogger::default(), runtime);
     worker.handle_message(InferenceWorkerMessage::Initialize {
         payload: InitializePayload {
             rtmdet_path: "det".into(),
-            rtmw3d_path: "pose".into(),
-            nlf_path: None,
+            nlf_path: "nlf".into(),
         },
     });
     let response = worker.handle_message(InferenceWorkerMessage::Process {
         payload: ProcessPayload {
-            image_data: image(4, 4),
+            image_data: image(640, 480),
             request_id: 1,
         },
     });
@@ -48,17 +47,15 @@ fn production_result_owns_all_native_feature_buffers_after_worker_drop() {
     let [WorkerResponse::Result { result, .. }] = &response[..] else {
         panic!("expected result")
     };
-    assert_eq!(result.features.len(), 7);
+    assert_eq!(result.features.len(), 5);
     let dimensions = result
         .features
         .iter()
         .map(|(kind, values)| (*kind, values.len()))
         .collect::<std::collections::HashMap<_, _>>();
-    assert_eq!(dimensions[&FeatureId::BackboneFeatures], 768);
-    assert_eq!(dimensions[&FeatureId::BackboneFeaturesMax], 768);
-    assert_eq!(dimensions[&FeatureId::BackboneFeaturesStd], 768);
-    assert_eq!(dimensions[&FeatureId::GauFeatures], 256);
-    assert_eq!(dimensions[&FeatureId::GauFeaturesMax], 256);
-    assert_eq!(dimensions[&FeatureId::GauFeaturesStd], 256);
     assert_eq!(dimensions[&FeatureId::RtmDetExtracted], 384);
+    assert_eq!(dimensions[&FeatureId::NlfDepth], 14);
+    assert_eq!(dimensions[&FeatureId::NlfBackbone], 512);
+    assert_eq!(dimensions[&FeatureId::NlfBackboneMax], 512);
+    assert_eq!(dimensions[&FeatureId::NlfBackboneStd], 512);
 }

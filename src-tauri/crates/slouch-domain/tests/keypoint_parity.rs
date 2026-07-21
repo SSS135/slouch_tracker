@@ -96,7 +96,7 @@ fn serde_shape_is_exactly_x_y_score() {
 
 #[test]
 fn validation_is_separate_from_keypoint_construction() {
-    // Construction stores any score verbatim; a SimCC activation mean can exceed 1.
+    // Construction stores any score verbatim; NLF scores are calibrated to [0, 1] but never range-enforced.
     let point = Keypoint::new(1.0, 2.0, 1.5);
     assert_eq!(point.score, 1.5);
     let mut frame = PostureFrame {

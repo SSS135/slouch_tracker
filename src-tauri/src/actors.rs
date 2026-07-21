@@ -429,35 +429,29 @@ fn inference_loop(receiver: Receiver<InferenceCommand>, storage: Arc<DatasetStor
     }
 }
 
-fn reservoir_sample_from_inference(result: &NativeInferenceResult) -> Option<ReservoirSample> {
+pub(crate) fn reservoir_sample_from_inference(
+    result: &NativeInferenceResult,
+) -> Option<ReservoirSample> {
     if !result.person_found {
         return None;
     }
-    let features = &result.features;
+    let keypoints = result.keypoints.clone()?;
+    let bbox = result.bbox.as_ref()?.original;
+    // Persist every stored feature the inference produced; computed features are
+    // rederived from keypoints/bbox at training time, so they never enter the reservoir.
+    let features: slouch_domain::FeatureMap = result
+        .features
+        .iter()
+        .filter(|&(id, _)| !id.metadata().computed)
+        .map(|(id, values)| (*id, values.clone()))
+        .collect();
+    if features.is_empty() {
+        return None;
+    }
     Some(ReservoirSample {
-        backbone_avg: features
-            .get(&slouch_domain::FeatureId::BackboneFeatures)?
-            .clone(),
-        backbone_max: features
-            .get(&slouch_domain::FeatureId::BackboneFeaturesMax)?
-            .clone(),
-        backbone_std: features
-            .get(&slouch_domain::FeatureId::BackboneFeaturesStd)?
-            .clone(),
-        gau_avg: features
-            .get(&slouch_domain::FeatureId::GauFeatures)?
-            .clone(),
-        gau_max: features
-            .get(&slouch_domain::FeatureId::GauFeaturesMax)?
-            .clone(),
-        gau_std: features
-            .get(&slouch_domain::FeatureId::GauFeaturesStd)?
-            .clone(),
-        rtmdet: features
-            .get(&slouch_domain::FeatureId::RtmDetExtracted)?
-            .clone(),
-        keypoints: result.keypoints.clone()?,
-        bbox: result.bbox.as_ref()?.original,
+        features,
+        keypoints,
+        bbox,
     })
 }
 
@@ -966,9 +960,7 @@ fn training_loop(receiver: Receiver<TrainingCommand>, storage: Arc<DatasetStorag
                     .name("slouch-training-job".to_owned())
                     .spawn(move || {
                         let worker = TrainingWorker::with_logger(
-                            NativeTrainingStorage {
-                                storage: child_storage,
-                            },
+                            NativeTrainingStorage::new(child_storage),
                             NativeTrainingBackend::new(child_cancel),
                             TrainingNoopLogger,
                         );
@@ -1031,8 +1023,14 @@ fn finish_training(
 }
 
 #[derive(Clone)]
-struct NativeTrainingStorage {
+pub(crate) struct NativeTrainingStorage {
     storage: Arc<DatasetStorage>,
+}
+
+impl NativeTrainingStorage {
+    pub(crate) fn new(storage: Arc<DatasetStorage>) -> Self {
+        Self { storage }
+    }
 }
 
 impl TrainingStorage for NativeTrainingStorage {
@@ -1054,13 +1052,7 @@ impl TrainingStorage for NativeTrainingStorage {
                 samples
                     .into_iter()
                     .map(|sample| TrainingReservoirSample {
-                        backbone_avg: sample.backbone_avg,
-                        backbone_max: sample.backbone_max,
-                        backbone_std: sample.backbone_std,
-                        gau_avg: sample.gau_avg,
-                        gau_max: sample.gau_max,
-                        gau_std: sample.gau_std,
-                        rtmdet: sample.rtmdet,
+                        features: sample.features,
                         keypoints: sample.keypoints,
                         bbox: sample.bbox,
                     })
@@ -1253,16 +1245,11 @@ pub fn raw_inference_message(image: ImageData, request_id: u64) -> InferenceWork
     }
 }
 
-pub fn initialize_message(
-    rtmdet_path: PathBuf,
-    rtmpose_path: PathBuf,
-    nlf_path: Option<PathBuf>,
-) -> InferenceWorkerMessage {
+pub fn initialize_message(rtmdet_path: PathBuf, nlf_path: PathBuf) -> InferenceWorkerMessage {
     InferenceWorkerMessage::Initialize {
         payload: slouch_domain::ported::messages::schemas::InitializePayload {
             rtmdet_path: rtmdet_path.to_string_lossy().into_owned(),
-            rtmw3d_path: rtmpose_path.to_string_lossy().into_owned(),
-            nlf_path: nlf_path.map(|path| path.to_string_lossy().into_owned()),
+            nlf_path: nlf_path.to_string_lossy().into_owned(),
         },
     }
 }
@@ -2791,8 +2778,7 @@ mod tests {
         inference
             .send(initialize_message(
                 manifest.join("resources/models/rtmdet-nano.onnx"),
-                manifest.join("resources/models/rtmpose-m.onnx"),
-                None,
+                manifest.join("resources/models/nlf_l_crop_fp16.onnx"),
             ))
             .expect("initialize native inference models");
 

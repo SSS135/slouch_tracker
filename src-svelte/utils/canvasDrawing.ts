@@ -1,8 +1,8 @@
 /**
- * Canvas drawing utilities for pose visualization - RTMPose-S
- * Pure functions with no dependencies on React or component state
+ * Canvas drawing utilities for pose visualization - NLF-L
+ * Pure functions with no dependencies on component state
  *
- * RTMPose-S provides 17 COCO body keypoints only (no face/hand keypoints).
+ * NLF-L supplies 17 COCO body keypoints only (no face/hand keypoints).
  */
 
 import {

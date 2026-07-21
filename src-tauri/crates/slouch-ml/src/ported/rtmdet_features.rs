@@ -1,9 +1,7 @@
 use std::fmt;
 
 use super::constants::{RTMDET_EXTRACTED_DIMS, RTMDET_SHAPE};
-use super::rtmpose_features::{
-    pool_features_max, pool_features_mean, pool_features_std, PoolingError,
-};
+use super::pooling::{pool_features_max, pool_features_mean, pool_features_std, PoolingError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RtmDetFeaturesError {

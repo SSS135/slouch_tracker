@@ -300,9 +300,9 @@ pub fn export_unlabeled_data_from(reservoir: &FeatureReservoir) -> Result<Vec<u8
             .collect(),
         shapes: shapes(
             frame_count,
-            first.backbone_avg.len(),
-            first.gau_avg.len(),
-            first.rtmdet.len(),
+            backbone_avg(first).len(),
+            gau_avg(first).len(),
+            rtmdet(first).len(),
         ),
         reservoir: Some(MessagePackReservoir {
             count: metadata.count,
@@ -516,32 +516,44 @@ fn flatten_unlabeled_feature(
         .collect()
 }
 
+// The MessagePackReservoir wire schema is frozen with the retired RTMPose slot
+// names. A sample carries only the stored features present when it was captured,
+// so an NLF-era sample (no backbone_features/gau_features) yields empty arrays
+// for those retired slots rather than the old fixed-length vectors.
+fn reservoir_feature(sample: &ReservoirSample, feature: FeatureId) -> &[f32] {
+    sample
+        .features
+        .get(&feature)
+        .map(Vec::as_slice)
+        .unwrap_or(&[])
+}
+
 fn backbone_avg(sample: &ReservoirSample) -> &[f32] {
-    &sample.backbone_avg
+    reservoir_feature(sample, FeatureId::BackboneFeatures)
 }
 
 fn backbone_max(sample: &ReservoirSample) -> &[f32] {
-    &sample.backbone_max
+    reservoir_feature(sample, FeatureId::BackboneFeaturesMax)
 }
 
 fn backbone_std(sample: &ReservoirSample) -> &[f32] {
-    &sample.backbone_std
+    reservoir_feature(sample, FeatureId::BackboneFeaturesStd)
 }
 
 fn gau_avg(sample: &ReservoirSample) -> &[f32] {
-    &sample.gau_avg
+    reservoir_feature(sample, FeatureId::GauFeatures)
 }
 
 fn gau_max(sample: &ReservoirSample) -> &[f32] {
-    &sample.gau_max
+    reservoir_feature(sample, FeatureId::GauFeaturesMax)
 }
 
 fn gau_std(sample: &ReservoirSample) -> &[f32] {
-    &sample.gau_std
+    reservoir_feature(sample, FeatureId::GauFeaturesStd)
 }
 
 fn rtmdet(sample: &ReservoirSample) -> &[f32] {
-    &sample.rtmdet
+    reservoir_feature(sample, FeatureId::RtmDetExtracted)
 }
 
 fn bbox_values(bbox: &slouch_domain::BoundingBox) -> [f64; EXPECTED_BBOX_VALUES] {

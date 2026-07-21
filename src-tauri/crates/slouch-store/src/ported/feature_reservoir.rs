@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use serde::{Deserialize, Serialize};
-use slouch_domain::{BoundingBox, FeatureId, Keypoint};
+use slouch_domain::{BoundingBox, FeatureMap, Keypoint};
 
 const MAX_SAMPLES: usize = 1_000;
 const MAX_NATIVE_SAMPLES: usize = 1_000_000;
@@ -31,15 +31,14 @@ CREATE TABLE IF NOT EXISTS feature_reservoir_samples (
 );
 ";
 
+/// A retained inference sample. `features` holds the stored (GPU-produced,
+/// persisted) feature vectors of one frame keyed by their registry id, so new
+/// stored features flow through the reservoir with no shape change. The twin
+/// `slouch_ml::ported::training_worker::ReservoirSample` is byte-identical under
+/// `rmp_serde::to_vec_named` (fields `features`/`keypoints`/`bbox`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReservoirSample {
-    pub backbone_avg: Vec<f32>,
-    pub backbone_max: Vec<f32>,
-    pub backbone_std: Vec<f32>,
-    pub gau_avg: Vec<f32>,
-    pub gau_max: Vec<f32>,
-    pub gau_std: Vec<f32>,
-    pub rtmdet: Vec<f32>,
+    pub features: FeatureMap,
     pub keypoints: Vec<Keypoint>,
     pub bbox: BoundingBox,
 }
@@ -288,22 +287,24 @@ pub fn feature_reservoir() -> &'static FeatureReservoir {
 }
 
 fn validate_sample(sample: &ReservoirSample) -> Result<(), ReservoirError> {
-    for (feature, values) in [
-        (FeatureId::BackboneFeatures, &sample.backbone_avg),
-        (FeatureId::BackboneFeaturesMax, &sample.backbone_max),
-        (FeatureId::BackboneFeaturesStd, &sample.backbone_std),
-        (FeatureId::GauFeatures, &sample.gau_avg),
-        (FeatureId::GauFeaturesMax, &sample.gau_max),
-        (FeatureId::GauFeaturesStd, &sample.gau_std),
-        (FeatureId::RtmDetExtracted, &sample.rtmdet),
-    ] {
-        if values.len() != feature.metadata().dimensions
-            || values.iter().any(|value| !value.is_finite())
-        {
+    if sample.features.is_empty() {
+        return Err(ReservoirError::Validation(
+            "reservoir sample must contain at least one stored feature".to_owned(),
+        ));
+    }
+    for (id, values) in &sample.features {
+        let metadata = id.metadata();
+        if metadata.computed {
+            return Err(ReservoirError::Validation(format!(
+                "reservoir feature {} is computed and cannot be stored",
+                id.as_str()
+            )));
+        }
+        if values.len() != metadata.dimensions || values.iter().any(|value| !value.is_finite()) {
             return Err(ReservoirError::Validation(format!(
                 "{} feature must contain {} finite values",
-                feature.as_str(),
-                feature.metadata().dimensions
+                id.as_str(),
+                metadata.dimensions
             )));
         }
     }

@@ -152,8 +152,9 @@ fn validate_keypoints(keypoints: &[crate::Keypoint], issues: &mut Vec<Validation
     }
 
     for (index, keypoint) in keypoints.iter().enumerate() {
-        // Keypoint scores are SimCC activation means, not probabilities, so they
-        // legitimately exceed 1 on real frames. Only finiteness is required.
+        // Keypoint scores are NLF uncertainty calibrated into [0, 1]. Only
+        // finiteness is enforced here so the contract stays independent of the
+        // score's numeric range.
         for (field, value) in [
             ("x", keypoint.x),
             ("y", keypoint.y),

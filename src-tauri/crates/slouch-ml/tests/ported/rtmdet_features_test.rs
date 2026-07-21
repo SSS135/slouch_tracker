@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use slouch_ml::ported::{
     constants::{EPSILON_STABLE, RTMDET_EXTRACTED_DIMS, RTMDET_RAW_DIMS, RTMDET_SHAPE},
+    pooling::PoolingError,
     rtmdet_features::{extract_rtm_det_features, RtmDetFeaturesError},
-    rtmpose_features::PoolingError,
 };
 
 fn assert_close(actual: f32, expected: f32) {

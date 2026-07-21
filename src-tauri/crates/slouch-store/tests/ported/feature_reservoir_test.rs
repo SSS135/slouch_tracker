@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use slouch_domain::{BoundingBox, FeatureId, Keypoint};
+use slouch_domain::{BoundingBox, FeatureId, FeatureMap, Keypoint};
 use slouch_store::ported::feature_reservoir::{FeatureReservoir, ReservoirSample};
 
 static NEXT_DATABASE_ID: AtomicUsize = AtomicUsize::new(0);
@@ -30,22 +30,39 @@ fn create_mock_sample(id: usize) -> ReservoirSample {
         .collect();
 
     ReservoirSample {
-        backbone_avg: vec![
-            0.1 + id as f32 * 0.01;
-            FeatureId::BackboneFeatures.metadata().dimensions
-        ],
-        backbone_max: vec![
-            0.2 + id as f32 * 0.01;
-            FeatureId::BackboneFeaturesMax.metadata().dimensions
-        ],
-        backbone_std: vec![
-            0.05 + id as f32 * 0.001;
-            FeatureId::BackboneFeaturesStd.metadata().dimensions
-        ],
-        gau_avg: vec![0.3 + id as f32 * 0.01; FeatureId::GauFeatures.metadata().dimensions],
-        gau_max: vec![0.4 + id as f32 * 0.01; FeatureId::GauFeaturesMax.metadata().dimensions],
-        gau_std: vec![0.08 + id as f32 * 0.001; FeatureId::GauFeaturesStd.metadata().dimensions],
-        rtmdet: vec![0.5 + id as f32 * 0.01; FeatureId::RtmDetExtracted.metadata().dimensions],
+        features: FeatureMap::from([
+            (
+                FeatureId::BackboneFeatures,
+                vec![0.1 + id as f32 * 0.01; FeatureId::BackboneFeatures.metadata().dimensions],
+            ),
+            (
+                FeatureId::BackboneFeaturesMax,
+                vec![0.2 + id as f32 * 0.01; FeatureId::BackboneFeaturesMax.metadata().dimensions],
+            ),
+            (
+                FeatureId::BackboneFeaturesStd,
+                vec![
+                    0.05 + id as f32 * 0.001;
+                    FeatureId::BackboneFeaturesStd.metadata().dimensions
+                ],
+            ),
+            (
+                FeatureId::GauFeatures,
+                vec![0.3 + id as f32 * 0.01; FeatureId::GauFeatures.metadata().dimensions],
+            ),
+            (
+                FeatureId::GauFeaturesMax,
+                vec![0.4 + id as f32 * 0.01; FeatureId::GauFeaturesMax.metadata().dimensions],
+            ),
+            (
+                FeatureId::GauFeaturesStd,
+                vec![0.08 + id as f32 * 0.001; FeatureId::GauFeaturesStd.metadata().dimensions],
+            ),
+            (
+                FeatureId::RtmDetExtracted,
+                vec![0.5 + id as f32 * 0.01; FeatureId::RtmDetExtracted.metadata().dimensions],
+            ),
+        ]),
         keypoints,
         bbox: BoundingBox {
             x1: (100 + id) as f64,
@@ -154,23 +171,31 @@ fn get_all_samples_returns_samples_with_correct_data() {
     assert_eq!(samples.len(), 2);
 
     assert_eq!(
-        samples[0].backbone_avg.len(),
+        samples[0].features[&FeatureId::BackboneFeatures].len(),
         FeatureId::BackboneFeatures.metadata().dimensions
     );
-    assert_close(samples[0].backbone_avg[0], 0.1, 1e-6);
+    assert_close(
+        samples[0].features[&FeatureId::BackboneFeatures][0],
+        0.1,
+        1e-6,
+    );
     assert_eq!(
-        samples[0].gau_avg.len(),
+        samples[0].features[&FeatureId::GauFeatures].len(),
         FeatureId::GauFeatures.metadata().dimensions
     );
-    assert_close(samples[0].gau_avg[0], 0.3, 1e-6);
+    assert_close(samples[0].features[&FeatureId::GauFeatures][0], 0.3, 1e-6);
     assert_eq!(
-        samples[0].rtmdet.len(),
+        samples[0].features[&FeatureId::RtmDetExtracted].len(),
         FeatureId::RtmDetExtracted.metadata().dimensions
     );
     assert_eq!(samples[0].keypoints.len(), 17);
     assert_eq!(samples[0].bbox.x1, 100.0);
 
-    assert_close(samples[1].backbone_avg[0], 0.11, 1e-6);
+    assert_close(
+        samples[1].features[&FeatureId::BackboneFeatures][0],
+        0.11,
+        1e-6,
+    );
     assert_eq!(samples[1].bbox.x1, 101.0);
 
     reservoir.clear().unwrap();
@@ -184,34 +209,22 @@ fn get_all_samples_preserves_native_feature_vectors() {
 
     let samples = reservoir.get_all_samples().unwrap();
     assert_eq!(samples.len(), 1);
-    assert_eq!(
-        samples[0].backbone_avg.len(),
-        FeatureId::BackboneFeatures.metadata().dimensions
-    );
-    assert_eq!(
-        samples[0].backbone_max.len(),
-        FeatureId::BackboneFeaturesMax.metadata().dimensions
-    );
-    assert_eq!(
-        samples[0].backbone_std.len(),
-        FeatureId::BackboneFeaturesStd.metadata().dimensions
-    );
-    assert_eq!(
-        samples[0].gau_avg.len(),
-        FeatureId::GauFeatures.metadata().dimensions
-    );
-    assert_eq!(
-        samples[0].gau_max.len(),
-        FeatureId::GauFeaturesMax.metadata().dimensions
-    );
-    assert_eq!(
-        samples[0].gau_std.len(),
-        FeatureId::GauFeaturesStd.metadata().dimensions
-    );
-    assert_eq!(
-        samples[0].rtmdet.len(),
-        FeatureId::RtmDetExtracted.metadata().dimensions
-    );
+    for id in [
+        FeatureId::BackboneFeatures,
+        FeatureId::BackboneFeaturesMax,
+        FeatureId::BackboneFeaturesStd,
+        FeatureId::GauFeatures,
+        FeatureId::GauFeaturesMax,
+        FeatureId::GauFeaturesStd,
+        FeatureId::RtmDetExtracted,
+    ] {
+        assert_eq!(
+            samples[0].features[&id].len(),
+            id.metadata().dimensions,
+            "{}",
+            id.as_str()
+        );
+    }
 
     reservoir.clear().unwrap();
 }
@@ -344,12 +357,15 @@ fn reservoir_sampling_represents_each_generation() {
 
         for id in 0..total_elements {
             let mut sample = create_mock_sample(id);
-            sample.backbone_avg[0] = id as f32;
+            sample
+                .features
+                .get_mut(&FeatureId::BackboneFeatures)
+                .unwrap()[0] = id as f32;
             reservoir.add(sample).unwrap();
         }
 
         for sample in reservoir.get_all_samples().unwrap() {
-            let id = sample.backbone_avg[0];
+            let id = sample.features[&FeatureId::BackboneFeatures][0];
             if id < 100.0 {
                 early += 1;
             } else if id < 500.0 {
@@ -403,13 +419,27 @@ fn feature_values_preserve_float_precision() {
     let database_name = unique_database_name("precision");
     let reservoir = FeatureReservoir::new(10, &database_name);
     let mut sample = create_mock_sample(0);
-    sample.backbone_avg[0] = 0.123_456_79;
-    sample.backbone_avg[767] = -0.987_654_3;
+    {
+        let backbone = sample
+            .features
+            .get_mut(&FeatureId::BackboneFeatures)
+            .unwrap();
+        backbone[0] = 0.123_456_79;
+        backbone[767] = -0.987_654_3;
+    }
     reservoir.add(sample).unwrap();
 
     let samples = reservoir.get_all_samples().unwrap();
-    assert_close(samples[0].backbone_avg[0], 0.123_456_79, 1e-6);
-    assert_close(samples[0].backbone_avg[767], -0.987_654_3, 1e-6);
+    assert_close(
+        samples[0].features[&FeatureId::BackboneFeatures][0],
+        0.123_456_79,
+        1e-6,
+    );
+    assert_close(
+        samples[0].features[&FeatureId::BackboneFeatures][767],
+        -0.987_654_3,
+        1e-6,
+    );
 
     reservoir.clear().unwrap();
 }
@@ -450,14 +480,29 @@ fn malformed_samples_and_capacities_are_rejected_without_mutation() {
 
     let mut invalid_cases = Vec::new();
     let mut stale_gau = create_mock_sample(0);
-    stale_gau.gau_avg = vec![0.0; 384];
+    stale_gau
+        .features
+        .insert(FeatureId::GauFeatures, vec![0.0; 384]);
     invalid_cases.push(stale_gau);
     let mut stale_rtmdet = create_mock_sample(0);
-    stale_rtmdet.rtmdet = vec![0.0; 768];
+    stale_rtmdet
+        .features
+        .insert(FeatureId::RtmDetExtracted, vec![0.0; 768]);
     invalid_cases.push(stale_rtmdet);
     let mut non_finite = create_mock_sample(0);
-    non_finite.backbone_avg[0] = f32::NAN;
+    non_finite
+        .features
+        .get_mut(&FeatureId::BackboneFeatures)
+        .unwrap()[0] = f32::NAN;
     invalid_cases.push(non_finite);
+    let mut empty_features = create_mock_sample(0);
+    empty_features.features.clear();
+    invalid_cases.push(empty_features);
+    let mut computed_feature = create_mock_sample(0);
+    computed_feature
+        .features
+        .insert(FeatureId::EngineeredFeatures, vec![0.0; 54]);
+    invalid_cases.push(computed_feature);
     let mut wrong_keypoints = create_mock_sample(0);
     wrong_keypoints.keypoints.pop();
     invalid_cases.push(wrong_keypoints);

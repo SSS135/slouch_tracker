@@ -26,7 +26,7 @@ const feature = {
 } as const;
 
 // A realistic registry in registry order that contains the default posture/presence feature ids, so
-// canonicalization at the persistence boundary preserves them (the real registry always ships all 17
+// canonicalization at the persistence boundary preserves them (the real registry always ships all 21
 // features; a single-feature stub would drop the defaults as unknown ids).
 const featureRegistry = [
   { ...feature, id: 'backbone_features_max', name: 'Backbone Max' },
@@ -34,6 +34,7 @@ const featureRegistry = [
   { ...feature, id: 'rtmdet_engineered', name: 'Detection', modelType: 'presence' },
   feature,
   { ...feature, id: 'keypoint_scores', name: 'Keypoint Scores', modelType: null },
+  { ...feature, id: 'nlf_backbone_max', name: 'NLF Backbone Max', modelType: 'posture' },
 ];
 
 const mlp = {
@@ -83,7 +84,7 @@ describe('TrainingConfigContext native integration', () => {
     expect(value?.config).toMatchObject({
       classifierConfig: { classifierId: 'mlp' },
       dimReductionConfig: { method: 'pca', components: 30 },
-      postureFeatureTypes: ['backbone_features_max', 'gau_features_max'],
+      postureFeatureTypes: ['nlf_backbone_max'],
       presenceFeatureTypes: ['rtmdet_engineered', 'keypoint_scores'],
       normalizationMode: 'z_score',
       cvFolds: 5,
@@ -108,7 +109,7 @@ describe('TrainingConfigContext native integration', () => {
         },
       },
       dimReductionConfig: { method: 'pca', components: 30 },
-      postureFeatureTypes: ['backbone_features_max', 'gau_features_max'],
+      postureFeatureTypes: ['nlf_backbone_max'],
       presenceFeatureTypes: ['rtmdet_engineered', 'keypoint_scores'],
       normalizationMode: 'z_score',
       cvFolds: 7,

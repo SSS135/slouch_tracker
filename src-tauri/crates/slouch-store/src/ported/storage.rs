@@ -201,7 +201,7 @@ impl DatasetStorage {
                 "database application_id does not belong to Slouch Tracker".into(),
             ));
         }
-        if version > 1 {
+        if version > 2 {
             return Err(StorageError::InvalidData(format!(
                 "database schema version {version} is newer than this application"
             )));
@@ -210,10 +210,11 @@ impl DatasetStorage {
             let transaction =
                 connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
             transaction.execute_batch(SCHEMA)?;
-            transaction.execute_batch("PRAGMA user_version = 1;")?;
+            transaction.execute_batch("PRAGMA user_version = 2;")?;
             transaction.commit()?;
         }
         ensure_bbox_score_column(&connection)?;
+        migrate_reservoir_format_v2(&mut connection, version)?;
         Ok(Self {
             connection: Mutex::new(connection),
         })
@@ -1386,6 +1387,28 @@ fn ensure_bbox_score_column(connection: &Connection) -> Result<(), StorageError>
     Ok(())
 }
 
+/// The NLF-EMBED format break. Reservoir payloads written under schema version 1
+/// use the retired fixed-field `ReservoirSample` shape and cannot be decoded into
+/// the generic `{features, keypoints, bbox}` sample, so a one-time open of a v1
+/// database drops every reservoir row and stamps `user_version = 2`. Only the
+/// reservoir is affected: frames, keypoints, features, thumbnails, settings, and
+/// models are untouched. Idempotent for versions 0 (fresh, already stamped 2) and
+/// 2 (already migrated).
+fn migrate_reservoir_format_v2(
+    connection: &mut Connection,
+    version: i64,
+) -> Result<(), StorageError> {
+    if version != 1 {
+        return Ok(());
+    }
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    transaction.execute("DELETE FROM reservoir_samples", [])?;
+    transaction.execute("DELETE FROM reservoir_state", [])?;
+    transaction.execute_batch("PRAGMA user_version = 2;")?;
+    transaction.commit()?;
+    Ok(())
+}
+
 fn verify_connection_policy(connection: &Connection) -> Result<(), StorageError> {
     let foreign_keys =
         connection.query_row("PRAGMA foreign_keys", [], |row| row.get::<_, i64>(0))?;
@@ -1548,21 +1571,23 @@ pub(crate) fn validate_training_settings_value(
 }
 
 pub(crate) fn validate_reservoir_sample(sample: &ReservoirSample) -> Result<(), StorageError> {
-    for (feature, values) in [
-        (FeatureId::BackboneFeatures, &sample.backbone_avg),
-        (FeatureId::BackboneFeaturesMax, &sample.backbone_max),
-        (FeatureId::BackboneFeaturesStd, &sample.backbone_std),
-        (FeatureId::GauFeatures, &sample.gau_avg),
-        (FeatureId::GauFeaturesMax, &sample.gau_max),
-        (FeatureId::GauFeaturesStd, &sample.gau_std),
-        (FeatureId::RtmDetExtracted, &sample.rtmdet),
-    ] {
-        if values.len() != feature.metadata().dimensions
-            || values.iter().any(|value| !value.is_finite())
-        {
+    if sample.features.is_empty() {
+        return Err(StorageError::Validation(
+            "reservoir sample must contain at least one stored feature".into(),
+        ));
+    }
+    for (id, values) in &sample.features {
+        let metadata = id.metadata();
+        if metadata.computed {
+            return Err(StorageError::Validation(format!(
+                "reservoir feature {} is computed and cannot be stored",
+                id.as_str()
+            )));
+        }
+        if values.len() != metadata.dimensions || values.iter().any(|value| !value.is_finite()) {
             return Err(StorageError::Validation(format!(
                 "reservoir {} feature is invalid",
-                feature.as_str()
+                id.as_str()
             )));
         }
     }

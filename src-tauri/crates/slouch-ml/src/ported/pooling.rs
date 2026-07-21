@@ -1,9 +1,12 @@
+//! Generic spatial pooling over flattened row-major tensors: average, spatial
+//! maximum, and population standard-deviation reductions over an arbitrary set of
+//! axes. This is model-agnostic feature-extraction math — RTMDet extracted features
+//! pool their `cls_p5`/`reg_p5` maps through it, and pooled backbone embedding
+//! features reuse the same reductions.
+
 use std::fmt;
 
-use crate::ported::constants::{
-    EPSILON_STABLE, RTMPOSE_BACKBONE_POOLED_DIMS, RTMPOSE_BACKBONE_RAW_DIMS,
-    RTMPOSE_BACKBONE_SHAPE, RTMPOSE_GAU_POOLED_DIMS, RTMPOSE_GAU_RAW_DIMS, RTMPOSE_GAU_SHAPE,
-};
+use super::constants::EPSILON_STABLE;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PoolingKind {
@@ -86,81 +89,6 @@ impl fmt::Display for PoolingError {
 
 impl std::error::Error for PoolingError {}
 
-/// Extracts the flattened backbone tensor without changing its source order.
-pub fn extract_backbone_raw(values: &[f32]) -> Result<Vec<f32>, PoolingError> {
-    validate_input("backbone", values, RTMPOSE_BACKBONE_RAW_DIMS)?;
-    Ok(values.to_vec())
-}
-
-/// Extracts the flattened GAU tensor without changing its source order.
-pub fn extract_gau_raw(values: &[f32]) -> Result<Vec<f32>, PoolingError> {
-    validate_input("gau", values, RTMPOSE_GAU_RAW_DIMS)?;
-    Ok(values.to_vec())
-}
-
-/// Pools backbone features over height and width.
-pub fn pool_backbone_features(values: &[f32]) -> Result<Vec<f32>, PoolingError> {
-    pool_backbone(
-        values,
-        RTMPOSE_BACKBONE_SHAPE[1],
-        RTMPOSE_BACKBONE_SHAPE[2],
-        RTMPOSE_BACKBONE_SHAPE[3],
-        PoolingKind::Mean,
-    )
-}
-
-/// Pools backbone features with a spatial maximum.
-pub fn pool_backbone_features_max(values: &[f32]) -> Result<Vec<f32>, PoolingError> {
-    pool_backbone(
-        values,
-        RTMPOSE_BACKBONE_SHAPE[1],
-        RTMPOSE_BACKBONE_SHAPE[2],
-        RTMPOSE_BACKBONE_SHAPE[3],
-        PoolingKind::Max,
-    )
-}
-
-/// Pools backbone features with a spatial population standard deviation.
-pub fn pool_backbone_features_std(values: &[f32]) -> Result<Vec<f32>, PoolingError> {
-    pool_backbone(
-        values,
-        RTMPOSE_BACKBONE_SHAPE[1],
-        RTMPOSE_BACKBONE_SHAPE[2],
-        RTMPOSE_BACKBONE_SHAPE[3],
-        PoolingKind::PopulationStd,
-    )
-}
-
-/// Pools GAU features over the keypoint dimension.
-pub fn pool_gau_features(values: &[f32]) -> Result<Vec<f32>, PoolingError> {
-    pool_gau(
-        values,
-        RTMPOSE_GAU_SHAPE[1],
-        RTMPOSE_GAU_SHAPE[2],
-        PoolingKind::Mean,
-    )
-}
-
-/// Pools GAU features with a keypoint maximum.
-pub fn pool_gau_features_max(values: &[f32]) -> Result<Vec<f32>, PoolingError> {
-    pool_gau(
-        values,
-        RTMPOSE_GAU_SHAPE[1],
-        RTMPOSE_GAU_SHAPE[2],
-        PoolingKind::Max,
-    )
-}
-
-/// Pools GAU features with a keypoint population standard deviation.
-pub fn pool_gau_features_std(values: &[f32]) -> Result<Vec<f32>, PoolingError> {
-    pool_gau(
-        values,
-        RTMPOSE_GAU_SHAPE[1],
-        RTMPOSE_GAU_SHAPE[2],
-        PoolingKind::PopulationStd,
-    )
-}
-
 /// Generic mean pooling equivalent to TensorFlow.js `tf.mean` followed by flattening.
 pub fn pool_features_mean(
     raw: &[f32],
@@ -213,59 +141,6 @@ pub fn pool_features(
         output.push(pool_contiguous(&lane, kind));
     }
 
-    Ok(output)
-}
-
-/// Pools an NCHW-style backbone tensor with configurable dimensions.
-pub fn pool_backbone(
-    values: &[f32],
-    channels: usize,
-    height: usize,
-    width: usize,
-    kind: PoolingKind,
-) -> Result<Vec<f32>, PoolingError> {
-    validate_dimension("backbone", "channels", channels)?;
-    validate_dimension("backbone", "height", height)?;
-    validate_dimension("backbone", "width", width)?;
-
-    let spatial = height
-        .checked_mul(width)
-        .ok_or(PoolingError::DimensionOverflow { tensor: "backbone" })?;
-    let expected = channels
-        .checked_mul(spatial)
-        .ok_or(PoolingError::DimensionOverflow { tensor: "backbone" })?;
-    validate_input("backbone", values, expected)?;
-
-    let mut output = Vec::with_capacity(channels);
-    for channel in values.chunks_exact(spatial) {
-        output.push(pool_contiguous(channel, kind));
-    }
-    Ok(output)
-}
-
-/// Pools a keypoint-major GAU tensor with configurable dimensions.
-pub fn pool_gau(
-    values: &[f32],
-    keypoints: usize,
-    features: usize,
-    kind: PoolingKind,
-) -> Result<Vec<f32>, PoolingError> {
-    validate_dimension("gau", "keypoints", keypoints)?;
-    validate_dimension("gau", "features", features)?;
-
-    let expected = keypoints
-        .checked_mul(features)
-        .ok_or(PoolingError::DimensionOverflow { tensor: "gau" })?;
-    validate_input("gau", values, expected)?;
-
-    let mut output = Vec::with_capacity(features);
-    for feature in 0..features {
-        let mut lane = Vec::with_capacity(keypoints);
-        for keypoint in 0..keypoints {
-            lane.push(values[keypoint * features + feature]);
-        }
-        output.push(pool_contiguous(&lane, kind));
-    }
     Ok(output)
 }
 
@@ -371,18 +246,6 @@ fn flat_index(coordinates: &[usize], shape: &[usize]) -> usize {
         })
 }
 
-fn validate_dimension(
-    tensor: &'static str,
-    dimension: &'static str,
-    value: usize,
-) -> Result<(), PoolingError> {
-    if value == 0 {
-        Err(PoolingError::ZeroDimension { tensor, dimension })
-    } else {
-        Ok(())
-    }
-}
-
 fn validate_input(
     tensor: &'static str,
     values: &[f32],
@@ -401,7 +264,127 @@ fn validate_input(
     Ok(())
 }
 
-const _: () = {
-    assert!(RTMPOSE_BACKBONE_POOLED_DIMS == RTMPOSE_BACKBONE_SHAPE[1]);
-    assert!(RTMPOSE_GAU_POOLED_DIMS == RTMPOSE_GAU_SHAPE[2]);
-};
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn close(actual: f32, expected: f32) -> bool {
+        (actual - expected).abs() <= 1e-6 + 1e-6 * expected.abs()
+    }
+
+    #[test]
+    fn mean_pools_each_row_of_a_two_dimensional_tensor() {
+        let raw = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let pooled = pool_features_mean(&raw, &[2, 3], &[1]).unwrap();
+        assert_eq!(pooled.len(), 2);
+        assert!(close(pooled[0], 2.0));
+        assert!(close(pooled[1], 5.0));
+    }
+
+    #[test]
+    fn max_pools_each_row_and_preserves_exact_bits() {
+        let raw = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let pooled = pool_features_max(&raw, &[2, 3], &[1]).unwrap();
+        assert_eq!(pooled[0].to_bits(), 3.0_f32.to_bits());
+        assert_eq!(pooled[1].to_bits(), 6.0_f32.to_bits());
+    }
+
+    #[test]
+    fn population_std_matches_the_manual_reduction() {
+        let raw = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let pooled = pool_features_std(&raw, &[2, 3], &[1]).unwrap();
+        // Population variance of {1,2,3} is 2/3; std = sqrt(2/3 + eps).
+        let expected = ((2.0_f64 / 3.0) + f64::from(EPSILON_STABLE)).sqrt() as f32;
+        assert!(close(pooled[0], expected));
+        assert!(close(pooled[1], expected));
+    }
+
+    #[test]
+    fn constant_input_std_collapses_to_sqrt_epsilon() {
+        let raw = vec![3.7_f32; 12];
+        let pooled = pool_features_std(&raw, &[3, 4], &[1]).unwrap();
+        let expected = EPSILON_STABLE.sqrt();
+        assert!(pooled.iter().all(|value| (*value - expected).abs() < 1e-6));
+    }
+
+    #[test]
+    fn nchw_channel_pooling_reduces_spatial_axes() {
+        // Shape [batch=1, channels=2, h=2, w=2]; pool the spatial axes [2, 3].
+        let raw = [1.0, 2.0, 3.0, 4.0, 10.0, 20.0, 30.0, 40.0];
+        let mean = pool_features_mean(&raw, &[1, 2, 2, 2], &[2, 3]).unwrap();
+        assert_eq!(mean.len(), 2);
+        assert!(close(mean[0], 2.5));
+        assert!(close(mean[1], 25.0));
+        let max = pool_features_max(&raw, &[1, 2, 2, 2], &[2, 3]).unwrap();
+        assert_eq!(max[0].to_bits(), 4.0_f32.to_bits());
+        assert_eq!(max[1].to_bits(), 40.0_f32.to_bits());
+    }
+
+    #[test]
+    fn rejects_length_mismatch() {
+        assert_eq!(
+            pool_features_mean(&[1.0, 2.0], &[2, 3], &[1]),
+            Err(PoolingError::Shape {
+                tensor: "features",
+                expected: 6,
+                actual: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_non_finite_values_at_their_index() {
+        for non_finite in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let raw = [1.0, non_finite, 3.0, 4.0, 5.0, 6.0];
+            assert_eq!(
+                pool_features_mean(&raw, &[2, 3], &[1]),
+                Err(PoolingError::NonFiniteInput {
+                    tensor: "features",
+                    index: 1,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_zero_dimension() {
+        assert_eq!(
+            pool_features_mean(&[], &[2, 0], &[1]),
+            Err(PoolingError::ZeroDimension {
+                tensor: "features",
+                dimension: "shape",
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_out_of_bounds_and_duplicate_axes() {
+        assert_eq!(
+            pool_features_mean(&[1.0, 2.0], &[2], &[1]),
+            Err(PoolingError::AxisOutOfBounds {
+                tensor: "features",
+                axis: 1,
+                rank: 1,
+            })
+        );
+        assert_eq!(
+            pool_features_mean(&[1.0, 2.0, 3.0, 4.0], &[2, 2], &[1, 1]),
+            Err(PoolingError::DuplicateAxis {
+                tensor: "features",
+                axis: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_empty_shape_or_axes() {
+        assert_eq!(
+            pool_features_mean(&[], &[], &[0]),
+            Err(PoolingError::InvalidShape { tensor: "features" })
+        );
+        assert_eq!(
+            pool_features_mean(&[1.0], &[1], &[]),
+            Err(PoolingError::InvalidShape { tensor: "features" })
+        );
+    }
+}

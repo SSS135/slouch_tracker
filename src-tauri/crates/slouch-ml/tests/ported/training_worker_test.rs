@@ -1029,18 +1029,17 @@ fn pca_component_clamp_surfaces_as_a_posture_warning() {
     );
 }
 
-/// A reservoir sample carrying the pooled RTMPose/RTMDet stored features (and keypoints)
-/// but NOT the GPU-only `nlf_depth` stored feature — exactly the shape the PCA guard
-/// must detect and drop.
+/// A reservoir sample carrying the NLF backbone pooled embedding (a stored feature the
+/// reservoir DOES capture) but NOT the GPU-only `nlf_depth` stored feature — exactly the
+/// shape the PCA guard must detect and drop for the absent feature only.
 fn nlf_reservoir_sample() -> ReservoirSample {
+    let mut features = slouch_domain::FeatureMap::new();
+    features.insert(
+        FeatureId::NlfBackboneMax,
+        vec![0.0; FeatureId::NlfBackboneMax.metadata().dimensions],
+    );
     ReservoirSample {
-        backbone_avg: vec![0.0; FeatureId::BackboneFeatures.metadata().dimensions],
-        backbone_max: vec![0.0; FeatureId::BackboneFeaturesMax.metadata().dimensions],
-        backbone_std: vec![0.0; FeatureId::BackboneFeaturesStd.metadata().dimensions],
-        gau_avg: vec![0.0; FeatureId::GauFeatures.metadata().dimensions],
-        gau_max: vec![0.0; FeatureId::GauFeaturesMax.metadata().dimensions],
-        gau_std: vec![0.0; FeatureId::GauFeaturesStd.metadata().dimensions],
-        rtmdet: vec![0.0; FeatureId::RtmDetExtracted.metadata().dimensions],
+        features,
         keypoints: vec![Keypoint::new(0.5, 0.5, 0.5); 17],
         bbox: BoundingBox {
             x1: 0.0,
@@ -1062,8 +1061,8 @@ fn nlf_frame(id: &str, label: FrameLabel) -> PostureFrame {
             vec![0.1; FeatureId::NlfDepth.metadata().dimensions],
         ),
         (
-            FeatureId::BackboneFeatures,
-            vec![0.2; FeatureId::BackboneFeatures.metadata().dimensions],
+            FeatureId::NlfBackboneMax,
+            vec![0.2; FeatureId::NlfBackboneMax.metadata().dimensions],
         ),
     ]);
     posture_frame
@@ -1071,10 +1070,10 @@ fn nlf_frame(id: &str, label: FrameLabel) -> PostureFrame {
 
 #[test]
 fn pca_drops_reservoir_for_a_posture_feature_absent_from_reservoir_samples() {
-    // Selecting [nlf_depth, backbone_features] + PCA + a non-empty reservoir: nlf_depth is a
-    // GPU-only stored feature the reservoir never carries, so the guard must drop the reservoir
-    // (rather than hard-error in concatenate_features) and surface a warning. backbone_features
-    // IS in the reservoir, so it must NOT trigger a warning.
+    // Selecting [nlf_backbone_max, nlf_depth] + PCA + a non-empty reservoir: nlf_backbone_max IS
+    // captured into the reservoir (a stored NLF backbone embedding), so it must NOT warn, while
+    // nlf_depth is a GPU-only stored feature the reservoir never carries, so the guard must drop
+    // the reservoir (rather than hard-error in concatenate_features) and surface a warning for it.
     let storage_state = Arc::new(Mutex::new(StorageState::default()));
     let backend_state = Arc::new(Mutex::new(BackendState::default()));
     let mut pca_settings = settings();
@@ -1082,7 +1081,7 @@ fn pca_drops_reservoir_for_a_posture_feature_absent_from_reservoir_samples() {
         method: DimensionalityReductionMethod::Pca,
         components: 5,
     };
-    pca_settings.posture_feature_types = vec![FeatureId::NlfDepth, FeatureId::BackboneFeatures];
+    pca_settings.posture_feature_types = vec![FeatureId::NlfBackboneMax, FeatureId::NlfDepth];
     let storage = TestStorage {
         state: storage_state,
         datasets: VecDeque::from([Ok(Some(PostureDataset {
@@ -1123,8 +1122,8 @@ fn pca_drops_reservoir_for_a_posture_feature_absent_from_reservoir_samples() {
         !result
             .warnings
             .iter()
-            .any(|warning| warning.contains("'backbone_features' is absent")),
-        "backbone_features is present in the reservoir and must not warn: {:?}",
+            .any(|warning| warning.contains("'nlf_backbone_max' is absent")),
+        "nlf_backbone_max is present in the reservoir and must not warn: {:?}",
         result.warnings
     );
 }

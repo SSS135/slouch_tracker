@@ -1,7 +1,8 @@
 //! Person presence detection based on RTMDet bounding-box confidence.
 //!
-//! RTMPose-S supplies body keypoints only, so posture, neck-tilt, hand, and
-//! mouth detections remain disabled until their classifier inputs are wired.
+//! The NLF-L pose model supplies the 17 body keypoints only; posture, neck-tilt,
+//! hand, and mouth detections remain disabled until their classifier inputs are
+//! wired.
 
 use crate::ExpandedBbox;
 
@@ -16,8 +17,8 @@ fn detect_person(bbox: Option<&ExpandedBbox>) -> bool {
 
 /// Detects person presence from the original RTMDet bounding-box score.
 ///
-/// The remaining task flags intentionally stay false: RTMPose-S does not
-/// provide the face and hand keypoints or classifier outputs those tasks need.
+/// The remaining task flags intentionally stay false: the neck-tilt, hand, and
+/// mouth classifier outputs those tasks need are not wired.
 pub fn detect_multi_task(bbox: Option<&ExpandedBbox>) -> MultiTaskDetectionResult {
     MultiTaskDetectionResult {
         person_found: detect_person(bbox),

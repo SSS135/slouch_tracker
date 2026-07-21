@@ -59,6 +59,23 @@ const UNCERT_UNUSABLE: f64 = 0.25;
 /// Guards the truncation-ratio denominator against a zero torso uncertainty.
 const UNCERT_EPS: f64 = 1e-6;
 
+/// Maps a raw NLF joint uncertainty (meters; LOWER = more confident) to a calibrated
+/// keypoint confidence in `[0, 1]`, reusing the same band as the depth-feature
+/// validity dim: `u <= UNCERT_CONFIDENT` (0.05) is fully confident (1.0) and
+/// `u >= UNCERT_UNUSABLE` (0.25) is unusable (0.0), linear in between. Non-finite
+/// uncertainty is treated as fully unusable so a pathological model output can never
+/// fabricate a confident keypoint.
+///
+/// Pilot band: confident upper-body `u ~= 0.026-0.03` -> 1.0; truncated legs
+/// `u ~= 0.09-0.12` -> ~0.80-0.65; `u >= 0.23` -> < 0.1 (treated absent by the
+/// downstream `MIN_KEYPOINT_CONFIDENCE` guard); `u >= 0.25` -> 0.
+pub fn uncertainty_to_keypoint_score(u: f64) -> f64 {
+    if !u.is_finite() {
+        return 0.0;
+    }
+    ((UNCERT_UNUSABLE - u) / (UNCERT_UNUSABLE - UNCERT_CONFIDENT)).clamp(0.0, 1.0)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NlfFeatureError {
     InvalidCoordsLength { expected: usize, actual: usize },
@@ -614,6 +631,36 @@ mod tests {
         let features = extract(&zeros, &uncertainty);
         assert!(features.iter().all(|value| value.is_finite()));
         assert_eq!(features[13], 0.0);
+    }
+
+    #[test]
+    fn uncertainty_to_keypoint_score_matches_the_pinned_calibration_band() {
+        // Confident upper-body uncertainty saturates at full confidence.
+        assert_eq!(uncertainty_to_keypoint_score(0.03), 1.0);
+        // The confident-band edge is exactly full confidence.
+        assert_eq!(uncertainty_to_keypoint_score(UNCERT_CONFIDENT), 1.0);
+        // Anything more confident than the edge is still clamped to 1.0.
+        assert_eq!(uncertainty_to_keypoint_score(0.0), 1.0);
+        // Mid-band truncated legs land near 0.75.
+        assert!((uncertainty_to_keypoint_score(0.10) - 0.75).abs() < 1e-9);
+        // The unusable edge and beyond are zero.
+        assert_eq!(uncertainty_to_keypoint_score(UNCERT_UNUSABLE), 0.0);
+        assert_eq!(uncertainty_to_keypoint_score(0.30), 0.0);
+        // Non-finite uncertainty is fully unusable.
+        assert_eq!(uncertainty_to_keypoint_score(f64::NAN), 0.0);
+        assert_eq!(uncertainty_to_keypoint_score(f64::INFINITY), 0.0);
+        assert_eq!(uncertainty_to_keypoint_score(f64::NEG_INFINITY), 0.0);
+    }
+
+    #[test]
+    fn uncertainty_to_keypoint_score_is_monotonically_non_increasing() {
+        let mut previous = f64::INFINITY;
+        for step in 0..=40 {
+            let score = uncertainty_to_keypoint_score(f64::from(step) * 0.01);
+            assert!((0.0..=1.0).contains(&score));
+            assert!(score <= previous + 1e-12, "score rose at step {step}");
+            previous = score;
+        }
     }
 
     #[test]
