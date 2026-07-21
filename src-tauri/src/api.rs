@@ -96,6 +96,7 @@ impl Drop for AppState {
 struct ModelPaths {
     rtmdet: Option<PathBuf>,
     rtmpose: Option<PathBuf>,
+    nlf: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -347,9 +348,11 @@ fn initialize_inference_state(state: &AppState) -> Result<(), ApiError> {
         .rtmpose
         .clone()
         .ok_or_else(|| ApiError::NotReady("RTMPose model resource is unavailable".into()))?;
-    let responses = state
-        .inference
-        .send(actors::initialize_message(rtmdet, rtmpose))?;
+    let responses = state.inference.send(actors::initialize_message(
+        rtmdet,
+        rtmpose,
+        state.model_paths.nlf.clone(),
+    ))?;
     if !responses.iter().any(|response| {
         matches!(
             response,
@@ -1200,6 +1203,7 @@ pub fn initialize_state(data_dir: PathBuf, resource_dir: PathBuf) -> Result<AppS
     let model_paths = ModelPaths {
         rtmdet: find_resource(&resource_dir, "rtmdet-nano.onnx"),
         rtmpose: find_resource(&resource_dir, "rtmpose-m.onnx"),
+        nlf: find_resource(&resource_dir, "nlf_l_crop_fp16.onnx"),
     };
     let training = TrainingActor::start(storage.clone())?;
     let inference = match InferenceActor::start(storage.clone()) {
@@ -1237,21 +1241,59 @@ pub fn initialize_state(data_dir: PathBuf, resource_dir: PathBuf) -> Result<AppS
     })
 }
 
-fn initialize_onnx_runtime(resource_dir: &Path) -> Result<(), ApiError> {
-    let runtime = [
-        resource_dir.join("resources/onnxruntime/windows-x86_64/onnxruntime.dll"),
-        resource_dir.join("onnxruntime/windows-x86_64/onnxruntime.dll"),
+fn runtime_resource_path(resource_dir: &Path, filename: &str) -> Option<PathBuf> {
+    [
+        resource_dir
+            .join("resources/onnxruntime/windows-x86_64")
+            .join(filename),
+        resource_dir
+            .join("onnxruntime/windows-x86_64")
+            .join(filename),
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("resources/onnxruntime/windows-x86_64/onnxruntime.dll"),
+            .join("resources/onnxruntime/windows-x86_64")
+            .join(filename),
     ]
     .into_iter()
     .find(|path| path.is_file())
-    .ok_or_else(|| ApiError::NotReady("packaged ONNX Runtime DLL is unavailable".into()))?;
+}
+
+fn initialize_onnx_runtime(resource_dir: &Path) -> Result<(), ApiError> {
+    // The DirectML build of onnxruntime.dll delay-loads DirectML.dll (verified via
+    // dumpbin) and loads onnxruntime_providers_shared.dll at runtime. ort::init_from
+    // loads onnxruntime.dll by absolute path without LOAD_WITH_ALTERED_SEARCH_PATH,
+    // so Windows never searches the packaged runtime directory when it later resolves
+    // those siblings for the DirectML session. Preload them by absolute path (kept
+    // resident) so the delay-load binds to the already-loaded modules by base name.
+    // Any failure is non-fatal: detection stays on CPU and only the optional NLF
+    // (DirectML) session is lost.
+    preload_runtime_dependency(resource_dir, "DirectML.dll");
+    preload_runtime_dependency(resource_dir, "onnxruntime_providers_shared.dll");
+
+    let runtime = runtime_resource_path(resource_dir, "onnxruntime.dll")
+        .ok_or_else(|| ApiError::NotReady("packaged ONNX Runtime DLL is unavailable".into()))?;
     let environment = ort::init_from(runtime).map_err(|error| {
         ApiError::NotReady(format!("failed to load packaged ONNX Runtime: {error}"))
     })?;
     environment.with_name("slouch-tracker").commit();
     Ok(())
+}
+
+fn preload_runtime_dependency(resource_dir: &Path, filename: &str) {
+    let Some(path) = runtime_resource_path(resource_dir, filename) else {
+        log::debug!(
+            "optional native runtime dependency {filename} is not packaged; skipping preload"
+        );
+        return;
+    };
+    // SAFETY: loading a packaged, first-party DLL by absolute path. The handle is
+    // intentionally leaked so the module stays resident for the process lifetime.
+    match unsafe { libloading::Library::new(&path) } {
+        Ok(library) => std::mem::forget(library),
+        Err(error) => log::warn!(
+            "failed to preload native runtime dependency {}: {error}",
+            path.display()
+        ),
+    }
 }
 
 fn find_resource(resource_dir: &Path, filename: &str) -> Option<PathBuf> {

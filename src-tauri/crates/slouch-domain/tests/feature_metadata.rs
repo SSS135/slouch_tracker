@@ -4,16 +4,16 @@ use serde_json::json;
 use slouch_domain::{feature_registry, FeatureId, ModelCategory};
 
 #[test]
-fn registry_contains_all_seventeen_unique_selectable_features() {
+fn registry_contains_all_eighteen_unique_selectable_features() {
     let registry = feature_registry();
-    assert_eq!(registry.len(), 17);
+    assert_eq!(registry.len(), 18);
     assert_eq!(
         registry
             .iter()
             .map(|item| item.id)
             .collect::<BTreeSet<_>>()
             .len(),
-        17
+        18
     );
     assert!(registry.iter().all(|item| item.user_selectable));
 }
@@ -57,6 +57,7 @@ fn dimensions_storage_and_model_categories_match_current_registry() {
         (FeatureId::RawKeypoints, 34, 0, ModelCategory::Posture),
         (FeatureId::PostureGeometry, 10, 0, ModelCategory::Posture),
         (FeatureId::TorsoInvariant, 7, 0, ModelCategory::Posture),
+        (FeatureId::NlfDepth, 14, 56, ModelCategory::Posture),
     ];
     for (id, dimensions, storage, model) in expected {
         let metadata = id.metadata();
@@ -92,6 +93,13 @@ fn optional_metadata_fields_match_typescript_omission_semantics() {
     let keypoint_scores = serde_json::to_value(FeatureId::KeypointScores.metadata()).unwrap();
     assert!(keypoint_scores.get("modelType").is_none());
     assert_eq!(keypoint_scores["requiresFitting"], false);
+
+    let nlf_depth = serde_json::to_value(FeatureId::NlfDepth.metadata()).unwrap();
+    assert_eq!(nlf_depth["modelType"], "posture");
+    assert_eq!(nlf_depth["dimensions"], 14);
+    assert_eq!(nlf_depth["storageCost"], 56);
+    assert_eq!(nlf_depth["computed"], false);
+    assert!(nlf_depth.get("requiresFitting").is_none());
 
     let engineered = serde_json::to_value(FeatureId::EngineeredFeatures.metadata()).unwrap();
     assert_eq!(

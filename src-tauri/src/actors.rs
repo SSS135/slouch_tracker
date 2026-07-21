@@ -1253,11 +1253,16 @@ pub fn raw_inference_message(image: ImageData, request_id: u64) -> InferenceWork
     }
 }
 
-pub fn initialize_message(rtmdet_path: PathBuf, rtmpose_path: PathBuf) -> InferenceWorkerMessage {
+pub fn initialize_message(
+    rtmdet_path: PathBuf,
+    rtmpose_path: PathBuf,
+    nlf_path: Option<PathBuf>,
+) -> InferenceWorkerMessage {
     InferenceWorkerMessage::Initialize {
         payload: slouch_domain::ported::messages::schemas::InitializePayload {
             rtmdet_path: rtmdet_path.to_string_lossy().into_owned(),
             rtmw3d_path: rtmpose_path.to_string_lossy().into_owned(),
+            nlf_path: nlf_path.map(|path| path.to_string_lossy().into_owned()),
         },
     }
 }
@@ -2787,6 +2792,7 @@ mod tests {
             .send(initialize_message(
                 manifest.join("resources/models/rtmdet-nano.onnx"),
                 manifest.join("resources/models/rtmpose-m.onnx"),
+                None,
             ))
             .expect("initialize native inference models");
 

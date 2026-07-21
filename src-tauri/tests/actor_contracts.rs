@@ -303,11 +303,13 @@ fn worker_message_constructors_and_response_mapping_preserve_the_ipc_contract() 
     let message = initialize_message(
         PathBuf::from("C:/models/rtmdet.onnx"),
         PathBuf::from("C:/models/rtmpose.onnx"),
+        Some(PathBuf::from("C:/models/nlf.onnx")),
     );
     match message {
         InferenceWorkerMessage::Initialize { payload } => {
             assert_eq!(payload.rtmdet_path, "C:/models/rtmdet.onnx");
             assert_eq!(payload.rtmw3d_path, "C:/models/rtmpose.onnx");
+            assert_eq!(payload.nlf_path.as_deref(), Some("C:/models/nlf.onnx"));
         }
         _ => panic!("initialize_message must build an Initialize message"),
     }

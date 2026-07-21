@@ -53,10 +53,12 @@ pub enum FeatureTypeSchema {
     PostureGeometry,
     #[serde(rename = "torso_invariant")]
     TorsoInvariant,
+    #[serde(rename = "nlf_depth")]
+    NlfDepth,
 }
 
 impl FeatureTypeSchema {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::BackboneFeatures,
         Self::BackboneFeaturesMax,
         Self::BackboneFeaturesStd,
@@ -74,6 +76,7 @@ impl FeatureTypeSchema {
         Self::RawKeypoints,
         Self::PostureGeometry,
         Self::TorsoInvariant,
+        Self::NlfDepth,
     ];
 }
 

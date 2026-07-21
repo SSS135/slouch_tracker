@@ -25,6 +25,7 @@ mod ml_matrix_svd;
 pub mod mlp_classifier;
 pub mod model;
 pub mod naive_bayes_classifier;
+pub mod nlf_features;
 pub mod pca;
 pub mod random_projection;
 pub mod rtmdet_engineered_features;

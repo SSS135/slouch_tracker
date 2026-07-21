@@ -54,15 +54,20 @@ fn package_shaped_startup_resolves_locked_runtime_and_loads_active_models() {
         std::fs::write(&packaged, bytes).expect("copy locked package resource");
         checked += 1;
     }
-    assert_eq!(checked, 6, "DLL, notices, and both models must be locked");
+    assert_eq!(
+        checked, 9,
+        "runtime DLLs, notices, and all models must be locked"
+    );
 
     let packaged_runtime =
         fixture_root.join("resources/onnxruntime/windows-x86_64/onnxruntime.dll");
     let packaged_detector = fixture_root.join("resources/models/rtmdet-nano.onnx");
     let packaged_pose = fixture_root.join("resources/models/rtmpose-m.onnx");
+    let packaged_nlf = fixture_root.join("resources/models/nlf_l_crop_fp16.onnx");
     assert!(packaged_runtime.is_file());
     assert!(packaged_detector.is_file());
     assert!(packaged_pose.is_file());
+    assert!(packaged_nlf.is_file());
 
     let state = crate::api::initialize_state(data_dir.clone(), fixture_root.clone())
         .expect("startup must resolve the package-shaped runtime and SQLite state");
@@ -71,6 +76,7 @@ fn package_shaped_startup_resolves_locked_runtime_and_loads_active_models() {
         .send(crate::actors::initialize_message(
             packaged_detector,
             packaged_pose,
+            Some(packaged_nlf),
         ))
         .expect("active packaged model initialization");
     assert!(responses.iter().any(|response| matches!(

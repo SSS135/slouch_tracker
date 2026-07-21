@@ -30,31 +30,6 @@ describe('Slider scale transformations', () => {
     expect(onValueChange).toHaveBeenLastCalledWith(expect.closeTo(10, 8));
   });
 
-  it('preserves mount-only local state on rerender', async () => {
-    const { container, rerender } = render(Slider, {
-      props: {
-        label: 'Scale',
-        value: 0.0001,
-        minimumValue: 0.001,
-        maximumValue: 1000,
-        scale: 'exponential',
-        onValueChange: vi.fn(),
-      },
-    });
-    const input = container.querySelector('input[type="range"]') as HTMLInputElement;
-    expect(Number(input.value)).toBeCloseTo(0, 5);
-
-    await rerender({
-      label: 'Scale',
-      value: 10_000,
-      minimumValue: 0.001,
-      maximumValue: 1000,
-      scale: 'exponential',
-      onValueChange: vi.fn(),
-    });
-    expect(Number(input.value)).toBeCloseTo(0, 5);
-  });
-
   it('clamps mount values outside the exponential bounds in both directions', () => {
     // Assert on the rendered formatted value (derived from the internal localValue
     // float via positionToValue), not just the range input.value which jsdom

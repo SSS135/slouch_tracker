@@ -75,6 +75,7 @@ name = "app"
 version = "1.0.0"
 dependencies = [
  "image",
+ "libloading 0.8.9",
  "log",
  "nokhwa",
  "ort",

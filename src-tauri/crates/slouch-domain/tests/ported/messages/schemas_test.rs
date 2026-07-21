@@ -19,6 +19,29 @@ fn initialize_message_round_trips_raw_camel_case_json() {
     };
     assert_eq!(payload.rtmdet_path, "/path/to/rtmdet.onnx");
     assert_eq!(payload.rtmw3d_path, "/path/to/rtmw3d.onnx");
+    assert_eq!(payload.nlf_path, None);
+    assert_eq!(
+        serde_json::to_value(message).expect("serialize initialize"),
+        raw
+    );
+}
+
+#[test]
+fn initialize_message_accepts_optional_nlf_path() {
+    let raw = json!({
+        "type": "initialize",
+        "payload": {
+            "rtmdetPath": "/path/to/rtmdet.onnx",
+            "rtmw3dPath": "/path/to/rtmw3d.onnx",
+            "nlfPath": "/path/to/nlf.onnx"
+        }
+    });
+    let message: InferenceWorkerMessage = serde_json::from_value(raw.clone())
+        .expect("initialize message with nlf path must deserialize");
+    let InferenceWorkerMessage::Initialize { payload } = &message else {
+        panic!("unexpected message: {message:?}")
+    };
+    assert_eq!(payload.nlf_path.as_deref(), Some("/path/to/nlf.onnx"));
     assert_eq!(
         serde_json::to_value(message).expect("serialize initialize"),
         raw

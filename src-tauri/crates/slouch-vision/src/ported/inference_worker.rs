@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use ndarray::Array4;
 use ort::{
+    ep::DirectML,
     session::{builder::GraphOptimizationLevel, Session, SessionOutputs},
     value::TensorRef,
 };
@@ -27,6 +28,7 @@ use slouch_ml::ported::constants::{
     RTMPOSE_BACKBONE_RAW_DIMS, RTMPOSE_GAU_RAW_DIMS, RTMPOSE_INPUT_SIZE, RTMPOSE_MEAN_RGB,
     RTMPOSE_NUM_KEYPOINTS, RTMPOSE_SIMCC_SPLIT_RATIO, RTMPOSE_STD_RGB,
 };
+use slouch_ml::ported::nlf_features::extract_nlf_depth_features;
 use slouch_ml::ported::rtmdet_features::extract_rtm_det_features as extract_ported_rtmdet_features;
 use slouch_ml::ported::rtmpose_features::{
     pool_backbone_features, pool_backbone_features_max, pool_backbone_features_std,
@@ -46,6 +48,15 @@ const RTMPOSE_GAU_VALUES: usize = RTMPOSE_GAU_RAW_DIMS;
 const RTMDET_FEATURE_VALUES: usize = RTMDET_RAW_DIMS;
 const MARK_CLEANUP_INTERVAL: u64 = 100;
 const MODEL_RETRIES: usize = 3;
+
+// NLF-L's square crop side (proc_side). The supplementary depth model consumes a
+// `[1,3,384,384]` RGB tensor; kept local like the other preprocessing geometry.
+const NLF_INPUT_SIZE: usize = 384;
+
+// Graph output names of the NLF-L model consumed by the depth-feature tap. The
+// third output (`coords2d`) is copied but not read here.
+const NLF_COORDS3D_OUTPUT: &str = "coords3d_rel";
+const NLF_UNCERTAINTY_OUTPUT: &str = "uncertainty";
 
 const RTMDET_CLS_P5: &str = RTMDET_OUTPUT_NAMES.cls_p5;
 const RTMDET_REG_P5: &str = RTMDET_OUTPUT_NAMES.reg_p5;
@@ -164,11 +175,22 @@ pub struct NoopLogger;
 
 impl WorkerLogger for NoopLogger {}
 
+/// Execution provider a session is created on. RTMDet/RTMPose stay on the CPU
+/// kernels (byte-identical across the CPU and DirectML runtime builds); only the
+/// supplementary NLF-L depth session runs on DirectML.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExecutionProvider {
+    #[default]
+    Cpu,
+    DirectMl,
+}
+
 /// Frozen native session settings passed through the injectable runtime boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionOptions {
     pub intra_threads: usize,
     pub graph_optimization_all: bool,
+    pub execution_provider: ExecutionProvider,
 }
 
 impl Default for SessionOptions {
@@ -179,6 +201,7 @@ impl Default for SessionOptions {
             // pinned foreground CPU. One thread keeps the app battery-friendly.
             intra_threads: 1,
             graph_optimization_all: true,
+            execution_provider: ExecutionProvider::Cpu,
         }
     }
 }
@@ -248,6 +271,18 @@ impl InferenceRuntime for OrtRuntime {
         } else {
             builder
         };
+        if options.execution_provider == ExecutionProvider::DirectMl {
+            // DirectML requires memory-pattern optimization disabled and sequential
+            // execution (pilot harness recipe). The DML API is resolved at runtime
+            // from the loaded onnxruntime.dll via the load-dynamic path.
+            builder = builder
+                .with_memory_pattern(false)
+                .map_err(|error| WorkerError::Model(error.to_string()))?
+                .with_parallel_execution(false)
+                .map_err(|error| WorkerError::Model(error.to_string()))?
+                .with_execution_providers([DirectML::default().build()])
+                .map_err(|error| WorkerError::Model(error.to_string()))?;
+        }
         let session = builder
             .commit_from_file(path)
             .map_err(|error| WorkerError::Model(error.to_string()))?;
@@ -302,9 +337,13 @@ where
     runtime: R,
     rtmdet_session: Option<Box<dyn InferenceSession>>,
     rtmpose_session: Option<Box<dyn InferenceSession>>,
+    // Supplementary NLF-L depth session on DirectML. Absent whenever the GPU/DML
+    // runtime is unavailable; its absence never fails init or a frame.
+    nlf_session: Option<Box<dyn InferenceSession>>,
     is_initialized: bool,
     last_rtmdet_path: String,
     last_rtmpose_path: String,
+    last_nlf_path: Option<String>,
     loaded_posture_model: Option<Box<dyn ClassifierModel>>,
     loaded_presence_model: Option<Box<dyn ClassifierModel>>,
     frame_counter: u64,
@@ -343,9 +382,11 @@ where
             runtime,
             rtmdet_session: None,
             rtmpose_session: None,
+            nlf_session: None,
             is_initialized: false,
             last_rtmdet_path: String::new(),
             last_rtmpose_path: String::new(),
+            last_nlf_path: None,
             loaded_posture_model: None,
             loaded_presence_model: None,
             frame_counter: 0,
@@ -356,9 +397,11 @@ where
     /// Handles one typed worker message and returns the emitted response(s).
     pub fn handle_message(&mut self, message: InferenceWorkerMessage) -> Vec<WorkerResponse> {
         let response = match message {
-            InferenceWorkerMessage::Initialize { payload } => {
-                self.initialize(&payload.rtmdet_path, &payload.rtmw3d_path)
-            }
+            InferenceWorkerMessage::Initialize { payload } => self.initialize(
+                &payload.rtmdet_path,
+                &payload.rtmw3d_path,
+                payload.nlf_path.as_deref(),
+            ),
             InferenceWorkerMessage::Process { payload } => {
                 self.process_frame(payload.image_data, payload.request_id)
             }
@@ -404,9 +447,15 @@ where
         vec![response]
     }
 
-    fn initialize(&mut self, rtmdet_path: &str, rtmpose_path: &str) -> WorkerResponse {
+    fn initialize(
+        &mut self,
+        rtmdet_path: &str,
+        rtmpose_path: &str,
+        nlf_path: Option<&str>,
+    ) -> WorkerResponse {
         self.last_rtmdet_path = rtmdet_path.to_owned();
         self.last_rtmpose_path = rtmpose_path.to_owned();
+        self.last_nlf_path = nlf_path.map(str::to_owned);
         self.logger
             .info("[Unified Worker] Initializing ONNX Runtime");
 
@@ -431,6 +480,10 @@ where
             Ok(()) => {
                 self.logger
                     .info("[Unified Worker] Both models loaded successfully");
+                // The NLF-L depth session is a supplementary tap: a failed load must
+                // never fail overall initialization. It is attempted only after the
+                // required detector/pose models are up.
+                self.nlf_session = self.try_load_nlf_session(nlf_path);
                 WorkerResponse::Initialized {
                     provider: "native".to_owned(),
                 }
@@ -439,6 +492,7 @@ where
                 self.is_initialized = false;
                 self.rtmdet_session = None;
                 self.rtmpose_session = None;
+                self.nlf_session = None;
                 self.logger
                     .error(&format!("[Unified Worker] Initialization error: {error}"));
                 WorkerResponse::Error {
@@ -449,6 +503,37 @@ where
                     details: None,
                     success: None,
                 }
+            }
+        }
+    }
+
+    /// Attempts a single DirectML session load for the optional NLF-L depth model.
+    /// Any failure (no path, empty path, absent GPU/DML runtime, load error) yields
+    /// `None` with a warning and never propagates — the depth feature is a
+    /// best-effort supplementary tap. No retry: a missing GPU is not transient.
+    fn try_load_nlf_session(
+        &mut self,
+        nlf_path: Option<&str>,
+    ) -> Option<Box<dyn InferenceSession>> {
+        let path = nlf_path?;
+        if path.is_empty() {
+            return None;
+        }
+        let options = SessionOptions {
+            execution_provider: ExecutionProvider::DirectMl,
+            ..SessionOptions::default()
+        };
+        match self.runtime.create_session(path, "NLF-L", options) {
+            Ok(session) => {
+                self.logger
+                    .info("[Unified Worker] NLF-L depth session initialized on DirectML");
+                Some(session)
+            }
+            Err(error) => {
+                self.logger.warn(&format!(
+                    "[Unified Worker] NLF-L depth session unavailable ({error}); depth features disabled"
+                ));
+                None
             }
         }
     }
@@ -620,10 +705,10 @@ where
                     success: None,
                 };
             }
-            let init = self.initialize(
-                &self.last_rtmdet_path.clone(),
-                &self.last_rtmpose_path.clone(),
-            );
+            let rtmdet_path = self.last_rtmdet_path.clone();
+            let rtmpose_path = self.last_rtmpose_path.clone();
+            let nlf_path = self.last_nlf_path.clone();
+            let init = self.initialize(&rtmdet_path, &rtmpose_path, nlf_path.as_deref());
             if !matches!(init, WorkerResponse::Initialized { .. }) {
                 self.cleanup_performance_if_due();
                 return WorkerResponse::Error {
@@ -816,6 +901,23 @@ where
         let rtmpose_end = self.mark("rtmpose-end");
         self.measure("rtmpose_total", &rtmpose_start, &rtmpose_end);
 
+        // Supplementary NLF-L depth tap. Uses the ORIGINAL (un-expanded) RTMDet
+        // bbox. Never fatal: any failure logs and skips the feature insert so the
+        // primary detection/pose pipeline always returns a valid result.
+        if self.nlf_session.is_some() {
+            match self.run_nlf_depth(image_data, &bbox) {
+                Ok(Some(values)) => {
+                    features.insert(FeatureId::NlfDepth, values);
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    self.logger.warn(&format!(
+                        "[Unified Worker] NLF depth features skipped for this frame: {error}"
+                    ));
+                }
+            }
+        }
+
         let normalized_bbox =
             normalize_expanded_bbox(&expanded, image_data.width, image_data.height)?;
         let transformed_keypoints = transform_keypoints(
@@ -834,6 +936,26 @@ where
             features,
             classification: None,
         })
+    }
+
+    /// Preprocesses the original-bbox square crop, runs the NLF-L depth session,
+    /// and derives the body-intrinsic depth features. Returns `Ok(None)` when the
+    /// pose is too degenerate for a meaningful feature (extractor's decision).
+    fn run_nlf_depth(
+        &mut self,
+        image_data: &ImageData,
+        bbox: &BoundingBox,
+    ) -> Result<Option<Vec<f32>>, WorkerError> {
+        let input = preprocess_nlf(image_data, bbox)?;
+        let session = self
+            .nlf_session
+            .as_mut()
+            .ok_or_else(|| WorkerError::Inference("NLF session is not loaded".to_owned()))?;
+        let outputs = session.run(&input)?;
+        let coords3d = take_f32_output(&outputs, NLF_COORDS3D_OUTPUT)?;
+        let uncertainty = take_f32_output(&outputs, NLF_UNCERTAINTY_OUTPUT)?;
+        extract_nlf_depth_features(&coords3d, &uncertainty)
+            .map_err(|error| WorkerError::Feature(error.to_string()))
     }
 
     fn mark(&mut self, stage: &str) -> String {
@@ -1046,6 +1168,61 @@ fn preprocess_rtmpose(image: &ImageData) -> Result<Vec<f32>, WorkerError> {
 /// Deterministic compatibility seam over the production RTMPose preprocessor.
 pub fn compatibility_preprocess_rtmpose(image: &ImageData) -> Result<Vec<f32>, WorkerError> {
     preprocess_rtmpose(image)
+}
+
+/// Builds the NLF-L input tensor: a square crop centered on the ORIGINAL RTMDet
+/// bbox, side `max(width, height)`, bilinearly resampled to `384x384` with
+/// edge-replicated borders, RGB channels scaled by `/255.0` into `[1,3,384,384]`.
+/// Mirrors the pilot crop (`cv2.warpAffine`, `INTER_LINEAR`, `BORDER_REPLICATE`);
+/// plain `/255.0` preprocessing per the integration addendum (no gamma).
+fn preprocess_nlf(image: &ImageData, bbox: &BoundingBox) -> Result<Array4<f32>, WorkerError> {
+    validate_image(image)?;
+    let width = image.width as usize;
+    let height = image.height as usize;
+    let side = (bbox.x2 - bbox.x1).max(bbox.y2 - bbox.y1);
+    if !side.is_finite() || side <= 0.0 {
+        return Err(WorkerError::InvalidInput(
+            "NLF crop square has a non-positive side".to_owned(),
+        ));
+    }
+    let center_x = (bbox.x1 + bbox.x2) / 2.0;
+    let center_y = (bbox.y1 + bbox.y2) / 2.0;
+    let origin_x = center_x - side / 2.0;
+    let origin_y = center_y - side / 2.0;
+    let step = side / NLF_INPUT_SIZE as f64;
+    let plane = NLF_INPUT_SIZE * NLF_INPUT_SIZE;
+    let max_x = (width - 1) as i64;
+    let max_y = (height - 1) as i64;
+    let mut tensor = vec![0.0_f32; plane * 3];
+
+    for out_y in 0..NLF_INPUT_SIZE {
+        let src_y = origin_y + out_y as f64 * step;
+        let floor_y = src_y.floor();
+        let weight_y = src_y - floor_y;
+        let y_lo = (floor_y as i64).clamp(0, max_y) as usize;
+        let y_hi = (floor_y as i64 + 1).clamp(0, max_y) as usize;
+        for out_x in 0..NLF_INPUT_SIZE {
+            let src_x = origin_x + out_x as f64 * step;
+            let floor_x = src_x.floor();
+            let weight_x = src_x - floor_x;
+            let x_lo = (floor_x as i64).clamp(0, max_x) as usize;
+            let x_hi = (floor_x as i64 + 1).clamp(0, max_x) as usize;
+            let index = out_y * NLF_INPUT_SIZE + out_x;
+            for channel in 0..3 {
+                let p00 = image.data[(y_lo * width + x_lo) * 4 + channel] as f64;
+                let p01 = image.data[(y_lo * width + x_hi) * 4 + channel] as f64;
+                let p10 = image.data[(y_hi * width + x_lo) * 4 + channel] as f64;
+                let p11 = image.data[(y_hi * width + x_hi) * 4 + channel] as f64;
+                let top = p00 * (1.0 - weight_x) + p01 * weight_x;
+                let bottom = p10 * (1.0 - weight_x) + p11 * weight_x;
+                let value = top * (1.0 - weight_y) + bottom * weight_y;
+                tensor[channel * plane + index] = (value / 255.0) as f32;
+            }
+        }
+    }
+
+    Array4::from_shape_vec((1, 3, NLF_INPUT_SIZE, NLF_INPUT_SIZE), tensor)
+        .map_err(|error| WorkerError::Tensor(error.to_string()))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1519,28 +1696,17 @@ fn take_i64_output(outputs: &SessionOutputMap, name: &str) -> Result<Vec<i64>, W
 }
 
 fn copy_session_outputs(outputs: &SessionOutputs<'_>) -> Result<SessionOutputMap, WorkerError> {
+    // Copy every named output generically (f32 or i64), covering RTMDet/RTMPose and
+    // the NLF-L outputs (coords2d/coords3d_rel/uncertainty) without a per-model
+    // allowlist. Outputs the worker never reads by name are simply carried along;
+    // outputs of an unsupported dtype are skipped, and a missing/wrong-typed output
+    // needed downstream still surfaces at the typed `take_*_output` read site.
     let mut copied = SessionOutputMap::new();
-    for name in [
-        "dets",
-        "labels",
-        RTMDET_CLS_P5,
-        RTMDET_REG_P5,
-        "simcc_x",
-        "simcc_y",
-        "backbone_features",
-        "gau_features",
-    ] {
-        let Some(output) = outputs.get(name) else {
-            continue;
-        };
-        if let Ok((_, values)) = output.try_extract_tensor::<f32>() {
+    for (name, value) in outputs.iter() {
+        if let Ok((_, values)) = value.try_extract_tensor::<f32>() {
             copied.insert(name.to_owned(), SessionOutput::F32(values.to_vec()));
-        } else if let Ok((_, values)) = output.try_extract_tensor::<i64>() {
+        } else if let Ok((_, values)) = value.try_extract_tensor::<i64>() {
             copied.insert(name.to_owned(), SessionOutput::I64(values.to_vec()));
-        } else {
-            return Err(WorkerError::Tensor(format!(
-                "{name}: expected f32 or i64 tensor"
-            )));
         }
     }
     Ok(copied)

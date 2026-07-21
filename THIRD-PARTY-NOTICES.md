@@ -98,11 +98,57 @@ License, Version 2.0. In accordance with that license this notices file:
 
 ---
 
-## 2. ONNX Runtime (native)
+## 2. NLF-L 3D human-pose model (isarandi/nlf)
 
-- **Component:** Microsoft ONNX Runtime (`onnxruntime.dll`), the native
-  inference engine bundled with the Windows release.
-- **Version:** 1.24.4 (per `src-tauri/resource-lock.json`).
+One additional ONNX model file is bundled in every release under
+`src-tauri/resources/models/` and loaded at runtime by the native ONNX Runtime
+on the DirectML execution provider:
+
+| File | Size | Role |
+| --- | --- | --- |
+| `nlf_l_crop_fp16.onnx` | ~233 MB | 3D human pose (Neural Localizer Fields, NLF-L); source of supplementary posture-depth features |
+
+- **Upstream project:** **NLF (Neural Localizer Fields)** —
+  https://github.com/isarandi/nlf
+- **Paper:** István Sárándi and Gerard Pons-Moll, "Neural Localizer Fields for
+  Continuous 3D Human Pose and Shape Estimation," NeurIPS 2024
+  (arXiv:2407.07532).
+- **Backbone lineage:** the NLF-L variant uses an **EfficientNetV2-L** backbone
+  at 384 px input (per the paper: "We use EfficientNetV2-S (256 px) and L
+  (384 px)"). EfficientNetV2 originates from Tan & Le (Google Research); NLF
+  initializes it from ImageNet pretraining.
+- **Code license:** the NLF source repository is licensed under the **MIT
+  License**, Copyright (c) 2024 István Sárándi.
+- **Model-weights license — IMPORTANT (non-commercial):** the released NLF
+  model weights, from which the bundled ONNX file is derived, are — per the
+  upstream project — **"released for noncommercial research use only."** This
+  restriction applies to the pre-trained weights and therefore to the bundled
+  `nlf_l_crop_fp16.onnx` file. The permissive MIT license covers the NLF
+  *code*, not the *weights*. Any redistribution or commercial use of a Slouch
+  Tracker build that includes this model file must comply with the NLF weights'
+  non-commercial research-use restriction. (Contrast the OpenMMLab models in
+  section 1, which are Apache-2.0 and carry no such restriction.)
+- **Modifications (the bundled file is a modified export, not an upstream
+  artifact):** the upstream NLF-L "crop" model was exported to ONNX and then
+  converted to **fp16** weights, with float32 graph inputs/outputs preserved
+  (`keep_io_types`). The application feeds a 384×384 RGB crop and reads the
+  `coords3d_rel` and `uncertainty` outputs to derive scale/rotation-aware
+  posture-depth features; only these derived features are stored, and the raw
+  model outputs are not persisted.
+
+---
+
+## 3. ONNX Runtime (native, DirectML build)
+
+- **Component:** Microsoft ONNX Runtime (`onnxruntime.dll` plus its companion
+  `onnxruntime_providers_shared.dll`), the native inference engine bundled with
+  the Windows release. This is the **DirectML build** of ONNX Runtime: it adds
+  the DirectML execution provider (used to run the NLF-L model on the GPU) while
+  retaining the CPU execution provider used — unchanged — for RTMDet and
+  RTMPose.
+- **Version:** ONNX Runtime 1.24.2 (DirectML build, per
+  `src-tauri/resource-lock.json`). The staged binaries report file version
+  `1.24.20260219.5.3ba85bd`.
 - **License:** MIT License.
 - **Attribution:** Copyright (c) Microsoft Corporation.
 - **Bundled notices:** the ONNX Runtime license and its own third-party
@@ -112,15 +158,37 @@ License, Version 2.0. In accordance with that license this notices file:
   - `Privacy.md` — ONNX Runtime privacy statement
   - `ThirdPartyNotices.txt` — ONNX Runtime's upstream third-party notices
 - **Upstream:** https://github.com/microsoft/onnxruntime
-- **Modifications:** none; redistributed unmodified as the prebuilt
-  `onnxruntime-win-x64-1.24.4` DLL.
+- **Modifications:** none; `onnxruntime.dll` and
+  `onnxruntime_providers_shared.dll` are redistributed unmodified from the
+  Microsoft.ML.OnnxRuntime.DirectML package.
 
 The Rust binding to ONNX Runtime is the `ort` crate (version `2.0.0-rc.12`),
 which is dual-licensed MIT OR Apache-2.0.
 
 ---
 
-## 3. mozjpeg / mozjpeg-sys (JPEG codec, compiled into the Windows binary)
+## 4. DirectML (Microsoft DirectX Machine Learning runtime)
+
+- **Component:** `DirectML.dll` — Microsoft's DirectX Machine Learning
+  hardware-acceleration library, bundled with the Windows release and loaded by
+  the DirectML execution provider of ONNX Runtime to run the NLF-L model on the
+  GPU.
+- **Version:** Microsoft DirectML 1.15.4 (file version
+  `1.15.4+241025-1615.1.dml-1.15.fac7597`), from the Microsoft.AI.DirectML
+  package.
+- **License:** proprietary **"Microsoft Software License Terms — Microsoft
+  DirectX Machine Learning (DirectML)."** This is **not** an open-source
+  license. It permits redistributing `DirectML.dll` as an integrated component
+  within applications and services developed with machine-learning tools and
+  frameworks that run on Windows/Xbox (as Slouch Tracker does), but prohibits
+  distributing the library as a stand-alone offering. The full terms are
+  available from Microsoft at https://aka.ms/directml.
+- **Attribution:** Copyright (c) Microsoft Corporation.
+- **Modifications:** none; redistributed unmodified.
+
+---
+
+## 5. mozjpeg / mozjpeg-sys (JPEG codec, compiled into the Windows binary)
 
 MJPEG camera frames are decoded through the `nokhwa` capture stack, which on
 Windows pulls in the mozjpeg JPEG codec. The mozjpeg C library is compiled
@@ -143,7 +211,7 @@ directly into the desktop binary.
 
 ---
 
-## 4. Apache-2.0 licensed Rust dependencies (notable)
+## 6. Apache-2.0 licensed Rust dependencies (notable)
 
 The following notable dependencies are used unmodified under the Apache
 License, Version 2.0 (most are dual-licensed MIT OR Apache-2.0). Full license
@@ -163,7 +231,7 @@ Attribution: see each crate's repository for its authors and copyright lines.
 
 ---
 
-## 5. MIT / ISC ecosystem dependencies
+## 7. MIT / ISC ecosystem dependencies
 
 The broader Rust and TypeScript dependency trees (Tauri core and plugins,
 `serde`, `rusqlite`, `ndarray`, `rmp-serde`, `sha2`, `zip`, `image`, the
@@ -176,7 +244,7 @@ sources and distributed artifacts. All are used unmodified.
 
 ---
 
-## 6. MPL-2.0 transitive dependencies (listed for completeness)
+## 8. MPL-2.0 transitive dependencies (listed for completeness)
 
 The following transitive crates are licensed under the **Mozilla Public
 License, Version 2.0 (MPL-2.0)**. They are pulled in transitively (via the

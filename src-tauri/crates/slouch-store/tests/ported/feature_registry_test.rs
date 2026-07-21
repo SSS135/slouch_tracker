@@ -4,7 +4,8 @@ use slouch_domain::{
     BoundingBox, FeatureId, FrameLabel, Keypoint, ModelCategory, PostureFrame, Thumbnail,
 };
 use slouch_ml::ported::constants::{
-    RTMDET_EXTRACTED_DIMS, RTMPOSE_BACKBONE_POOLED_DIMS, RTMPOSE_GAU_POOLED_DIMS,
+    NLF_DEPTH_DIMS, NLF_DEPTH_STORAGE_COST, RTMDET_EXTRACTED_DIMS, RTMPOSE_BACKBONE_POOLED_DIMS,
+    RTMPOSE_GAU_POOLED_DIMS,
 };
 use slouch_store::ported::feature_registry::{
     extract_feature, get_all_feature_types, get_feature_dimensions,
@@ -154,6 +155,38 @@ fn stored_features_are_pinned_as_not_computed() {
         assert!(!definition.computed, "{}", id.as_str());
         assert!(definition.storage_cost > 0, "{}", id.as_str());
     }
+}
+
+#[test]
+fn nlf_depth_is_a_stored_posture_feature_with_frozen_dimensions() {
+    // Oracle: nlf_depth is a 14-dim stored posture feature (NLF_DEPTH_DIMS is frozen).
+    // Its storage cost is dimensions * FLOAT32_BYTES and it dispatches through the
+    // Stored extractor (read from the persisted feature map, no on-demand compute).
+    let definition = require_feature_definition("nlf_depth").unwrap();
+    assert_eq!(definition.id, FeatureId::NlfDepth);
+    assert_eq!(definition.name, "NLF Depth (3D)");
+    assert_eq!(definition.dimensions, NLF_DEPTH_DIMS);
+    assert_eq!(definition.dimensions, 14);
+    assert_eq!(definition.storage_cost, NLF_DEPTH_STORAGE_COST);
+    assert_eq!(definition.storage_cost, NLF_DEPTH_DIMS * 4);
+    assert!(!definition.computed);
+    assert!(!is_computed_feature("nlf_depth").unwrap());
+    assert_eq!(definition.model_type, Some(ModelCategory::Posture));
+    assert!(definition.user_selectable);
+    assert_eq!(definition.requires_fitting, None);
+
+    // Stored extractor: absent from the frame's feature map -> None (never a panic),
+    // mirroring the other GPU-produced stored features on old/GPU-absent frames.
+    assert_eq!(extract_feature("nlf_depth", &valid_frame()).unwrap(), None);
+
+    // Present in the map -> returned verbatim with the registry dimension.
+    let mut populated = valid_frame();
+    populated
+        .features
+        .insert(FeatureId::NlfDepth, vec![0.125; NLF_DEPTH_DIMS]);
+    let extracted = extract_feature("nlf_depth", &populated).unwrap().unwrap();
+    assert_eq!(extracted.len(), NLF_DEPTH_DIMS);
+    assert!(extracted.iter().all(|lane| *lane == 0.125));
 }
 
 #[test]

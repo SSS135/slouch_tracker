@@ -179,3 +179,62 @@ pub const KEYPOINT_SCORES_DIMS: usize = 17;
 pub const RAW_KEYPOINTS_DIMS: usize = 34;
 
 pub const KEYPOINT_RENDER_MIN_CONFIDENCE: f64 = 0.3;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NlfOutputNames {
+    pub coords2d: &'static str,
+    pub coords3d_rel: &'static str,
+    pub uncertainty: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NlfModelConfig {
+    pub name: &'static str,
+    pub path: &'static str,
+    pub input_side: usize,
+    pub num_canonical: usize,
+    pub output_names: NlfOutputNames,
+}
+
+/// NLF-L crop model (EfficientNetV2-L backbone). fp16 weights with fp32 IO
+/// (`keep_io_types=True`), so the existing `Array4<f32>` session seam is unchanged.
+/// Input `image` is `[1, 3, 384, 384]` RGB in `[0, 1]`; outputs are all fp32.
+pub const NLF_MODEL_CONFIG: NlfModelConfig = NlfModelConfig {
+    name: "NLF-L",
+    path: "nlf_l_crop_fp16.onnx",
+    input_side: 384,
+    num_canonical: 867,
+    output_names: NlfOutputNames {
+        coords2d: "coords2d",
+        coords3d_rel: "coords3d_rel",
+        uncertainty: "uncertainty",
+    },
+};
+
+/// Number of baked canonical joints; `coords3d_rel` is `[1, 867, 3]`, `uncertainty` `[1, 867]`.
+pub const NLF_NUM_CANONICAL: usize = NLF_MODEL_CONFIG.num_canonical;
+
+// coco_19 posture-joint output indices into the 867 canonical points (from
+// `models/nlf_joint_map.json`: output_index == canonical index).
+pub const NLF_JOINT_NECK: usize = 75;
+pub const NLF_JOINT_NOSE: usize = 76;
+pub const NLF_JOINT_LSHO: usize = 77;
+pub const NLF_JOINT_RSHO: usize = 83;
+pub const NLF_JOINT_LHIP: usize = 80;
+pub const NLF_JOINT_RHIP: usize = 86;
+pub const NLF_JOINT_LEAR: usize = 90;
+pub const NLF_JOINT_REAR: usize = 92;
+pub const NLF_JOINT_LEYE: usize = 89;
+pub const NLF_JOINT_REYE: usize = 91;
+pub const NLF_JOINT_PELV: usize = 93;
+// Lower-body joints used only for the truncation-uncertainty signal.
+pub const NLF_JOINT_LKNE: usize = 81;
+pub const NLF_JOINT_LANK: usize = 82;
+pub const NLF_JOINT_RKNE: usize = 87;
+pub const NLF_JOINT_RANK: usize = 88;
+
+/// FROZEN feature width of the NLF depth feature. Changing it would make every
+/// already-stored `nlf_depth` frame fail the storage dimension check. Kept in sync
+/// with the literal `14` in `slouch_domain::FeatureId::NlfDepth` metadata.
+pub const NLF_DEPTH_DIMS: usize = 14;
+pub const NLF_DEPTH_STORAGE_COST: usize = NLF_DEPTH_DIMS * FLOAT32_BYTES;

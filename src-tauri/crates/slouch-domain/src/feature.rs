@@ -40,10 +40,12 @@ pub enum FeatureId {
     PostureGeometry,
     #[serde(rename = "torso_invariant")]
     TorsoInvariant,
+    #[serde(rename = "nlf_depth")]
+    NlfDepth,
 }
 
 impl FeatureId {
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::BackboneFeatures,
         Self::BackboneFeaturesMax,
         Self::BackboneFeaturesStd,
@@ -61,6 +63,7 @@ impl FeatureId {
         Self::RawKeypoints,
         Self::PostureGeometry,
         Self::TorsoInvariant,
+        Self::NlfDepth,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -82,6 +85,7 @@ impl FeatureId {
             Self::RawKeypoints => "raw_keypoints",
             Self::PostureGeometry => "posture_geometry",
             Self::TorsoInvariant => "torso_invariant",
+            Self::NlfDepth => "nlf_depth",
         }
     }
 
@@ -104,6 +108,9 @@ impl FeatureId {
       Self::RawKeypoints => FeatureMetadata::computed(self, "Raw Keypoints", "Raw x,y coordinates for all 17 keypoints (34 dims)", 34, Some(ModelCategory::Posture), Some(false)),
       Self::PostureGeometry => FeatureMetadata::computed(self, "Posture Geometry (invariant)", "10 scale/translation-invariant geometric posture features from head and shoulder keypoints", 10, Some(ModelCategory::Posture), Some(false)),
       Self::TorsoInvariant => FeatureMetadata::computed(self, "Torso-Invariant Geometry", "7 scale/translation-invariant torso-anchored features separating head flexion from trunk slouch (7 dims)", 7, Some(ModelCategory::Posture), Some(false)),
+      // Dimension literal `14` must stay in lock-step with `slouch_ml::constants::NLF_DEPTH_DIMS`;
+      // slouch-domain cannot depend on slouch-ml, so it is duplicated here (frozen at 14).
+      Self::NlfDepth => FeatureMetadata::stored(self, "NLF Depth (3D)", "Body-intrinsic 3D depth and angle features from the NLF-L model that separate forward-head posture from trunk lean (14 dims)", 14, ModelCategory::Posture),
     }
     }
 }
@@ -204,6 +211,6 @@ impl FeatureMetadata {
     }
 }
 
-pub fn feature_registry() -> [FeatureMetadata; 17] {
+pub fn feature_registry() -> [FeatureMetadata; 18] {
     FeatureId::ALL.map(FeatureId::metadata)
 }

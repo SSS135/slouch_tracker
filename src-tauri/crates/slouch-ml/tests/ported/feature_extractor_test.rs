@@ -798,7 +798,9 @@ fn pca_clamped_to_feature_dimensions_records_effective_count_and_round_trips() {
         30,
     ));
     let features = (0..30).map(create_torso_mock).collect::<Vec<_>>();
-    let labels = (0..30usize).map(|index| (index % 2) as i32).collect::<Vec<_>>();
+    let labels = (0..30usize)
+        .map(|index| (index % 2) as i32)
+        .collect::<Vec<_>>();
     extractor.fit(&features, &labels).unwrap();
 
     assert_eq!(extractor.get_output_dimensions(), 7);

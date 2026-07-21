@@ -40,7 +40,8 @@ fn worker_with_frames(
         &worker.handle_message(InferenceWorkerMessage::Initialize {
             payload: InitializePayload {
                 rtmdet_path: "det".into(),
-                rtmw3d_path: "pose".into()
+                rtmw3d_path: "pose".into(),
+                nlf_path: None,
             },
         })[..],
         [WorkerResponse::Initialized { .. }]
@@ -195,6 +196,7 @@ fn no_person_reports_away_without_running_presence_and_posture_only_emits_no_cla
             payload: InitializePayload {
                 rtmdet_path: "det".into(),
                 rtmw3d_path: "pose".into(),
+                nlf_path: None,
             },
         });
         if presence {
@@ -276,6 +278,7 @@ fn prediction_error_degrades_to_result_without_classification_and_logs() {
         payload: InitializePayload {
             rtmdet_path: "det".into(),
             rtmw3d_path: "pose".into(),
+            nlf_path: None,
         },
     });
     load_presence(&mut worker, 0.8);
@@ -317,6 +320,7 @@ fn prediction_error_degrades_to_result_without_classification_and_logs() {
         payload: InitializePayload {
             rtmdet_path: "det".into(),
             rtmw3d_path: "pose".into(),
+            nlf_path: None,
         },
     });
     load_posture(&mut worker, 0.7);
@@ -365,6 +369,7 @@ fn no_person_reports_away_even_when_presence_model_would_error() {
         payload: InitializePayload {
             rtmdet_path: "det".into(),
             rtmw3d_path: "pose".into(),
+            nlf_path: None,
         },
     });
     load_presence(&mut worker, 0.2);

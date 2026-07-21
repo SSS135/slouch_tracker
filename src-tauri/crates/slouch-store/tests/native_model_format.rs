@@ -234,8 +234,8 @@ fn clamped_pca_model_round_trips_through_container() {
         version: 1.0,
     };
 
-    let bytes =
-        encode_model(&model, ModelRole::Posture, 1, [1; 32], None).expect("encode clamped PCA SLMD");
+    let bytes = encode_model(&model, ModelRole::Posture, 1, [1; 32], None)
+        .expect("encode clamped PCA SLMD");
     let (decoded, _envelope) = decode_model(&bytes).expect("decode clamped PCA SLMD");
     assert_eq!(
         decoded.feature_extractor.dim_reduction_config.components,

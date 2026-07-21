@@ -404,6 +404,9 @@ pub struct InitializePayload {
     pub rtmdet_path: String,
     #[serde(deserialize_with = "deserialize_nonempty_string")]
     pub rtmw3d_path: String,
+    // Optional so the GPU-absent path (and existing constructors) can pass `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nlf_path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

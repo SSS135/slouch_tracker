@@ -86,7 +86,8 @@ fn actual_worker_routes_configuration_initialization_and_processing_logs() {
         &worker.handle_message(InferenceWorkerMessage::Initialize {
             payload: InitializePayload {
                 rtmdet_path: "det".into(),
-                rtmw3d_path: "pose".into()
+                rtmw3d_path: "pose".into(),
+                nlf_path: None,
             },
         })[..],
         [WorkerResponse::Initialized { .. }]
@@ -135,6 +136,7 @@ fn actual_worker_logs_initialization_failure_without_publishing_initialized() {
         payload: InitializePayload {
             rtmdet_path: "bad".into(),
             rtmw3d_path: "unused".into(),
+            nlf_path: None,
         },
     });
     assert!(matches!(&response[..], [WorkerResponse::Error { .. }]));

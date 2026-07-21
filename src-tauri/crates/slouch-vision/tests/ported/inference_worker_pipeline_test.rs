@@ -33,7 +33,8 @@ fn initialized_worker(
         &worker.handle_message(InferenceWorkerMessage::Initialize {
             payload: InitializePayload {
                 rtmdet_path: "det".into(),
-                rtmw3d_path: "pose".into()
+                rtmw3d_path: "pose".into(),
+                nlf_path: None,
             },
         })[..],
         [WorkerResponse::Initialized { .. }]

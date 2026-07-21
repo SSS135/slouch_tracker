@@ -1028,3 +1028,103 @@ fn pca_component_clamp_surfaces_as_a_posture_warning() {
         posture.warnings
     );
 }
+
+/// A reservoir sample carrying the pooled RTMPose/RTMDet stored features (and keypoints)
+/// but NOT the GPU-only `nlf_depth` stored feature — exactly the shape the PCA guard
+/// must detect and drop.
+fn nlf_reservoir_sample() -> ReservoirSample {
+    ReservoirSample {
+        backbone_avg: vec![0.0; FeatureId::BackboneFeatures.metadata().dimensions],
+        backbone_max: vec![0.0; FeatureId::BackboneFeaturesMax.metadata().dimensions],
+        backbone_std: vec![0.0; FeatureId::BackboneFeaturesStd.metadata().dimensions],
+        gau_avg: vec![0.0; FeatureId::GauFeatures.metadata().dimensions],
+        gau_max: vec![0.0; FeatureId::GauFeaturesMax.metadata().dimensions],
+        gau_std: vec![0.0; FeatureId::GauFeaturesStd.metadata().dimensions],
+        rtmdet: vec![0.0; FeatureId::RtmDetExtracted.metadata().dimensions],
+        keypoints: vec![Keypoint::new(0.5, 0.5, 0.5); 17],
+        bbox: BoundingBox {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 1.0,
+            y2: 1.0,
+            score: 0.9,
+            width: 1.0,
+            height: 1.0,
+        },
+    }
+}
+
+fn nlf_frame(id: &str, label: FrameLabel) -> PostureFrame {
+    let mut posture_frame = frame(id, label);
+    posture_frame.features = BTreeMap::from([
+        (
+            FeatureId::NlfDepth,
+            vec![0.1; FeatureId::NlfDepth.metadata().dimensions],
+        ),
+        (
+            FeatureId::BackboneFeatures,
+            vec![0.2; FeatureId::BackboneFeatures.metadata().dimensions],
+        ),
+    ]);
+    posture_frame
+}
+
+#[test]
+fn pca_drops_reservoir_for_a_posture_feature_absent_from_reservoir_samples() {
+    // Selecting [nlf_depth, backbone_features] + PCA + a non-empty reservoir: nlf_depth is a
+    // GPU-only stored feature the reservoir never carries, so the guard must drop the reservoir
+    // (rather than hard-error in concatenate_features) and surface a warning. backbone_features
+    // IS in the reservoir, so it must NOT trigger a warning.
+    let storage_state = Arc::new(Mutex::new(StorageState::default()));
+    let backend_state = Arc::new(Mutex::new(BackendState::default()));
+    let mut pca_settings = settings();
+    pca_settings.dim_reduction_config = DimensionalityReductionConfig {
+        method: DimensionalityReductionMethod::Pca,
+        components: 5,
+    };
+    pca_settings.posture_feature_types = vec![FeatureId::NlfDepth, FeatureId::BackboneFeatures];
+    let storage = TestStorage {
+        state: storage_state,
+        datasets: VecDeque::from([Ok(Some(PostureDataset {
+            frames: vec![
+                nlf_frame("good", FrameLabel::Good),
+                nlf_frame("bad", FrameLabel::Bad),
+            ],
+            version: 1,
+            last_modified: 1.0,
+        }))]),
+        settings: Ok(Some(pca_settings)),
+        reservoir: Ok(vec![nlf_reservoir_sample()]),
+        fail_posture_save: false,
+        fail_presence_save: false,
+    };
+    let mut worker = make_worker(
+        storage,
+        TestBackend {
+            state: backend_state,
+            fail_cv_for: None,
+            fail_fit_for: None,
+        },
+        TestLogger::default(),
+    );
+    let response = worker.handle_message(TrainingWorkerMessage::Train { payload: None });
+    let [TrainingWorkerResponse::Result { result, models }] = &response[..] else {
+        panic!("expected result: {response:?}")
+    };
+    assert!(result.success);
+    assert!(models.posture.is_some());
+    assert!(
+        result.warnings.iter().any(|warning| warning
+            == "PCA fitted on labeled frames only: feature 'nlf_depth' is absent from reservoir samples."),
+        "expected nlf_depth reservoir-drop warning, got {:?}",
+        result.warnings
+    );
+    assert!(
+        !result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("'backbone_features' is absent")),
+        "backbone_features is present in the reservoir and must not warn: {:?}",
+        result.warnings
+    );
+}

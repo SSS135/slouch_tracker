@@ -17,6 +17,7 @@ use slouch_domain::{
     PostureFrame, TrainingMetrics, TrainingResult, TrainingSettings,
 };
 
+use super::feature_extraction::is_feature_available;
 use super::types::SerializedModel;
 
 const MIN_FRAMES_PER_CLASS: usize = 1;
@@ -488,12 +489,13 @@ where
                 .iter()
                 .map(|frame| i32::from(frame.label != FrameLabel::Good))
                 .collect::<Vec<_>>();
-            let unlabeled =
-                if settings.dim_reduction_config.method == DimensionalityReductionMethod::Pca {
-                    reservoir_sources
-                } else {
-                    Vec::new()
-                };
+            let unlabeled = if settings.dim_reduction_config.method
+                == DimensionalityReductionMethod::Pca
+            {
+                drop_reservoir_absent_from_pca(reservoir_sources, &posture_features, &mut warnings)
+            } else {
+                Vec::new()
+            };
             match self.train_one(
                 (&frames, &labels, &unlabeled),
                 &posture_features,
@@ -746,6 +748,63 @@ fn validate_training_reservoir(samples: &[ReservoirSample]) -> Result<(), Traini
         })?;
     }
     Ok(())
+}
+
+/// Drops the reservoir from PCA fitting when a selected posture feature cannot be
+/// extracted from the reservoir samples. Reservoir containers carry only the pooled
+/// RTMPose/RTMDet stored features plus keypoints, never GPU-only stored features such as
+/// `nlf_depth`; feeding one to `concatenate_features` for an absent feature hard-errors,
+/// so PCA falls back to the labeled frames only and a visible warning is surfaced.
+fn drop_reservoir_absent_from_pca(
+    reservoir_sources: Vec<FeatureContainer>,
+    posture_features: &[FeatureId],
+    warnings: &mut Vec<String>,
+) -> Vec<FeatureContainer> {
+    let Some(representative) = reservoir_sources.first() else {
+        return reservoir_sources;
+    };
+    let probe = reservoir_probe_frame(representative);
+    let absent = posture_features
+        .iter()
+        .copied()
+        .filter(|feature| !matches!(is_feature_available(&probe, *feature), Ok(true)))
+        .collect::<Vec<_>>();
+    if absent.is_empty() {
+        return reservoir_sources;
+    }
+    for feature in absent {
+        warnings.push(format!(
+            "PCA fitted on labeled frames only: feature '{}' is absent from reservoir samples.",
+            feature.as_str()
+        ));
+    }
+    Vec::new()
+}
+
+/// Wraps a reservoir container as a `PostureFrame` so feature availability can be probed
+/// through the shared extractor. Posture-feature availability reads only the feature map
+/// and keypoints, never the bbox, so a placeholder bbox is used when the sample had none.
+fn reservoir_probe_frame(container: &FeatureContainer) -> PostureFrame {
+    PostureFrame {
+        id: String::new(),
+        timestamp: 0.0,
+        features: container.features.clone(),
+        thumbnail: slouch_domain::Thumbnail {
+            mime_type: String::new(),
+            bytes: Vec::new(),
+        },
+        keypoints: container.keypoints.clone(),
+        bbox: container.bbox.unwrap_or(slouch_domain::BoundingBox {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 1.0,
+            y2: 1.0,
+            score: 0.0,
+            width: 1.0,
+            height: 1.0,
+        }),
+        label: FrameLabel::Unused,
+    }
 }
 
 fn frames_with_label(frames: &[PostureFrame], label: FrameLabel) -> Vec<PostureFrame> {

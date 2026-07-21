@@ -25,10 +25,33 @@
     },
     {
       "id": "onnxruntime-dll",
-      "archiveMember": "onnxruntime-win-x64-1.24.4/lib/onnxruntime.dll",
-      "bytes": 14203464,
-      "sha256": "b95efb2113b603bbbf3f191061c5516a871ed546893c820e4f3b7b6c358dbf2a",
+      "source": "Microsoft.ML.OnnxRuntime.DirectML (DirectML build of ONNX Runtime)",
+      "packageVersion": "1.24.2",
+      "fileVersion": "1.24.20260219.5.3ba85bd",
+      "packageMember": "runtimes/win-x64/native/onnxruntime.dll",
+      "bytes": 17270304,
+      "sha256": "a2323bc49544645b911743052f1edce594e17df1e3423b71468c7386bc902f80",
       "packagedPath": "resources/onnxruntime/windows-x86_64/onnxruntime.dll"
+    },
+    {
+      "id": "directml-dll",
+      "source": "Microsoft.AI.DirectML",
+      "packageVersion": "1.15.4",
+      "fileVersion": "1.15.4+241025-1615.1.dml-1.15.fac7597",
+      "packageMember": "bin/x64-win/DirectML.dll",
+      "bytes": 18527776,
+      "sha256": "9c9e6d822561c6c41b90e6994b3e8857cf1d66dbfb1e0c4c799c7c89b4e92da1",
+      "packagedPath": "resources/onnxruntime/windows-x86_64/DirectML.dll"
+    },
+    {
+      "id": "onnxruntime-providers-shared-dll",
+      "source": "Microsoft.ML.OnnxRuntime.DirectML (DirectML build of ONNX Runtime)",
+      "packageVersion": "1.24.2",
+      "fileVersion": "1.24.20260219.5.3ba85bd",
+      "packageMember": "runtimes/win-x64/native/onnxruntime_providers_shared.dll",
+      "bytes": 22048,
+      "sha256": "8b33b30ac866c938aa3d946d4f92fc2ba70fff06ef45d5ce22e483f19ba2c896",
+      "packagedPath": "resources/onnxruntime/windows-x86_64/onnxruntime_providers_shared.dll"
     },
     {
       "id": "onnxruntime-license",
@@ -64,6 +87,13 @@
       "bytes": 54369106,
       "sha256": "4afb3ac968d37fa540b3b4d34acfdb0b054f3d534c9d9b7a417147036e7e9491",
       "packagedPath": "resources/models/rtmpose-m.onnx"
+    },
+    {
+      "id": "nlf-l-crop-fp16",
+      "source": "isarandi/nlf (github releases) — NLF-L crop model, fp16-converted export",
+      "bytes": 244721785,
+      "sha256": "801d6217f63a16eda4869b8b42d5bb70617e1d35cee2a8b2dfd9959decd350e7",
+      "packagedPath": "resources/models/nlf_l_crop_fp16.onnx"
     }
   ]
 }

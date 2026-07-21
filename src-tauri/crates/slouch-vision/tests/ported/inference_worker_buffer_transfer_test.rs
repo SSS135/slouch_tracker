@@ -34,6 +34,7 @@ fn production_result_owns_all_native_feature_buffers_after_worker_drop() {
         payload: InitializePayload {
             rtmdet_path: "det".into(),
             rtmw3d_path: "pose".into(),
+            nlf_path: None,
         },
     });
     let response = worker.handle_message(InferenceWorkerMessage::Process {

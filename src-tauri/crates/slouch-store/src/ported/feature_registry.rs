@@ -9,8 +9,9 @@ use std::fmt;
 use slouch_domain::{BboxAccessor, ModelCategory};
 use slouch_ml::ported::constants::{
     ENGINEERED_1D_DIMS, JOINT_2D_DIMS, JOINT_3D_DIMS, JOINT_4D_DIMS, KEYPOINT_SCORES_DIMS,
-    POSTURE_GEOMETRY_DIMS, POSTURE_RAW_DIMS, RAW_KEYPOINTS_DIMS, RTMDET_ENGINEERED_DIMS,
-    RTMDET_EXTRACTED_DIMS, RTMDET_EXTRACTED_STORAGE_COST, RTMPOSE_BACKBONE_POOLED_DIMS,
+    NLF_DEPTH_DIMS, NLF_DEPTH_STORAGE_COST, POSTURE_GEOMETRY_DIMS, POSTURE_RAW_DIMS,
+    RAW_KEYPOINTS_DIMS, RTMDET_ENGINEERED_DIMS, RTMDET_EXTRACTED_DIMS,
+    RTMDET_EXTRACTED_STORAGE_COST, RTMPOSE_BACKBONE_POOLED_DIMS,
     RTMPOSE_BACKBONE_POOLED_STORAGE_COST, RTMPOSE_GAU_POOLED_DIMS, RTMPOSE_GAU_POOLED_STORAGE_COST,
     TORSO_INVARIANT_DIMS,
 };
@@ -49,10 +50,11 @@ pub const FEATURE_KEYPOINT_SCORES: FeatureType = FeatureType::KeypointScores;
 pub const FEATURE_RAW_KEYPOINTS: FeatureType = FeatureType::RawKeypoints;
 pub const FEATURE_POSTURE_GEOMETRY: FeatureType = FeatureType::PostureGeometry;
 pub const FEATURE_TORSO_INVARIANT: FeatureType = FeatureType::TorsoInvariant;
+pub const FEATURE_NLF_DEPTH: FeatureType = FeatureType::NlfDepth;
 
 /// Valid feature type identifiers, in the same insertion order as the source
 /// object registry.
-pub const FEATURE_TYPES: [FeatureType; 17] = FeatureType::ALL;
+pub const FEATURE_TYPES: [FeatureType; 18] = FeatureType::ALL;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExtractorKind {
@@ -278,6 +280,14 @@ impl FeatureDefinition {
                 Some(false),
                 ExtractorKind::TorsoInvariant,
             ),
+            FeatureType::NlfDepth => Self::stored(
+                id,
+                "NLF Depth (3D)",
+                "14 camera-robust 3D depth cues from NLF-L (forward-head, neck flexion, trunk lean, plus confidence/truncation guards)",
+                NLF_DEPTH_DIMS,
+                NLF_DEPTH_STORAGE_COST,
+                ModelCategory::Posture,
+            ),
         }
     }
 
@@ -317,7 +327,7 @@ impl FeatureDefinition {
 }
 
 /// Registry of all available feature types.
-pub const FEATURE_REGISTRY: [FeatureDefinition; 17] = [
+pub const FEATURE_REGISTRY: [FeatureDefinition; 18] = [
     FeatureDefinition::from_feature_type(FEATURE_BACKBONE_AVG),
     FeatureDefinition::from_feature_type(FEATURE_BACKBONE_MAX),
     FeatureDefinition::from_feature_type(FEATURE_BACKBONE_STD),
@@ -335,6 +345,7 @@ pub const FEATURE_REGISTRY: [FeatureDefinition; 17] = [
     FeatureDefinition::from_feature_type(FEATURE_RAW_KEYPOINTS),
     FeatureDefinition::from_feature_type(FEATURE_POSTURE_GEOMETRY),
     FeatureDefinition::from_feature_type(FEATURE_TORSO_INVARIANT),
+    FeatureDefinition::from_feature_type(FEATURE_NLF_DEPTH),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -406,7 +417,7 @@ pub fn get_feature_dimensions(feature_type: &str) -> Result<usize, UnknownFeatur
 }
 
 /// Return all feature identifiers in registry order.
-pub fn get_all_feature_types() -> [FeatureType; 17] {
+pub fn get_all_feature_types() -> [FeatureType; 18] {
     FEATURE_TYPES
 }
 
