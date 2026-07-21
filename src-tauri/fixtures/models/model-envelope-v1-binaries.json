@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "generator": {
+    "path": "scripts/oracles/generate-model-envelopes.ts",
+    "sha256": "51e4cf1f88bb8bdb8b21859bfa36057b26d984943db23104de498b8a0e1fa01d"
+  },
+  "binaries": [
+    {
+      "id": "presence-svm",
+      "path": "src-tauri/fixtures/models/presence-svm-v1.bin",
+      "bytes": 531,
+      "sha256": "e72acec67baf21175b716ff6d5f6f15946059110990187bdd2acbb2c8b557d19"
+    },
+    {
+      "id": "posture-svm",
+      "path": "src-tauri/fixtures/models/posture-svm-v1.bin",
+      "bytes": 530,
+      "sha256": "c3e73a5724b6ff4f4bfd2b95be3abc0f1d19addd70ab925e1223b96c70e65a6c"
+    },
+    {
+      "id": "training-config",
+      "path": "src-tauri/fixtures/models/training-config-v1.bin",
+      "bytes": 92,
+      "sha256": "97755f6c754202de84fdcb511a81ee9c6e95f6c13b511ab6630014c6c2ff5e0f"
+    },
+    {
+      "id": "nonsquare-mlp",
+      "path": "src-tauri/fixtures/models/nonsquare-mlp-v1.bin",
+      "bytes": 2839,
+      "sha256": "61992b53cff0e29e0ea30900acc3bdf71a5b9290618fe2a1077ca00849ec8f36"
+    }
+  ]
+}

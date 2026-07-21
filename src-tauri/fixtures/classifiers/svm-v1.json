@@ -1,0 +1,1027 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "classifiers/svm-v1",
+  "sources": [
+    {
+      "path": "src/services/ml/svmClassifier.ts",
+      "sha256": "bb7e7cde1ae34ed0b35d4fa81f3029fc9bdee0f135fbb30a6ae3e01a3439c11d"
+    },
+    {
+      "path": "src/services/ml/sgd.ts",
+      "sha256": "34c3f63110c088ba2cacc8f1d5a7025795b446dc3cf7897de6c688d987398d66"
+    },
+    {
+      "path": "src/services/ml/config.ts",
+      "sha256": "8f0313e827cda4411c48b2a5a91cd41ce680e45bd0fd4e03e47c5dbb5e4b442c"
+    },
+    {
+      "path": "src/services/ml/utils/classWeights.ts",
+      "sha256": "2514d64e82c0e8633f84f843b5ea7dfe19a0d149e6b9cf15d40a4cea01a3f914"
+    }
+  ],
+  "generator": {
+    "path": "scripts/oracles/generate-svm.ts",
+    "sha256": "b1ab1709b81123009fc516cd2cf4b38c4974dcee66a359bcca616d4e28d8f81f",
+    "command": "npx tsx scripts/oracles/generate-svm.ts --write"
+  },
+  "environment": {
+    "os": "win32",
+    "arch": "x64",
+    "node": "24.15.0",
+    "packageLockSha256": "cef95e334f993f2752776beeb27d737385afdd0530dc8703b53fbacd8056391f",
+    "backend": "TensorFlow.js 4.22.0 CPU",
+    "endianness": "le",
+    "threads": 1,
+    "graphOptimization": "all",
+    "rng": "seedrandom 3.0.5 ARC4 where applicable",
+    "seedEncoding": "JavaScript Number.prototype.toString"
+  },
+  "tolerances": {
+    "numeric": {
+      "absolute": 0.000002,
+      "relative": 0.000002
+    },
+    "iterative": {
+      "absolute": 0.0002
+    },
+    "exact": [
+      "ids",
+      "labels",
+      "shapes",
+      "assignments",
+      "decisionsAwayFromThreshold"
+    ]
+  },
+  "invalidCases": [
+    {
+      "id": "empty",
+      "operation": "train",
+      "rows": [],
+      "labels": [],
+      "params": {
+        "C": 1,
+        "maxIterations": 2,
+        "useClassWeights": false
+      },
+      "nativeError": "EmptyDataset",
+      "typescript": {
+        "ok": false,
+        "errorName": "Error",
+        "errorMessage": "Cannot train on empty dataset"
+      }
+    },
+    {
+      "id": "mismatch",
+      "operation": "train",
+      "rows": [
+        [
+          1
+        ]
+      ],
+      "labels": [],
+      "params": {
+        "C": 1,
+        "maxIterations": 2,
+        "useClassWeights": false
+      },
+      "nativeError": "LengthMismatch",
+      "typescript": {
+        "ok": false,
+        "errorName": "Error",
+        "errorMessage": "Length mismatch: 1 features, 0 labels"
+      }
+    },
+    {
+      "id": "ragged",
+      "operation": "train",
+      "rows": [
+        [
+          1,
+          2
+        ],
+        [
+          3
+        ]
+      ],
+      "labels": [
+        0,
+        1
+      ],
+      "params": {
+        "C": 1,
+        "maxIterations": 2,
+        "useClassWeights": false
+      },
+      "nativeError": "RaggedFeatures",
+      "typescript": {
+        "ok": false,
+        "errorName": "Error",
+        "errorMessage": "Training failed: Model weights contain NaN values. This indicates numerical instability. Try reducing learning rate or increasing regularization."
+      }
+    },
+    {
+      "id": "nan",
+      "operation": "train",
+      "rows": [
+        [
+          "NaN"
+        ],
+        [
+          1
+        ]
+      ],
+      "labels": [
+        0,
+        1
+      ],
+      "params": {
+        "C": 1,
+        "maxIterations": 2,
+        "useClassWeights": false
+      },
+      "nativeError": "NonFiniteFeature",
+      "typescript": {
+        "ok": false,
+        "errorName": "Error",
+        "errorMessage": "Training failed: Model weights contain NaN values. This indicates numerical instability. Try reducing learning rate or increasing regularization."
+      }
+    },
+    {
+      "id": "invalid-c",
+      "operation": "construct",
+      "params": {
+        "C": -1,
+        "maxIterations": 2,
+        "useClassWeights": false
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": true,
+        "value": "svm"
+      }
+    },
+    {
+      "id": "malformed-state",
+      "operation": "load",
+      "params": {
+        "C": 1,
+        "maxIterations": 2,
+        "useClassWeights": false
+      },
+      "state": {
+        "weights": [],
+        "bias": 0,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": true,
+        "value": {
+          "state": {
+            "weights": [],
+            "bias": 0,
+            "classWeights": [
+              1,
+              1
+            ]
+          },
+          "probability": 0.5
+        }
+      }
+    },
+    {
+      "id": "nonfinite-state",
+      "operation": "load",
+      "params": {
+        "C": 1,
+        "maxIterations": 2,
+        "useClassWeights": false
+      },
+      "state": {
+        "weights": [
+          "NaN",
+          0.004774465691298246
+        ],
+        "bias": 0,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": true,
+        "value": {
+          "state": {
+            "weights": [
+              "NaN",
+              0.004774465691298246
+            ],
+            "bias": 0,
+            "classWeights": [
+              1,
+              1
+            ]
+          },
+          "probability": "NaN"
+        }
+      }
+    },
+    {
+      "id": "above-f32-max-state",
+      "operation": "load",
+      "params": {
+        "C": 1,
+        "maxIterations": 2,
+        "useClassWeights": false
+      },
+      "state": {
+        "weights": [
+          3.5e+38,
+          0.004774465691298246
+        ],
+        "bias": 0,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": true,
+        "value": {
+          "state": {
+            "weights": [
+              "+Infinity",
+              0.004774465691298246
+            ],
+            "bias": 0,
+            "classWeights": [
+              1,
+              1
+            ]
+          },
+          "probability": 0
+        }
+      }
+    },
+    {
+      "id": "nonfinite-prediction",
+      "operation": "predict",
+      "params": {
+        "C": 1,
+        "maxIterations": 2,
+        "useClassWeights": false
+      },
+      "state": {
+        "weights": [
+          0.01905309408903122,
+          0.004774465691298246
+        ],
+        "bias": 0,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "probe": [
+        "+Infinity",
+        0
+      ],
+      "nativeError": "NonFiniteFeature",
+      "typescript": {
+        "ok": true,
+        "value": {
+          "state": {
+            "weights": [
+              0.01905309408903122,
+              0.004774465691298246
+            ],
+            "bias": 0,
+            "classWeights": [
+              1,
+              1
+            ]
+          },
+          "probability": 0
+        }
+      }
+    }
+  ],
+  "cases": [
+    {
+      "id": "iter0",
+      "params": {
+        "C": 1,
+        "maxIterations": 0,
+        "useClassWeights": false
+      },
+      "rows": [
+        [
+          -2,
+          -0.7
+        ],
+        [
+          -1.4,
+          -0.4
+        ],
+        [
+          -0.8,
+          -1.1
+        ],
+        [
+          0.7,
+          1.2
+        ],
+        [
+          1.6,
+          0.4
+        ],
+        [
+          2.2,
+          1.7
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -1.25,
+          -0.75
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1.25,
+          0.75
+        ]
+      ],
+      "state": {
+        "weights": [
+          0.01905309408903122,
+          0.004774465691298246
+        ],
+        "bias": 0,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "stateF32Bits": {
+        "weights": [
+          1016862012,
+          1000108831
+        ],
+        "bias": 0
+      },
+      "decisionValues": [
+        -0.027397217229008675,
+        0,
+        0.027397217229008675
+      ],
+      "probabilities": [
+        0.5068488717079163,
+        0.5,
+        0.49315112829208374
+      ],
+      "loadedProbabilities": [
+        0.5068488717079163,
+        0.5,
+        0.49315112829208374
+      ]
+    },
+    {
+      "id": "iter1",
+      "params": {
+        "C": 1,
+        "maxIterations": 1,
+        "useClassWeights": false
+      },
+      "rows": [
+        [
+          -2,
+          -0.7
+        ],
+        [
+          -1.4,
+          -0.4
+        ],
+        [
+          -0.8,
+          -1.1
+        ],
+        [
+          0.7,
+          1.2
+        ],
+        [
+          1.6,
+          0.4
+        ],
+        [
+          2.2,
+          1.7
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -1.25,
+          -0.75
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1.25,
+          0.75
+        ]
+      ],
+      "state": {
+        "weights": [
+          0.03317203372716904,
+          0.013845643028616905
+        ],
+        "bias": 0,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "stateF32Bits": {
+        "weights": [
+          1023926118,
+          1013110998
+        ],
+        "bias": 0
+      },
+      "decisionValues": [
+        -0.05184927582740784,
+        0,
+        0.05184927582740784
+      ],
+      "probabilities": [
+        0.5129594206809998,
+        0.5,
+        0.48704057931900024
+      ],
+      "loadedProbabilities": [
+        0.5129594206809998,
+        0.5,
+        0.48704057931900024
+      ]
+    },
+    {
+      "id": "iter2",
+      "params": {
+        "C": 1,
+        "maxIterations": 2,
+        "useClassWeights": false
+      },
+      "rows": [
+        [
+          -2,
+          -0.7
+        ],
+        [
+          -1.4,
+          -0.4
+        ],
+        [
+          -0.8,
+          -1.1
+        ],
+        [
+          0.7,
+          1.2
+        ],
+        [
+          1.6,
+          0.4
+        ],
+        [
+          2.2,
+          1.7
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -1.25,
+          -0.75
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1.25,
+          0.75
+        ]
+      ],
+      "state": {
+        "weights": [
+          0.059715636074543,
+          0.03089945577085018
+        ],
+        "bias": 0,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "stateF32Bits": {
+        "weights": [
+          1031051362,
+          1023221979
+        ],
+        "bias": 0
+      },
+      "decisionValues": [
+        -0.09781913459300995,
+        0,
+        0.09781913459300995
+      ],
+      "probabilities": [
+        0.5244353115558624,
+        0.5,
+        0.47556471824645996
+      ],
+      "loadedProbabilities": [
+        0.5244353115558624,
+        0.5,
+        0.47556471824645996
+      ]
+    },
+    {
+      "id": "iter25",
+      "params": {
+        "C": 1,
+        "maxIterations": 25,
+        "useClassWeights": false
+      },
+      "rows": [
+        [
+          -2,
+          -0.7
+        ],
+        [
+          -1.4,
+          -0.4
+        ],
+        [
+          -0.8,
+          -1.1
+        ],
+        [
+          0.7,
+          1.2
+        ],
+        [
+          1.6,
+          0.4
+        ],
+        [
+          2.2,
+          1.7
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -1.25,
+          -0.75
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1.25,
+          0.75
+        ]
+      ],
+      "state": {
+        "weights": [
+          0.38853779435157776,
+          0.31490617990493774
+        ],
+        "bias": -0.06113699823617935,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "stateF32Bits": {
+        "weights": [
+          1053224557,
+          1050753890
+        ],
+        "bias": 3178916554
+      },
+      "decisionValues": [
+        -0.7829889059066772,
+        -0.06113699823617935,
+        0.660714864730835
+      ],
+      "probabilities": [
+        0.6863239407539368,
+        0.5152795016765594,
+        0.3405790328979492
+      ],
+      "loadedProbabilities": [
+        0.6863239407539368,
+        0.5152795016765594,
+        0.3405790328979492
+      ]
+    },
+    {
+      "id": "c-point-one",
+      "params": {
+        "C": 0.1,
+        "maxIterations": 2,
+        "useClassWeights": false
+      },
+      "rows": [
+        [
+          -2,
+          -0.7
+        ],
+        [
+          -1.4,
+          -0.4
+        ],
+        [
+          -0.8,
+          -1.1
+        ],
+        [
+          0.7,
+          1.2
+        ],
+        [
+          1.6,
+          0.4
+        ],
+        [
+          2.2,
+          1.7
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -1.25,
+          -0.75
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1.25,
+          0.75
+        ]
+      ],
+      "state": {
+        "weights": [
+          0.02213163673877716,
+          0.007139456458389759
+        ],
+        "bias": 0,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "stateF32Bits": {
+        "weights": [
+          1018514792,
+          1005187610
+        ],
+        "bias": 0
+      },
+      "decisionValues": [
+        -0.033019136637449265,
+        0,
+        0.033019136637449265
+      ],
+      "probabilities": [
+        0.5082540214061737,
+        0.5,
+        0.4917459487915039
+      ],
+      "loadedProbabilities": [
+        0.5082540214061737,
+        0.5,
+        0.4917459487915039
+      ]
+    },
+    {
+      "id": "c-ten",
+      "params": {
+        "C": 10,
+        "maxIterations": 2,
+        "useClassWeights": false
+      },
+      "rows": [
+        [
+          -2,
+          -0.7
+        ],
+        [
+          -1.4,
+          -0.4
+        ],
+        [
+          -0.8,
+          -1.1
+        ],
+        [
+          0.7,
+          1.2
+        ],
+        [
+          1.6,
+          0.4
+        ],
+        [
+          2.2,
+          1.7
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -1.25,
+          -0.75
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1.25,
+          0.75
+        ]
+      ],
+      "state": {
+        "weights": [
+          0.435555636882782,
+          0.2684994637966156
+        ],
+        "bias": 0,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "stateF32Bits": {
+        "weights": [
+          1054802214,
+          1049196739
+        ],
+        "bias": 0
+      },
+      "decisionValues": [
+        -0.7458191514015198,
+        0,
+        0.7458191514015198
+      ],
+      "probabilities": [
+        0.6782670319080353,
+        0.5,
+        0.3217329978942871
+      ],
+      "loadedProbabilities": [
+        0.6782670319080353,
+        0.5,
+        0.3217329978942871
+      ]
+    },
+    {
+      "id": "weighted",
+      "params": {
+        "C": 1,
+        "maxIterations": 2,
+        "useClassWeights": true
+      },
+      "rows": [
+        [
+          -2,
+          -0.7
+        ],
+        [
+          -1.4,
+          -0.4
+        ],
+        [
+          -0.8,
+          -1.1
+        ],
+        [
+          0.7,
+          1.2
+        ],
+        [
+          1.6,
+          0.4
+        ],
+        [
+          2.2,
+          1.7
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -1.25,
+          -0.75
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1.25,
+          0.75
+        ]
+      ],
+      "state": {
+        "weights": [
+          0.059715636074543,
+          0.03089945577085018
+        ],
+        "bias": 0,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "stateF32Bits": {
+        "weights": [
+          1031051362,
+          1023221979
+        ],
+        "bias": 0
+      },
+      "decisionValues": [
+        -0.09781913459300995,
+        0,
+        0.09781913459300995
+      ],
+      "probabilities": [
+        0.5244353115558624,
+        0.5,
+        0.47556471824645996
+      ],
+      "loadedProbabilities": [
+        0.5244353115558624,
+        0.5,
+        0.47556471824645996
+      ]
+    },
+    {
+      "id": "large-small-cancellation",
+      "params": {
+        "C": 1,
+        "maxIterations": 2,
+        "useClassWeights": false
+      },
+      "rows": [
+        [
+          16777216,
+          1,
+          -16777216
+        ],
+        [
+          -16777216,
+          -1,
+          16777216
+        ],
+        [
+          8388608,
+          1.1920928955078125e-7,
+          -8388608
+        ],
+        [
+          -8388608,
+          -1.1920928955078125e-7,
+          8388608
+        ]
+      ],
+      "labels": [
+        0,
+        1,
+        0,
+        1
+      ],
+      "probes": [
+        [
+          16777216,
+          1,
+          -16777216
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          -16777216,
+          -1,
+          16777216
+        ]
+      ],
+      "state": {
+        "weights": [
+          -236558.71875,
+          -0.004900543484836817,
+          236558.75
+        ],
+        "bias": 0,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "stateF32Bits": {
+        "weights": [
+          3362194350,
+          3147863229,
+          1214710704
+        ],
+        "bias": 0
+      },
+      "decisionValues": [
+        -7937593966592,
+        0,
+        7937593966592
+      ],
+      "probabilities": [
+        1,
+        0.5,
+        0
+      ],
+      "loadedProbabilities": [
+        1,
+        0.5,
+        0
+      ]
+    }
+  ]
+}

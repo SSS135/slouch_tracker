@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "target": "x86_64-pc-windows-msvc",
+  "resources": [
+    {
+      "id": "ort-web-wasm-oracle",
+      "source": "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.0/dist/ort-wasm-simd-threaded.wasm",
+      "packageVersion": "1.23.0",
+      "packageResolved": "https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.23.0.tgz",
+      "packageIntegrity": "sha512-w0bvC2RwDxphOUFF8jFGZ/dYw+duaX20jM6V4BIZJPCfK4QuCpB/pVREV+hjYbT3x4hyfa2ZbTaWx4e1Vot0fQ==",
+      "artifactFilename": "ort-wasm-simd-threaded.wasm",
+      "bytes": 11815498,
+      "sha256": "3260fcdb33b4fc4ec33e89caf392e13625823e01049d3bf32c38464f9dbfe14c",
+      "executionProvider": "wasm",
+      "threads": 1,
+      "graphOptimization": "all",
+      "packagedPath": null
+    },
+    {
+      "id": "onnxruntime-archive",
+      "source": "https://github.com/microsoft/onnxruntime/releases/download/v1.24.4/onnxruntime-win-x64-1.24.4.zip",
+      "bytes": 74442783,
+      "sha256": "d2319fddfb6ea4db99ccc4b60c85c517bcd855721f5daa6a06d40d7cb2ee2357",
+      "packagedPath": null
+    },
+    {
+      "id": "onnxruntime-dll",
+      "archiveMember": "onnxruntime-win-x64-1.24.4/lib/onnxruntime.dll",
+      "bytes": 14203464,
+      "sha256": "b95efb2113b603bbbf3f191061c5516a871ed546893c820e4f3b7b6c358dbf2a",
+      "packagedPath": "resources/onnxruntime/windows-x86_64/onnxruntime.dll"
+    },
+    {
+      "id": "onnxruntime-license",
+      "archiveMember": "onnxruntime-win-x64-1.24.4/LICENSE",
+      "bytes": 1094,
+      "sha256": "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674",
+      "packagedPath": "resources/onnxruntime/notices/LICENSE"
+    },
+    {
+      "id": "onnxruntime-privacy",
+      "archiveMember": "onnxruntime-win-x64-1.24.4/Privacy.md",
+      "bytes": 2490,
+      "sha256": "bfb7712b075f3f07e3ebee5dc2a296d1de32dbf71ad28663f73d1538cb6c3b08",
+      "packagedPath": "resources/onnxruntime/notices/Privacy.md"
+    },
+    {
+      "id": "onnxruntime-notices",
+      "archiveMember": "onnxruntime-win-x64-1.24.4/ThirdPartyNotices.txt",
+      "bytes": 331175,
+      "sha256": "fb0af774b4d7cffc5b9d046f2aaeade2f37df2f80abf8033c95dfffcc77a8866",
+      "packagedPath": "resources/onnxruntime/notices/ThirdPartyNotices.txt"
+    },
+    {
+      "id": "rtmdet-nano",
+      "source": "public/rtmdet-nano.onnx",
+      "bytes": 4146352,
+      "sha256": "47d6009fe13f2a279707f3e868558f7a98a367e2b2f4c5ddb8c2fe123ef571bf",
+      "packagedPath": "resources/models/rtmdet-nano.onnx"
+    },
+    {
+      "id": "rtmpose-m",
+      "source": "public/rtmpose-m.onnx",
+      "bytes": 54369106,
+      "sha256": "4afb3ac968d37fa540b3b4d34acfdb0b054f3d534c9d9b7a417147036e7e9491",
+      "packagedPath": "resources/models/rtmpose-m.onnx"
+    }
+  ]
+}

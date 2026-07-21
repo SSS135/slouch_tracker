@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.svelte.json",
+  "include": [
+    "src/generated/**/*.ts",
+    "src-svelte/lib/**/*.ts",
+    "src-svelte/harness/mockTauri.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "src/generated/**/*.test.ts",
+    "src-svelte/**/*.test.ts",
+    "src-svelte/**/*.test.svelte.ts"
+  ]
+}

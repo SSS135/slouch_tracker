@@ -1,0 +1,70 @@
+:root {
+  color-scheme: dark;
+  font-family: var(--font-family);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --panel-width: 36rem;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+/* Native desktop chrome: app UI text/images are not selectable or draggable. */
+body {
+  min-width: 20rem;
+  color: var(--color-text);
+  background: var(--color-background);
+  -webkit-user-select: none;
+  user-select: none;
+  cursor: default;
+}
+
+input,
+textarea,
+select,
+[contenteditable],
+[role='alert'] {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: auto;
+}
+
+img {
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+
+button,
+input,
+select,
+textarea {
+  color: inherit;
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--color-primary-hover);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  :root {
+    --panel-width: 100vw;
+  }
+}

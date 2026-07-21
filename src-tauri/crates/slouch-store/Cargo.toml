@@ -1,0 +1,17 @@
+[package]
+name = "slouch-store"
+version = "0.1.0"
+description = "SQLite storage, dataset archive export/import, and model container format for Slouch Tracker"
+license = "MIT"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+slouch-domain = { workspace = true }
+rusqlite = { workspace = true }
+rmp-serde = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+slouch-ml = { workspace = true }
+zip = { workspace = true }

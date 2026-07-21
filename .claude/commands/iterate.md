@@ -1,0 +1,1 @@
+Iterative optimization for hyperparameters, features, or algorithmic changes. Iterations NOT offloaded to scripts. NO evolutionary/iterative scripts. User specifies: samples to test in next iteration, iterations to do (or iterate until objective reached). After each iteration: report what you tried and current progress. Manually select next batch based on analysis.

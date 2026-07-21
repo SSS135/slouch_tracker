@@ -1,0 +1,19 @@
+[package]
+name = "slouch-vision"
+version = "0.1.0"
+description = "ONNX Runtime sessions, preprocessing, and the RTMDet + RTMPose inference worker for Slouch Tracker"
+license = "MIT"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+slouch-domain = { workspace = true }
+slouch-ml = { workspace = true }
+serde = { workspace = true }
+ndarray = { workspace = true }
+ort = { workspace = true }
+log = "0.4"
+
+[dev-dependencies]
+serde_json = { workspace = true }
+sha2 = { workspace = true }

@@ -1,0 +1,1263 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "classifiers/mlp-v1",
+  "sources": [
+    {
+      "path": "src/services/ml/mlpClassifier.ts",
+      "sha256": "ddc116292dc8b3e88cbf0b85dce08cb25d05f362542df466a5f943dcc449140a"
+    },
+    {
+      "path": "src/services/ml/adamw.ts",
+      "sha256": "a80f70b9c7a169184e7c5b2c574681b300d02d36cf74ce44edce38fc8b4589e5"
+    },
+    {
+      "path": "src/services/ml/config.ts",
+      "sha256": "8f0313e827cda4411c48b2a5a91cd41ce680e45bd0fd4e03e47c5dbb5e4b442c"
+    },
+    {
+      "path": "src/services/ml/utils/classWeights.ts",
+      "sha256": "2514d64e82c0e8633f84f843b5ea7dfe19a0d149e6b9cf15d40a4cea01a3f914"
+    },
+    {
+      "path": "src/services/ml/__tests__/mlpClassifier.test.ts",
+      "sha256": "ebf3f2c2ea1a91e07bfc2b6b5861f2a55e3ea6461e5a40a22fcb466add122e56"
+    }
+  ],
+  "generator": {
+    "path": "scripts/oracles/generate-mlp.ts",
+    "sha256": "6041ec8bba7f045ed59aa3d3830bdfb42a22a8cdeb08a8181cc8369c816a79a6",
+    "command": "npx tsx scripts/oracles/generate-mlp.ts --write"
+  },
+  "environment": {
+    "os": "win32",
+    "arch": "x64",
+    "node": "24.15.0",
+    "packageLockSha256": "cef95e334f993f2752776beeb27d737385afdd0530dc8703b53fbacd8056391f",
+    "backend": "TensorFlow.js 4.22.0 CPU",
+    "endianness": "le",
+    "threads": 1,
+    "graphOptimization": "all",
+    "rng": "seedrandom 3.0.5 ARC4 where applicable",
+    "seedEncoding": "JavaScript Number.prototype.toString"
+  },
+  "tolerances": {
+    "numeric": {
+      "absolute": 0.000002,
+      "relative": 0.000002
+    },
+    "iterative": {
+      "absolute": 0.0002
+    },
+    "exact": [
+      "ids",
+      "labels",
+      "shapes",
+      "assignments",
+      "decisionsAwayFromThreshold"
+    ]
+  },
+  "invalidCases": [
+    {
+      "id": "empty",
+      "operation": "train",
+      "rows": [],
+      "labels": [],
+      "params": {
+        "hiddenSize": 4,
+        "learningRate": 0.01,
+        "weightDecay": 0.01,
+        "labelSmoothing": 0
+      },
+      "nativeError": "EmptyDataset",
+      "typescript": {
+        "ok": false,
+        "errorName": "Error",
+        "errorMessage": "Cannot train on empty dataset"
+      }
+    },
+    {
+      "id": "mismatch",
+      "operation": "train",
+      "rows": [
+        [
+          1,
+          2
+        ]
+      ],
+      "labels": [],
+      "params": {
+        "hiddenSize": 4,
+        "learningRate": 0.01,
+        "weightDecay": 0.01,
+        "labelSmoothing": 0
+      },
+      "nativeError": "LengthMismatch",
+      "typescript": {
+        "ok": false,
+        "errorName": "Error",
+        "errorMessage": "Length mismatch: 1 features, 0 labels"
+      }
+    },
+    {
+      "id": "ragged",
+      "operation": "train",
+      "rows": [
+        [
+          1,
+          2
+        ],
+        [
+          3
+        ]
+      ],
+      "labels": [
+        0,
+        1
+      ],
+      "params": {
+        "hiddenSize": 4,
+        "learningRate": 0.01,
+        "weightDecay": 0.01,
+        "labelSmoothing": 0
+      },
+      "nativeError": "RaggedFeatures",
+      "typescript": {
+        "ok": false,
+        "errorName": "Error",
+        "errorMessage": "Training failed: Model weights contain NaN values. This indicates numerical instability. Try reducing learning rate or increasing regularization."
+      }
+    },
+    {
+      "id": "nan",
+      "operation": "train",
+      "rows": [
+        [
+          "NaN"
+        ],
+        [
+          1
+        ]
+      ],
+      "labels": [
+        0,
+        1
+      ],
+      "params": {
+        "hiddenSize": 4,
+        "learningRate": 0.01,
+        "weightDecay": 0.01,
+        "labelSmoothing": 0
+      },
+      "nativeError": "NonFiniteFeature",
+      "typescript": {
+        "ok": false,
+        "errorName": "Error",
+        "errorMessage": "Training failed: Model weights contain NaN values. This indicates numerical instability. Try reducing learning rate or increasing regularization."
+      }
+    },
+    {
+      "id": "invalid-hidden-layers",
+      "operation": "construct",
+      "params": {
+        "hiddenSize": 4,
+        "learningRate": 0.01,
+        "weightDecay": 0.01,
+        "labelSmoothing": 0,
+        "hiddenLayers": 3
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": false,
+        "errorName": "Error",
+        "errorMessage": "hiddenLayers must be 0, 1, or 2"
+      }
+    },
+    {
+      "id": "malformed-state",
+      "operation": "load",
+      "params": {
+        "hiddenSize": 4,
+        "learningRate": 0.01,
+        "weightDecay": 0.01,
+        "labelSmoothing": 0
+      },
+      "state": {
+        "layerWeights": [
+          []
+        ],
+        "layerBiases": [
+          [
+            0
+          ]
+        ],
+        "layerShapes": [
+          2,
+          1
+        ],
+        "hiddenLayers": 0,
+        "hiddenSize": 4,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": false,
+        "errorName": "Error",
+        "errorMessage": "Based on the provided shape, [2,1], the tensor should have 2 values but has 0"
+      }
+    },
+    {
+      "id": "nonfinite-state",
+      "operation": "load",
+      "params": {
+        "hiddenSize": 4,
+        "learningRate": 0.01,
+        "weightDecay": 0.01,
+        "labelSmoothing": 0
+      },
+      "state": {
+        "layerWeights": [
+          [
+            "NaN",
+            0.004774465691298246
+          ]
+        ],
+        "layerBiases": [
+          [
+            0
+          ]
+        ],
+        "layerShapes": [
+          2,
+          1
+        ],
+        "hiddenLayers": 0,
+        "hiddenSize": 4,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": true,
+        "value": {
+          "state": {
+            "layerWeights": [
+              [
+                "NaN",
+                0.004774465691298246
+              ]
+            ],
+            "layerBiases": [
+              [
+                0
+              ]
+            ],
+            "layerShapes": [
+              2,
+              1
+            ],
+            "hiddenLayers": 0,
+            "hiddenSize": 4,
+            "classWeights": [
+              1,
+              1
+            ]
+          },
+          "probability": "NaN"
+        }
+      }
+    },
+    {
+      "id": "above-f32-max-state",
+      "operation": "load",
+      "params": {
+        "hiddenSize": 4,
+        "learningRate": 0.01,
+        "weightDecay": 0.01,
+        "labelSmoothing": 0
+      },
+      "state": {
+        "layerWeights": [
+          [
+            3.5e+38,
+            0.004774465691298246
+          ]
+        ],
+        "layerBiases": [
+          [
+            0
+          ]
+        ],
+        "layerShapes": [
+          2,
+          1
+        ],
+        "hiddenLayers": 0,
+        "hiddenSize": 4,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": true,
+        "value": {
+          "state": {
+            "layerWeights": [
+              [
+                "+Infinity",
+                0.004774465691298246
+              ]
+            ],
+            "layerBiases": [
+              [
+                0
+              ]
+            ],
+            "layerShapes": [
+              2,
+              1
+            ],
+            "hiddenLayers": 0,
+            "hiddenSize": 4,
+            "classWeights": [
+              1,
+              1
+            ]
+          },
+          "probability": 0
+        }
+      }
+    },
+    {
+      "id": "nonfinite-prediction",
+      "operation": "predict",
+      "params": {
+        "hiddenSize": 4,
+        "learningRate": 0.01,
+        "weightDecay": 0.01,
+        "labelSmoothing": 0
+      },
+      "state": {
+        "layerWeights": [
+          [
+            0.01905309408903122,
+            0.004774465691298246
+          ]
+        ],
+        "layerBiases": [
+          [
+            0
+          ]
+        ],
+        "layerShapes": [
+          2,
+          1
+        ],
+        "hiddenLayers": 0,
+        "hiddenSize": 4,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "probe": [
+        "+Infinity",
+        0
+      ],
+      "nativeError": "NonFiniteFeature",
+      "typescript": {
+        "ok": true,
+        "value": {
+          "state": {
+            "layerWeights": [
+              [
+                0.01905309408903122,
+                0.004774465691298246
+              ]
+            ],
+            "layerBiases": [
+              [
+                0
+              ]
+            ],
+            "layerShapes": [
+              2,
+              1
+            ],
+            "hiddenLayers": 0,
+            "hiddenSize": 4,
+            "classWeights": [
+              1,
+              1
+            ]
+          },
+          "probability": 0
+        }
+      }
+    }
+  ],
+  "cases": [
+    {
+      "id": "zero-hidden-iter0",
+      "params": {
+        "hiddenSize": 4,
+        "learningRate": 0.01,
+        "weightDecay": 0.01,
+        "labelSmoothing": 0,
+        "hiddenLayers": 0,
+        "maxIterations": 0
+      },
+      "rows": [
+        [
+          -2,
+          -0.7
+        ],
+        [
+          -1.4,
+          -0.4
+        ],
+        [
+          -0.8,
+          -1.1
+        ],
+        [
+          0.7,
+          1.2
+        ],
+        [
+          1.6,
+          0.4
+        ],
+        [
+          2.2,
+          1.7
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -1.25,
+          -0.75
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1.25,
+          0.75
+        ]
+      ],
+      "state": {
+        "layerWeights": [
+          [
+            0.01905309408903122,
+            0.004774465691298246
+          ]
+        ],
+        "layerBiases": [
+          [
+            0
+          ]
+        ],
+        "layerShapes": [
+          2,
+          1
+        ],
+        "hiddenLayers": 0,
+        "hiddenSize": 4,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "probabilities": [
+        0.5068488717079163,
+        0.5,
+        0.49315112829208374
+      ],
+      "loadedProbabilities": [
+        0.5068488717079163,
+        0.5,
+        0.49315112829208374
+      ]
+    },
+    {
+      "id": "zero-hidden-iter1",
+      "params": {
+        "hiddenSize": 4,
+        "learningRate": 0.01,
+        "weightDecay": 0.01,
+        "labelSmoothing": 0,
+        "hiddenLayers": 0,
+        "maxIterations": 1
+      },
+      "rows": [
+        [
+          -2,
+          -0.7
+        ],
+        [
+          -1.4,
+          -0.4
+        ],
+        [
+          -0.8,
+          -1.1
+        ],
+        [
+          0.7,
+          1.2
+        ],
+        [
+          1.6,
+          0.4
+        ],
+        [
+          2.2,
+          1.7
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -1.25,
+          -0.75
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1.25,
+          0.75
+        ]
+      ],
+      "state": {
+        "layerWeights": [
+          [
+            0.029051121324300766,
+            0.014773919247090816
+          ]
+        ],
+        "layerBiases": [
+          [
+            -0.009997744113206863
+          ]
+        ],
+        "layerShapes": [
+          2,
+          1
+        ],
+        "hiddenLayers": 0,
+        "hiddenSize": 4,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "probabilities": [
+        0.5143440961837769,
+        0.5024994015693665,
+        0.4906519651412964
+      ],
+      "loadedProbabilities": [
+        0.5143440961837769,
+        0.5024994015693665,
+        0.4906519651412964
+      ]
+    },
+    {
+      "id": "zero-hidden-iter2",
+      "params": {
+        "hiddenSize": 4,
+        "learningRate": 0.01,
+        "weightDecay": 0.01,
+        "labelSmoothing": 0.1,
+        "hiddenLayers": 0,
+        "maxIterations": 2
+      },
+      "rows": [
+        [
+          -2,
+          -0.7
+        ],
+        [
+          -1.4,
+          -0.4
+        ],
+        [
+          -0.8,
+          -1.1
+        ],
+        [
+          0.7,
+          1.2
+        ],
+        [
+          1.6,
+          0.4
+        ],
+        [
+          2.2,
+          1.7
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -1.25,
+          -0.75
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1.25,
+          0.75
+        ]
+      ],
+      "state": {
+        "layerWeights": [
+          [
+            0.03904404118657112,
+            0.024768508970737457
+          ]
+        ],
+        "layerBiases": [
+          [
+            -0.0048975697718560696
+          ]
+        ],
+        "layerShapes": [
+          2,
+          1
+        ],
+        "hiddenLayers": 0,
+        "hiddenSize": 4,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "probabilities": [
+        0.5180618762969971,
+        0.5012243986129761,
+        0.48438411951065063
+      ],
+      "loadedProbabilities": [
+        0.5180618762969971,
+        0.5012243986129761,
+        0.48438411951065063
+      ]
+    },
+    {
+      "id": "zero-hidden-iter25",
+      "params": {
+        "hiddenSize": 4,
+        "learningRate": 0.01,
+        "weightDecay": 0.01,
+        "labelSmoothing": 0.2,
+        "hiddenLayers": 0,
+        "maxIterations": 25
+      },
+      "rows": [
+        [
+          -2,
+          -0.7
+        ],
+        [
+          -1.4,
+          -0.4
+        ],
+        [
+          -0.8,
+          -1.1
+        ],
+        [
+          0.7,
+          1.2
+        ],
+        [
+          1.6,
+          0.4
+        ],
+        [
+          2.2,
+          1.7
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -1.25,
+          -0.75
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1.25,
+          0.75
+        ]
+      ],
+      "state": {
+        "layerWeights": [
+          [
+            0.2597668170928955,
+            0.24559158086776733
+          ]
+        ],
+        "layerBiases": [
+          [
+            -0.05379369109869003
+          ]
+        ],
+        "layerShapes": [
+          2,
+          1
+        ],
+        "hiddenLayers": 0,
+        "hiddenSize": 4,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "probabilities": [
+        0.6370760798454285,
+        0.5134451687335968,
+        0.38814687728881836
+      ],
+      "loadedProbabilities": [
+        0.6370760798454285,
+        0.5134451687335968,
+        0.38814687728881836
+      ]
+    },
+    {
+      "id": "one-hidden-iter2",
+      "params": {
+        "hiddenSize": 4,
+        "learningRate": 0.01,
+        "weightDecay": 0.01,
+        "labelSmoothing": 0.1,
+        "hiddenLayers": 1,
+        "maxIterations": 2
+      },
+      "rows": [
+        [
+          -2,
+          -0.7
+        ],
+        [
+          -1.4,
+          -0.4
+        ],
+        [
+          -0.8,
+          -1.1
+        ],
+        [
+          0.7,
+          1.2
+        ],
+        [
+          1.6,
+          0.4
+        ],
+        [
+          2.2,
+          1.7
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -1.25,
+          -0.75
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1.25,
+          0.75
+        ]
+      ],
+      "state": {
+        "layerWeights": [
+          [
+            1.1197149753570557,
+            0.2947525382041931,
+            0.27622464299201965,
+            -0.24286141991615295,
+            0.060412436723709106,
+            0.31375858187675476,
+            -0.22235700488090515,
+            0.05616835877299309
+          ],
+          [
+            0.039050206542015076,
+            0.024780023843050003,
+            0.024458691477775574,
+            -0.0238901786506176
+          ]
+        ],
+        "layerBiases": [
+          [
+            0.019902296364307404,
+            0.01915035769343376,
+            0.019105087965726852,
+            0.01897529326379299
+          ],
+          [
+            -0.02001113072037697
+          ]
+        ],
+        "layerShapes": [
+          2,
+          4,
+          1
+        ],
+        "hiddenLayers": 1,
+        "hiddenSize": 4,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "probabilities": [
+        0.5066772401332855,
+        0.5046862065792084,
+        0.48563867807388306
+      ],
+      "loadedProbabilities": [
+        0.5066772401332855,
+        0.5046862065792084,
+        0.48563867807388306
+      ]
+    },
+    {
+      "id": "two-hidden-iter2",
+      "params": {
+        "hiddenSize": 8,
+        "learningRate": 0.01,
+        "weightDecay": 0.01,
+        "labelSmoothing": 0.1,
+        "hiddenLayers": 2,
+        "maxIterations": 2
+      },
+      "rows": [
+        [
+          -2,
+          -0.7
+        ],
+        [
+          -1.4,
+          -0.4
+        ],
+        [
+          -0.8,
+          -1.1
+        ],
+        [
+          0.7,
+          1.2
+        ],
+        [
+          1.6,
+          0.4
+        ],
+        [
+          2.2,
+          1.7
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -1.25,
+          -0.75
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1.25,
+          0.75
+        ]
+      ],
+      "state": {
+        "layerWeights": [
+          [
+            0.8716424703598022,
+            0.2331700325012207,
+            0.2187127321958542,
+            -0.16988705098628998,
+            0.051156092435121536,
+            0.2459518015384674,
+            -0.1844072788953781,
+            0.03844931721687317,
+            0.44770824909210205,
+            -0.23624521493911743,
+            -0.47291654348373413,
+            -0.7165721654891968,
+            -0.5579704642295837,
+            -0.3578213155269623,
+            -0.2336067110300064,
+            0.29548516869544983
+          ],
+          [
+            0.6933829188346863,
+            0.18789707124233246,
+            0.17652907967567444,
+            -0.15604013204574585,
+            0.02480684034526348,
+            0.19959063827991486,
+            -0.14785954356193542,
+            0.06402207911014557,
+            0.3579173684120178,
+            -0.1838313341140747,
+            -0.37050312757492065,
+            -0.5723426938056946,
+            -0.456876665353775,
+            -0.26135337352752686,
+            -0.1510581523180008,
+            0.2671571373939514,
+            0.5107746720314026,
+            0.6043298840522766,
+            -0.06783514469861984,
+            -0.2282378226518631,
+            -0.21247632801532745,
+            0.8313365578651428,
+            -0.05574636533856392,
+            0.6371147632598877,
+            0.08953538537025452,
+            0.23674467206001282,
+            0.2358088195323944,
+            0.14346641302108765,
+            -0.11549863964319229,
+            -0.41741636395454407,
+            0.3661212921142578,
+            -0.29327744245529175,
+            0.043765757232904434,
+            0.010508364997804165,
+            0.17100347578525543,
+            -0.24556496739387512,
+            0.5496734380722046,
+            -0.5880919098854065,
+            0.12306642532348633,
+            -0.09889731556177139,
+            -0.13597768545150757,
+            0.702978789806366,
+            0.29264119267463684,
+            -0.136800616979599,
+            0.14615073800086975,
+            -0.07403670996427536,
+            0.22448307275772095,
+            -0.15848000347614288,
+            0.052274614572525024,
+            -0.5073809623718262,
+            -1.0100212097167969,
+            0.10057917982339859,
+            -0.6121135354042053,
+            0.19768169522285461,
+            0.17975933849811554,
+            0.19655676186084747,
+            -0.3471376895904541,
+            0.3221031427383423,
+            0.27261820435523987,
+            0.5183139443397522,
+            -0.4387471377849579,
+            0.10278800874948502,
+            -0.013373453170061111,
+            -0.12332242727279663
+          ],
+          [
+            0.03906157240271568,
+            0.024785896763205528,
+            0.02446344867348671,
+            -0.022860821336507797,
+            0.0007016433519311249,
+            0.025115106254816055,
+            -0.024188769981265068,
+            0.021013982594013214
+          ]
+        ],
+        "layerBiases": [
+          [
+            0.01972339302301407,
+            -0.01841222494840622,
+            0.01855364814400673,
+            -0.00459424639120698,
+            -0.019848844036459923,
+            0.019421637058258057,
+            0.01774035394191742,
+            -0.019967984408140182
+          ],
+          [
+            -0.019748371094465256,
+            0.01915191113948822,
+            0.019092915579676628,
+            0.018977953121066093,
+            0,
+            0.01920332945883274,
+            0.019037708640098572,
+            0.017676793038845062
+          ],
+          [
+            -0.020009353756904602
+          ]
+        ],
+        "layerShapes": [
+          2,
+          8,
+          8,
+          1
+        ],
+        "hiddenLayers": 2,
+        "hiddenSize": 8,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "probabilities": [
+        0.5062134563922882,
+        0.5044699311256409,
+        0.4891642928123474
+      ],
+      "loadedProbabilities": [
+        0.5062134563922882,
+        0.5044699311256409,
+        0.4891642928123474
+      ]
+    },
+    {
+      "id": "weighted-imbalanced",
+      "params": {
+        "hiddenSize": 4,
+        "learningRate": 0.01,
+        "weightDecay": 0.01,
+        "labelSmoothing": 0.1,
+        "hiddenLayers": 0,
+        "maxIterations": 2,
+        "useClassWeights": true
+      },
+      "rows": [
+        [
+          -2,
+          -0.7
+        ],
+        [
+          -1.4,
+          -0.4
+        ],
+        [
+          -0.8,
+          -1.1
+        ],
+        [
+          0.7,
+          1.2
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "probes": [
+        [
+          -1.25,
+          -0.75
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          1.25,
+          0.75
+        ]
+      ],
+      "state": {
+        "layerWeights": [
+          [
+            0.03904344141483307,
+            0.0247686468064785
+          ]
+        ],
+        "layerBiases": [
+          [
+            -0.019991731271147728
+          ]
+        ],
+        "layerShapes": [
+          2,
+          1
+        ],
+        "hiddenLayers": 0,
+        "hiddenSize": 4,
+        "classWeights": [
+          0.6666666666666666,
+          2
+        ]
+      },
+      "probabilities": [
+        0.5218292474746704,
+        0.5049977600574493,
+        0.48815494775772095
+      ],
+      "loadedProbabilities": [
+        0.5218292474746704,
+        0.5049977600574493,
+        0.48815494775772095
+      ]
+    },
+    {
+      "id": "large-small-cancellation-iter2",
+      "params": {
+        "hiddenSize": 4,
+        "learningRate": 0.01,
+        "weightDecay": 0.01,
+        "labelSmoothing": 0.1,
+        "hiddenLayers": 0,
+        "maxIterations": 2
+      },
+      "rows": [
+        [
+          16777216,
+          1,
+          -16777216
+        ],
+        [
+          -16777216,
+          -1,
+          16777216
+        ],
+        [
+          8388608,
+          1.1920928955078125e-7,
+          -8388608
+        ],
+        [
+          -8388608,
+          -1.1920928955078125e-7,
+          8388608
+        ]
+      ],
+      "labels": [
+        0,
+        1,
+        0,
+        1
+      ],
+      "probes": [
+        [
+          16777216,
+          1,
+          -16777216
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          -16777216,
+          -1,
+          16777216
+        ]
+      ],
+      "state": {
+        "layerWeights": [
+          [
+            0.0027504079043865204,
+            -0.011525360867381096,
+            0.020752448588609695
+          ]
+        ],
+        "layerBiases": [
+          [
+            -0.00028291993658058345
+          ]
+        ],
+        "layerShapes": [
+          3,
+          1
+        ],
+        "hiddenLayers": 0,
+        "hiddenSize": 4,
+        "classWeights": [
+          1,
+          1
+        ]
+      },
+      "probabilities": [
+        1,
+        0.500070720911026,
+        0
+      ],
+      "loadedProbabilities": [
+        1,
+        0.500070720911026,
+        0
+      ]
+    }
+  ]
+}

@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "sources": {
+    "naiveBayesClassifier.ts": "45ebc5d230064b25898cc64398dec787866a8a334da151d96b28edfa7466905e",
+    "naiveBayesClassifier.test.ts": "1d37b6fa8a1be13f7cedfb706789cc8d8895ae1a7c126df1c3176ff6923a2946"
+  },
+  "oracle": {
+    "runtime": "Node.js 24.15.0 on win32 x64",
+    "packageLockSha256": "b6b051e76bd1b2220f34bc6f8b56c30468d7a67036e10da3f1ab44d6e761b3dc",
+    "script": "scripts/check-wave1-oracles.ts",
+    "scriptSha256": "2d028503ee6233467c5fb654f54e4d77501b1426d89154554c805dbff8d44924",
+    "command": "npx tsx scripts/check-wave1-oracles.ts"
+  },
+  "epsilon": 0.001,
+  "features": [[0, 0], [2, 4], [4, 8], [8, 10], [10, 14]],
+  "labels": [0, 0, 0, 1, 1],
+  "expectedState": {
+    "classMeans": [[2, 4], [9, 12]],
+    "classVariances": [
+      [2.6676666736602783, 10.6676664352417],
+      [1.0010000467300415, 4.000999927520752]
+    ],
+    "classPriors": [0.6, 0.4],
+    "epsilon": 0.001
+  },
+  "probes": [
+    { "features": [2, 4], "probabilityGood": 0.9999999998399735 },
+    { "features": [9, 12], "probabilityGood": 0.00012073429452585938 },
+    { "features": [5, 8], "probabilityGood": 0.9928638441979538 },
+    { "features": [6, 9], "probabilityGood": 0.6498640829982167 }
+  ],
+  "nonzeroLabelCase": {
+    "features": [[0], [1], [9], [10]],
+    "labels": [0, 0, -7, 42]
+  },
+  "highDimensionalCase": {
+    "dimensions": 200,
+    "samplesPerClass": 10,
+    "class0Alternating": [-1, 1],
+    "class1Alternating": [0, 2],
+    "probeValue": 0.4,
+    "expectedMean": [0, 1],
+    "expectedVariance": 1.0000009536743164,
+    "probabilityGood": 0.8044294570649482
+  },
+  "rejections": {
+    "ragged": [[0, 1], [2], [9, 10]],
+    "nonfiniteKinds": ["NaN", "+Infinity", "-Infinity"],
+    "predictionDimension": 3,
+    "invalidEpsilon": [0, -0.001]
+  }
+}

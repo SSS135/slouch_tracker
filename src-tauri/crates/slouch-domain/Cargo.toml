@@ -1,0 +1,15 @@
+[package]
+name = "slouch-domain"
+version = "0.1.0"
+description = "Domain types, DTOs, validation, and feature/classifier registry metadata for Slouch Tracker"
+license = "MIT"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+specta = { workspace = true }
+specta-typescript = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

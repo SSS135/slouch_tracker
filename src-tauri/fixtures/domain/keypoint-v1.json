@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "source": "src/services/posture/Keypoint.ts",
+  "sourceSha256": "3f411b325babc002f4d1ed34bca89e46a8335c8a71dc1131e2b1a141cc85e967",
+  "values": [
+    { "x": -12.5, "y": 0.0, "score": -0.25 },
+    { "x": 9007199254740991, "y": -0.125, "score": 1.5 },
+    { "x": 10.25, "y": 200.5, "score": 0.875 }
+  ]
+}

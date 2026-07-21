@@ -1,0 +1,68 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+.env*
+
+# typescript
+*.tsbuildinfo
+
+__pycache__
+augmentation_samples/
+feature_cache/
+dinov3_models/
+pose_evaluations/
+dinov2_knn_models/
+chroma_data/
+nul
+coverage/
+test-outputs/
+/.idea/
+/web-dist/
+
+# Tauri
+src-tauri/target/
+src-tauri/WixTools/
+
+# build outputs / test artifacts (regenerable; excluded from verification fingerprints)
+/web-dist-svelte/
+/web-dist-svelte-harness/
+/test-results/
+/playwright-report/
+
+# migration agent transcripts / gate snapshots / per-machine tool config (local only, never tracked)
+/.pi-subagents/
+/.pi/
+/.plans/
+/src-tauri/reviews/
+/.claude/settings.local.json
+/.mcp.json

@@ -1,0 +1,61 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "Slouch Tracker",
+  "version": "1.0.0",
+  "identifier": "com.slouchtracker.main",
+  "build": {
+    "frontendDist": "../web-dist-svelte",
+    "devUrl": "http://127.0.0.1:5174",
+    "beforeDevCommand": "npm run dev:svelte",
+    "beforeBuildCommand": "npm run build:svelte"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Slouch Tracker",
+        "url": "index.svelte.html",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "alwaysOnTop": false,
+        "skipTaskbar": false,
+        "center": true,
+        "devtools": false
+      }
+    ],
+    "security": {
+      "csp": null
+    },
+    "withGlobalTauri": false
+  },
+  "bundle": {
+    "active": true,
+    "copyright": "Copyright (c) Slouch Tracker Contributors",
+    "licenseFile": "../LICENSE",
+    "resources": {
+      "resources/models/rtmdet-nano.onnx": "resources/models/rtmdet-nano.onnx",
+      "resources/models/rtmpose-m.onnx": "resources/models/rtmpose-m.onnx",
+      "resources/onnxruntime/windows-x86_64/onnxruntime.dll": "resources/onnxruntime/windows-x86_64/onnxruntime.dll",
+      "resources/onnxruntime/notices/LICENSE": "resources/onnxruntime/notices/LICENSE",
+      "resources/onnxruntime/notices/Privacy.md": "resources/onnxruntime/notices/Privacy.md",
+      "resources/onnxruntime/notices/ThirdPartyNotices.txt": "resources/onnxruntime/notices/ThirdPartyNotices.txt"
+    },
+    "targets": "nsis",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": ""
+    }
+  }
+}

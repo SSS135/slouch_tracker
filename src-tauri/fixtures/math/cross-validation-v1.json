@@ -1,0 +1,227 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "math/cross-validation-v1",
+  "sources": [
+    {
+      "path": "src/services/ml/crossValidation.ts",
+      "sha256": "7ed63fbcb89a29b239b8972d56682d5e076b4e24f1a9821fe62fce1e1c8b06d7"
+    },
+    {
+      "path": "src/services/ml/__tests__/crossValidation.test.ts",
+      "sha256": "4b2a064eea27354c17016046ed98937760fa1fca5e8e74bd8d40f888b1520957"
+    }
+  ],
+  "generator": {
+    "path": "scripts/oracles/generate-cross-validation.ts",
+    "sha256": "af9afef978ae203e6bfab61246f5c178f78e6d465ac8b072196b534a1ba61ee9",
+    "command": "npx tsx scripts/oracles/generate-cross-validation.ts --write"
+  },
+  "environment": {
+    "os": "win32",
+    "arch": "x64",
+    "node": "24.15.0",
+    "packageLockSha256": "cef95e334f993f2752776beeb27d737385afdd0530dc8703b53fbacd8056391f",
+    "backend": "pure TypeScript",
+    "endianness": "le",
+    "threads": 1,
+    "graphOptimization": "all",
+    "rng": "seedrandom 3.0.5 ARC4 where applicable",
+    "seedEncoding": "JavaScript Number.prototype.toString"
+  },
+  "tolerances": {
+    "numeric": {
+      "absolute": 0.000002,
+      "relative": 0.000002
+    },
+    "iterative": {
+      "absolute": 0.0002
+    },
+    "exact": [
+      "ids",
+      "labels",
+      "shapes",
+      "assignments",
+      "decisionsAwayFromThreshold"
+    ]
+  },
+  "cases": [
+    {
+      "id": "stratified-seed42",
+      "labels": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+      ],
+      "folds": [
+        {
+          "trainIndices": [
+            1,
+            3,
+            0,
+            7,
+            5,
+            6
+          ],
+          "testIndices": [
+            2,
+            4
+          ]
+        },
+        {
+          "trainIndices": [
+            2,
+            3,
+            0,
+            4,
+            5,
+            6
+          ],
+          "testIndices": [
+            1,
+            7
+          ]
+        },
+        {
+          "trainIndices": [
+            2,
+            1,
+            0,
+            4,
+            7,
+            6
+          ],
+          "testIndices": [
+            3,
+            5
+          ]
+        },
+        {
+          "trainIndices": [
+            2,
+            1,
+            3,
+            4,
+            7,
+            5
+          ],
+          "testIndices": [
+            0,
+            6
+          ]
+        }
+      ],
+      "valid": true
+    },
+    {
+      "id": "temporal-blocks-seed42",
+      "labels": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+      ],
+      "timestamps": [
+        1000,
+        1100,
+        1200,
+        8000,
+        8100,
+        15000,
+        15100,
+        30000
+      ],
+      "blocks": [
+        {
+          "indices": [
+            0,
+            1,
+            2,
+            3
+          ],
+          "label": 0,
+          "startTime": 1000,
+          "endTime": 8000
+        },
+        {
+          "indices": [
+            4,
+            5,
+            6,
+            7
+          ],
+          "label": 1,
+          "startTime": 8100,
+          "endTime": 30000
+        }
+      ],
+      "folds": [
+        {
+          "trainIndices": [
+            1,
+            7,
+            3,
+            5,
+            0,
+            6
+          ],
+          "testIndices": [
+            2,
+            4
+          ]
+        },
+        {
+          "trainIndices": [
+            2,
+            4,
+            3,
+            5,
+            0,
+            6
+          ],
+          "testIndices": [
+            1,
+            7
+          ]
+        },
+        {
+          "trainIndices": [
+            2,
+            4,
+            1,
+            7,
+            0,
+            6
+          ],
+          "testIndices": [
+            3,
+            5
+          ]
+        },
+        {
+          "trainIndices": [
+            2,
+            4,
+            1,
+            7,
+            3,
+            5
+          ],
+          "testIndices": [
+            0,
+            6
+          ]
+        }
+      ],
+      "valid": true
+    }
+  ]
+}

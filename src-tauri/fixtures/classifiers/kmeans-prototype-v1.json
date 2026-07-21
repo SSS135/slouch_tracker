@@ -1,0 +1,1335 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "classifiers/kmeans-prototype-v1",
+  "sources": [
+    {
+      "path": "src/services/ml/kmeansPrototypeClassifier.ts",
+      "sha256": "4a1a1a2673d961506475c46550eac1eba8180af80e59a2ec368be8713ceb9b0a"
+    },
+    {
+      "path": "src/services/ml/kmeans.ts",
+      "sha256": "60bf7c712165e24fa7b6deb4c015aa97d27491be86d68739b325c7e4705297d3"
+    }
+  ],
+  "generator": {
+    "path": "scripts/oracles/generate-kmeans-prototype.ts",
+    "sha256": "b5100f19bb90e5163c1c828dcc4440db116ed0c4699059ce70e359e518aba7f3",
+    "command": "npx tsx scripts/oracles/generate-kmeans-prototype.ts --write"
+  },
+  "environment": {
+    "os": "win32",
+    "arch": "x64",
+    "node": "24.15.0",
+    "packageLockSha256": "cef95e334f993f2752776beeb27d737385afdd0530dc8703b53fbacd8056391f",
+    "backend": "pure TypeScript",
+    "endianness": "le",
+    "threads": 1,
+    "graphOptimization": "all",
+    "rng": "seedrandom 3.0.5 ARC4 where applicable",
+    "seedEncoding": "JavaScript Number.prototype.toString"
+  },
+  "tolerances": {
+    "numeric": {
+      "absolute": 0.000002,
+      "relative": 0.000002
+    },
+    "iterative": {
+      "absolute": 0.0002
+    },
+    "exact": [
+      "ids",
+      "labels",
+      "shapes",
+      "assignments",
+      "decisionsAwayFromThreshold"
+    ]
+  },
+  "invalidCases": [
+    {
+      "id": "missing-class",
+      "operation": "train",
+      "rows": [
+        [
+          1
+        ],
+        [
+          2
+        ]
+      ],
+      "labels": [
+        0,
+        0
+      ],
+      "params": {
+        "nClusters": 2,
+        "temperature": 1
+      },
+      "nativeError": "MissingClass",
+      "typescript": {
+        "ok": false,
+        "errorName": "Error",
+        "errorMessage": "Dataset must contain samples from both classes"
+      }
+    },
+    {
+      "id": "empty",
+      "operation": "train",
+      "rows": [],
+      "labels": [],
+      "params": {
+        "nClusters": 2,
+        "temperature": 1
+      },
+      "nativeError": "EmptyDataset",
+      "typescript": {
+        "ok": false,
+        "errorName": "Error",
+        "errorMessage": "Cannot train on empty dataset"
+      }
+    },
+    {
+      "id": "mismatch",
+      "operation": "train",
+      "rows": [
+        [
+          1
+        ]
+      ],
+      "labels": [],
+      "params": {
+        "nClusters": 2,
+        "temperature": 1
+      },
+      "nativeError": "LengthMismatch",
+      "typescript": {
+        "ok": false,
+        "errorName": "Error",
+        "errorMessage": "Length mismatch: 1 features, 0 labels"
+      }
+    },
+    {
+      "id": "ragged",
+      "operation": "train",
+      "rows": [
+        [
+          1,
+          2
+        ],
+        [
+          3
+        ]
+      ],
+      "labels": [
+        0,
+        1
+      ],
+      "params": {
+        "nClusters": 2,
+        "temperature": 1
+      },
+      "nativeError": "RaggedFeatures",
+      "typescript": {
+        "ok": true,
+        "value": {
+          "state": {
+            "clusters": [
+              {
+                "centroid": [
+                  1,
+                  2
+                ],
+                "prototypeGood": [
+                  1,
+                  2
+                ],
+                "prototypeBad": null
+              },
+              {
+                "centroid": [
+                  3,
+                  "NaN"
+                ],
+                "prototypeGood": null,
+                "prototypeBad": [
+                  3,
+                  "NaN"
+                ]
+              }
+            ],
+            "globalPrototypeGood": [
+              1,
+              2
+            ],
+            "globalPrototypeBad": [
+              3,
+              "NaN"
+            ],
+            "temperature": 1
+          },
+          "probabilities": [
+            "NaN",
+            "NaN",
+            "NaN"
+          ]
+        }
+      }
+    },
+    {
+      "id": "nonfinite-feature",
+      "operation": "train",
+      "rows": [
+        [
+          "NaN"
+        ],
+        [
+          1
+        ]
+      ],
+      "labels": [
+        0,
+        1
+      ],
+      "params": {
+        "nClusters": 2,
+        "temperature": 1
+      },
+      "nativeError": "NonFiniteFeature",
+      "typescript": {
+        "ok": true,
+        "value": {
+          "state": {
+            "clusters": [
+              {
+                "centroid": [
+                  "NaN"
+                ],
+                "prototypeGood": [
+                  "NaN"
+                ],
+                "prototypeBad": null
+              },
+              {
+                "centroid": [
+                  1
+                ],
+                "prototypeGood": null,
+                "prototypeBad": [
+                  1
+                ]
+              }
+            ],
+            "globalPrototypeGood": [
+              "NaN"
+            ],
+            "globalPrototypeBad": [
+              1
+            ],
+            "temperature": 1
+          },
+          "probabilities": [
+            "NaN",
+            "NaN",
+            "NaN"
+          ]
+        }
+      }
+    },
+    {
+      "id": "nonpositive-temperature",
+      "operation": "construct",
+      "params": {
+        "nClusters": 2,
+        "temperature": 0
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": true,
+        "value": "kmeans_prototype"
+      }
+    },
+    {
+      "id": "empty-clusters",
+      "operation": "load",
+      "params": {
+        "nClusters": 2,
+        "temperature": 1
+      },
+      "state": {
+        "clusters": [],
+        "globalPrototypeGood": [
+          -0.375,
+          0.375
+        ],
+        "globalPrototypeBad": [
+          0.375,
+          -0.375
+        ],
+        "temperature": 1
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": true,
+        "value": {
+          "state": {
+            "clusters": [],
+            "globalPrototypeGood": [
+              -0.375,
+              0.375
+            ],
+            "globalPrototypeBad": [
+              0.375,
+              -0.375
+            ],
+            "temperature": 1
+          },
+          "probabilities": [
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "id": "malformed-state",
+      "operation": "load",
+      "params": {
+        "nClusters": 2,
+        "temperature": 1
+      },
+      "state": {
+        "clusters": [
+          {
+            "centroid": [
+              -1.625,
+              -1.875
+            ],
+            "prototypeGood": [
+              -2,
+              -1.5
+            ],
+            "prototypeBad": [
+              -1.25,
+              -2.25
+            ]
+          },
+          {
+            "centroid": [
+              1.625,
+              1.875
+            ],
+            "prototypeGood": [
+              1.25,
+              2.25
+            ],
+            "prototypeBad": [
+              2,
+              1.5
+            ]
+          }
+        ],
+        "globalPrototypeGood": [
+          -0.375,
+          0.375
+        ],
+        "globalPrototypeBad": [],
+        "temperature": 1
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": true,
+        "value": {
+          "state": {
+            "clusters": [
+              {
+                "centroid": [
+                  -1.625,
+                  -1.875
+                ],
+                "prototypeGood": [
+                  -2,
+                  -1.5
+                ],
+                "prototypeBad": [
+                  -1.25,
+                  -2.25
+                ]
+              },
+              {
+                "centroid": [
+                  1.625,
+                  1.875
+                ],
+                "prototypeGood": [
+                  1.25,
+                  2.25
+                ],
+                "prototypeBad": [
+                  2,
+                  1.5
+                ]
+              }
+            ],
+            "globalPrototypeGood": [
+              -0.375,
+              0.375
+            ],
+            "globalPrototypeBad": [],
+            "temperature": 1
+          },
+          "probabilities": [
+            0.5715438436874142,
+            0.5,
+            0.4284561563125858
+          ]
+        }
+      }
+    },
+    {
+      "id": "nonfinite-state",
+      "operation": "load",
+      "params": {
+        "nClusters": 2,
+        "temperature": 1
+      },
+      "state": {
+        "clusters": [
+          {
+            "centroid": [
+              -1.625,
+              -1.875
+            ],
+            "prototypeGood": [
+              -2,
+              -1.5
+            ],
+            "prototypeBad": [
+              -1.25,
+              -2.25
+            ]
+          },
+          {
+            "centroid": [
+              1.625,
+              1.875
+            ],
+            "prototypeGood": [
+              1.25,
+              2.25
+            ],
+            "prototypeBad": [
+              2,
+              1.5
+            ]
+          }
+        ],
+        "globalPrototypeGood": [
+          "NaN",
+          0.375
+        ],
+        "globalPrototypeBad": [
+          0.375,
+          -0.375
+        ],
+        "temperature": 1
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": true,
+        "value": {
+          "state": {
+            "clusters": [
+              {
+                "centroid": [
+                  -1.625,
+                  -1.875
+                ],
+                "prototypeGood": [
+                  -2,
+                  -1.5
+                ],
+                "prototypeBad": [
+                  -1.25,
+                  -2.25
+                ]
+              },
+              {
+                "centroid": [
+                  1.625,
+                  1.875
+                ],
+                "prototypeGood": [
+                  1.25,
+                  2.25
+                ],
+                "prototypeBad": [
+                  2,
+                  1.5
+                ]
+              }
+            ],
+            "globalPrototypeGood": [
+              "NaN",
+              0.375
+            ],
+            "globalPrototypeBad": [
+              0.375,
+              -0.375
+            ],
+            "temperature": 1
+          },
+          "probabilities": [
+            0.5715438436874142,
+            0.5,
+            0.4284561563125858
+          ]
+        }
+      }
+    },
+    {
+      "id": "malformed-cluster-prototype",
+      "operation": "load",
+      "params": {
+        "nClusters": 2,
+        "temperature": 1
+      },
+      "state": {
+        "clusters": [
+          {
+            "centroid": [
+              -1.625,
+              -1.875
+            ],
+            "prototypeGood": [
+              1
+            ],
+            "prototypeBad": [
+              -1.25,
+              -2.25
+            ]
+          },
+          {
+            "centroid": [
+              1.625,
+              1.875
+            ],
+            "prototypeGood": [
+              1.25,
+              2.25
+            ],
+            "prototypeBad": [
+              2,
+              1.5
+            ]
+          }
+        ],
+        "globalPrototypeGood": [
+          -0.375,
+          0.375
+        ],
+        "globalPrototypeBad": [
+          0.375,
+          -0.375
+        ],
+        "temperature": 1
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": true,
+        "value": {
+          "state": {
+            "clusters": [
+              {
+                "centroid": [
+                  -1.625,
+                  -1.875
+                ],
+                "prototypeGood": [
+                  1
+                ],
+                "prototypeBad": [
+                  -1.25,
+                  -2.25
+                ]
+              },
+              {
+                "centroid": [
+                  1.625,
+                  1.875
+                ],
+                "prototypeGood": [
+                  1.25,
+                  2.25
+                ],
+                "prototypeBad": [
+                  2,
+                  1.5
+                ]
+              }
+            ],
+            "globalPrototypeGood": [
+              -0.375,
+              0.375
+            ],
+            "globalPrototypeBad": [
+              0.375,
+              -0.375
+            ],
+            "temperature": 1
+          },
+          "probabilities": [
+            "NaN",
+            "NaN",
+            "NaN"
+          ]
+        }
+      }
+    }
+  ],
+  "cases": [
+    {
+      "id": "manual-mixed-temp1",
+      "params": {
+        "nClusters": 2,
+        "temperature": 1
+      },
+      "rows": [
+        [
+          -3,
+          -2
+        ],
+        [
+          -2,
+          -3
+        ],
+        [
+          -1,
+          -1
+        ],
+        [
+          -0.5,
+          -1.5
+        ],
+        [
+          0.5,
+          1.5
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          2
+        ]
+      ],
+      "labels": [
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1
+      ],
+      "probes": [
+        [
+          -2,
+          -2
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          2,
+          2
+        ]
+      ],
+      "state": {
+        "clusters": [
+          {
+            "centroid": [
+              -1.625,
+              -1.875
+            ],
+            "prototypeGood": [
+              -2,
+              -1.5
+            ],
+            "prototypeBad": [
+              -1.25,
+              -2.25
+            ]
+          },
+          {
+            "centroid": [
+              1.625,
+              1.875
+            ],
+            "prototypeGood": [
+              1.25,
+              2.25
+            ],
+            "prototypeBad": [
+              2,
+              1.5
+            ]
+          }
+        ],
+        "globalPrototypeGood": [
+          -0.375,
+          0.375
+        ],
+        "globalPrototypeBad": [
+          0.375,
+          -0.375
+        ],
+        "temperature": 1
+      },
+      "trainingTrace": {
+        "selectedK": 2,
+        "assignments": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1
+        ],
+        "centroids": [
+          [
+            -1.625,
+            -1.875
+          ],
+          [
+            1.625,
+            1.875
+          ]
+        ],
+        "prototypeMasks": [
+          {
+            "good": true,
+            "bad": true
+          },
+          {
+            "good": true,
+            "bad": true
+          }
+        ]
+      },
+      "routingWeights": [
+        [
+          0.9926884502371378,
+          0.007311549762862149
+        ],
+        [
+          0.5,
+          0.5
+        ],
+        [
+          0.007311549762862149,
+          0.9926884502371378
+        ]
+      ],
+      "probabilities": [
+        0.5715438436874142,
+        0.5,
+        0.4284561563125858
+      ],
+      "loadedProbabilities": [
+        0.5715438436874142,
+        0.5,
+        0.4284561563125858
+      ]
+    },
+    {
+      "id": "manual-separated-temp-half",
+      "params": {
+        "nClusters": 2,
+        "temperature": 0.5
+      },
+      "rows": [
+        [
+          -3,
+          -2
+        ],
+        [
+          -2,
+          -3
+        ],
+        [
+          -1,
+          -1
+        ],
+        [
+          -0.5,
+          -1.5
+        ],
+        [
+          0.5,
+          1.5
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          2
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -2,
+          -2
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          2,
+          2
+        ]
+      ],
+      "state": {
+        "clusters": [
+          {
+            "centroid": [
+              -1.625,
+              -1.875
+            ],
+            "prototypeGood": [
+              -1.625,
+              -1.875
+            ],
+            "prototypeBad": null
+          },
+          {
+            "centroid": [
+              1.625,
+              1.875
+            ],
+            "prototypeGood": null,
+            "prototypeBad": [
+              1.625,
+              1.875
+            ]
+          }
+        ],
+        "globalPrototypeGood": [
+          -1.625,
+          -1.875
+        ],
+        "globalPrototypeBad": [
+          1.625,
+          1.875
+        ],
+        "temperature": 0.5
+      },
+      "trainingTrace": {
+        "selectedK": 2,
+        "assignments": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1
+        ],
+        "centroids": [
+          [
+            -1.625,
+            -1.875
+          ],
+          [
+            1.625,
+            1.875
+          ]
+        ],
+        "prototypeMasks": [
+          {
+            "good": true,
+            "bad": false
+          },
+          {
+            "good": false,
+            "bad": true
+          }
+        ]
+      },
+      "routingWeights": [
+        [
+          0.9999457537922403,
+          0.000054246207759777896
+        ],
+        [
+          0.5,
+          0.5
+        ],
+        [
+          0.000054246207759777896,
+          0.9999457537922403
+        ]
+      ],
+      "probabilities": [
+        0.9999457537922403,
+        0.5,
+        0.000054246207759777896
+      ],
+      "loadedProbabilities": [
+        0.9999457537922403,
+        0.5,
+        0.000054246207759777896
+      ]
+    },
+    {
+      "id": "manual-separated-temp-two",
+      "params": {
+        "nClusters": 2,
+        "temperature": 2
+      },
+      "rows": [
+        [
+          -3,
+          -2
+        ],
+        [
+          -2,
+          -3
+        ],
+        [
+          -1,
+          -1
+        ],
+        [
+          -0.5,
+          -1.5
+        ],
+        [
+          0.5,
+          1.5
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          2
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -2,
+          -2
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          2,
+          2
+        ]
+      ],
+      "state": {
+        "clusters": [
+          {
+            "centroid": [
+              -1.625,
+              -1.875
+            ],
+            "prototypeGood": [
+              -1.625,
+              -1.875
+            ],
+            "prototypeBad": null
+          },
+          {
+            "centroid": [
+              1.625,
+              1.875
+            ],
+            "prototypeGood": null,
+            "prototypeBad": [
+              1.625,
+              1.875
+            ]
+          }
+        ],
+        "globalPrototypeGood": [
+          -1.625,
+          -1.875
+        ],
+        "globalPrototypeBad": [
+          1.625,
+          1.875
+        ],
+        "temperature": 2
+      },
+      "trainingTrace": {
+        "selectedK": 2,
+        "assignments": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1
+        ],
+        "centroids": [
+          [
+            -1.625,
+            -1.875
+          ],
+          [
+            1.625,
+            1.875
+          ]
+        ],
+        "prototypeMasks": [
+          {
+            "good": true,
+            "bad": false
+          },
+          {
+            "good": false,
+            "bad": true
+          }
+        ]
+      },
+      "routingWeights": [
+        [
+          0.9209613288215179,
+          0.07903867117848204
+        ],
+        [
+          0.5,
+          0.5
+        ],
+        [
+          0.07903867117848204,
+          0.9209613288215179
+        ]
+      ],
+      "probabilities": [
+        0.9209613288215179,
+        0.5,
+        0.07903867117848203
+      ],
+      "loadedProbabilities": [
+        0.9209613288215179,
+        0.5,
+        0.07903867117848203
+      ]
+    },
+    {
+      "id": "auto-candidates",
+      "params": {
+        "nClusters": 0,
+        "temperature": 1
+      },
+      "rows": [
+        [
+          -3,
+          -2
+        ],
+        [
+          -2,
+          -3
+        ],
+        [
+          -1,
+          -1
+        ],
+        [
+          -0.5,
+          -1.5
+        ],
+        [
+          0.5,
+          1.5
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          2
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -2,
+          -2
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          2,
+          2
+        ]
+      ],
+      "state": {
+        "clusters": [
+          {
+            "centroid": [
+              -2.5,
+              -2.5
+            ],
+            "prototypeGood": [
+              -2.5,
+              -2.5
+            ],
+            "prototypeBad": null
+          },
+          {
+            "centroid": [
+              0.5,
+              1.5
+            ],
+            "prototypeGood": null,
+            "prototypeBad": [
+              0.5,
+              1.5
+            ]
+          },
+          {
+            "centroid": [
+              3,
+              2
+            ],
+            "prototypeGood": null,
+            "prototypeBad": [
+              3,
+              2
+            ]
+          },
+          {
+            "centroid": [
+              -1,
+              -1
+            ],
+            "prototypeGood": [
+              -1,
+              -1
+            ],
+            "prototypeBad": null
+          },
+          {
+            "centroid": [
+              2,
+              3
+            ],
+            "prototypeGood": null,
+            "prototypeBad": [
+              2,
+              3
+            ]
+          },
+          {
+            "centroid": [
+              -0.5,
+              -1.5
+            ],
+            "prototypeGood": [
+              -0.5,
+              -1.5
+            ],
+            "prototypeBad": null
+          },
+          {
+            "centroid": [
+              1,
+              1
+            ],
+            "prototypeGood": null,
+            "prototypeBad": [
+              1,
+              1
+            ]
+          }
+        ],
+        "globalPrototypeGood": [
+          -1.625,
+          -1.875
+        ],
+        "globalPrototypeBad": [
+          1.625,
+          1.875
+        ],
+        "temperature": 1
+      },
+      "trainingTrace": {
+        "selectedK": 7,
+        "assignments": [
+          0,
+          0,
+          3,
+          5,
+          1,
+          6,
+          4,
+          2
+        ],
+        "centroids": [
+          [
+            -2.5,
+            -2.5
+          ],
+          [
+            0.5,
+            1.5
+          ],
+          [
+            3,
+            2
+          ],
+          [
+            -1,
+            -1
+          ],
+          [
+            2,
+            3
+          ],
+          [
+            -0.5,
+            -1.5
+          ],
+          [
+            1,
+            1
+          ]
+        ],
+        "prototypeMasks": [
+          {
+            "good": true,
+            "bad": false
+          },
+          {
+            "good": false,
+            "bad": true
+          },
+          {
+            "good": false,
+            "bad": true
+          },
+          {
+            "good": true,
+            "bad": false
+          },
+          {
+            "good": false,
+            "bad": true
+          },
+          {
+            "good": true,
+            "bad": false
+          },
+          {
+            "good": false,
+            "bad": true
+          }
+        ]
+      },
+      "routingWeights": [
+        [
+          0.5066670136428169,
+          0.013926564865866381,
+          0.0017020553560603104,
+          0.2498216413899978,
+          0.0017020553560603104,
+          0.21141477476750928,
+          0.01476589462168913
+        ],
+        [
+          0.029701494887986107,
+          0.2096820746479718,
+          0.02769300925675912,
+          0.24777416865127594,
+          0.02769300925675912,
+          0.2096820746479718,
+          0.24777416865127594
+        ],
+        [
+          0.0014185829129820548,
+          0.16943690664151967,
+          0.3029656568650142,
+          0.011834023952417515,
+          0.3029656568650142,
+          0.011161348934149848,
+          0.20021782382890244
+        ]
+      ],
+      "probabilities": [
+        0.9843892118891489,
+        0.50693610528528,
+        0.016525278794009488
+      ],
+      "loadedProbabilities": [
+        0.9843892118891489,
+        0.50693610528528,
+        0.016525278794009488
+      ]
+    }
+  ]
+}

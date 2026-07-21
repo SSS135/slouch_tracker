@@ -1,0 +1,872 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "classifiers/adamw-v1",
+  "sources": [
+    {
+      "path": "src/services/ml/adamw.ts",
+      "sha256": "a80f70b9c7a169184e7c5b2c574681b300d02d36cf74ce44edce38fc8b4589e5"
+    },
+    {
+      "path": "src/services/ml/__tests__/adamw.test.ts",
+      "sha256": "83a039fe9852534ab0aba323ef9f320955bd76b1764ea6b14570d100a8b6a1a7"
+    }
+  ],
+  "generator": {
+    "path": "scripts/oracles/generate-adamw.ts",
+    "sha256": "fa34ed0321c4dda1a9419998ae1a036163f0408162ace60922a2477780509153",
+    "command": "npx tsx scripts/oracles/generate-adamw.ts --write"
+  },
+  "environment": {
+    "os": "win32",
+    "arch": "x64",
+    "node": "24.15.0",
+    "packageLockSha256": "cef95e334f993f2752776beeb27d737385afdd0530dc8703b53fbacd8056391f",
+    "backend": "TensorFlow.js 4.22.0 CPU",
+    "endianness": "le",
+    "threads": 1,
+    "graphOptimization": "all",
+    "rng": "seedrandom 3.0.5 ARC4 where applicable",
+    "seedEncoding": "JavaScript Number.prototype.toString"
+  },
+  "tolerances": {
+    "numeric": {
+      "absolute": 0.000002,
+      "relative": 0.000002
+    },
+    "iterative": {
+      "absolute": 0.0002
+    },
+    "exact": [
+      "ids",
+      "labels",
+      "shapes",
+      "assignments",
+      "decisionsAwayFromThreshold"
+    ]
+  },
+  "settings": {
+    "learningRate": 0.01,
+    "beta1": 0.9,
+    "beta2": 0.999,
+    "epsilon": 1e-7
+  },
+  "adversarialCases": [
+    {
+      "id": "null-gradient-source-order",
+      "decay": 0.1,
+      "names": [
+        "oracle_order_first",
+        "oracle_order_second_bias"
+      ],
+      "initial": [
+        [
+          1,
+          -1
+        ],
+        [
+          2
+        ]
+      ],
+      "gradientSteps": [
+        [
+          [
+            0.25,
+            -0.5
+          ],
+          null
+        ],
+        [
+          null,
+          [
+            0.75
+          ]
+        ],
+        [
+          [
+            -0.1,
+            0.2
+          ],
+          [
+            0.5
+          ]
+        ]
+      ],
+      "checkpoints": [
+        {
+          "step": 1,
+          "variables": [
+            [
+              0.9890000820159912,
+              -0.9890000820159912
+            ],
+            [
+              2
+            ]
+          ],
+          "optimizerWeights": [
+            {
+              "name": "iter",
+              "values": [
+                1
+              ]
+            },
+            {
+              "name": "oracle_order_first/m",
+              "values": [
+                0.02500000037252903,
+                -0.05000000074505806
+              ]
+            },
+            {
+              "name": "oracle_order_second_bias/m",
+              "values": [
+                0
+              ]
+            },
+            {
+              "name": "oracle_order_first/v",
+              "values": [
+                0.0000625000029685907,
+                0.0002500000118743628
+              ]
+            },
+            {
+              "name": "oracle_order_second_bias/v",
+              "values": [
+                0
+              ]
+            }
+          ]
+        },
+        {
+          "step": 2,
+          "variables": [
+            [
+              0.9890000820159912,
+              -0.9890000820159912
+            ],
+            [
+              1.9925587177276611
+            ]
+          ],
+          "optimizerWeights": [
+            {
+              "name": "iter",
+              "values": [
+                2
+              ]
+            },
+            {
+              "name": "oracle_order_first/m",
+              "values": [
+                0.02500000037252903,
+                -0.05000000074505806
+              ]
+            },
+            {
+              "name": "oracle_order_second_bias/m",
+              "values": [
+                0.07500000298023224
+              ]
+            },
+            {
+              "name": "oracle_order_first/v",
+              "values": [
+                0.0000625000029685907,
+                0.0002500000118743628
+              ]
+            },
+            {
+              "name": "oracle_order_second_bias/v",
+              "values": [
+                0.000562500033993274
+              ]
+            }
+          ]
+        },
+        {
+          "step": 3,
+          "variables": [
+            [
+              0.9850442409515381,
+              -0.9850442409515381
+            ],
+            [
+              1.9842287302017212
+            ]
+          ],
+          "optimizerWeights": [
+            {
+              "name": "iter",
+              "values": [
+                3
+              ]
+            },
+            {
+              "name": "oracle_order_first/m",
+              "values": [
+                0.012499998323619366,
+                -0.02499999664723873
+              ]
+            },
+            {
+              "name": "oracle_order_second_bias/m",
+              "values": [
+                0.11750000715255737
+              ]
+            },
+            {
+              "name": "oracle_order_first/v",
+              "values": [
+                0.00007243750587804243,
+                0.0002897500235121697
+              ]
+            },
+            {
+              "name": "oracle_order_second_bias/v",
+              "values": [
+                0.0008119374979287386
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "save-restore-continuation",
+      "decay": 0.01,
+      "name": "oracle_restore_weight",
+      "initial": [
+        1,
+        -2,
+        3
+      ],
+      "gradient": [
+        0.1,
+        -0.2,
+        0.3
+      ],
+      "saveAfterStep": 3,
+      "savedVariable": [
+        0.9697033166885376,
+        -1.9694033861160278,
+        2.9691033363342285
+      ],
+      "savedWeights": [
+        {
+          "name": "iter",
+          "values": [
+            3
+          ]
+        },
+        {
+          "name": "oracle_restore_weight/m",
+          "values": [
+            0.02710000053048134,
+            -0.05420000106096268,
+            0.08130000531673431
+          ]
+        },
+        {
+          "name": "oracle_restore_weight/v",
+          "values": [
+            0.000029970015020808205,
+            0.00011988006008323282,
+            0.0002697301097214222
+          ]
+        }
+      ],
+      "checkpoints": [
+        {
+          "step": 4,
+          "original": [
+            0.9596064686775208,
+            -1.9592065811157227,
+            2.958806276321411
+          ],
+          "restored": [
+            0.9596064686775208,
+            -1.9592065811157227,
+            2.958806276321411
+          ],
+          "restoredWeights": [
+            {
+              "name": "iter",
+              "values": [
+                4
+              ]
+            },
+            {
+              "name": "oracle_restore_weight/m",
+              "values": [
+                0.03438999876379967,
+                -0.06877999752759933,
+                0.1031700074672699
+              ]
+            },
+            {
+              "name": "oracle_restore_weight/v",
+              "values": [
+                0.000039940045098774135,
+                0.00015976018039509654,
+                0.000359460391337052
+              ]
+            }
+          ]
+        },
+        {
+          "step": 5,
+          "original": [
+            0.9495106339454651,
+            -1.9490107297897339,
+            2.9485104084014893
+          ],
+          "restored": [
+            0.9495106339454651,
+            -1.9490107297897339,
+            2.9485104084014893
+          ],
+          "restoredWeights": [
+            {
+              "name": "iter",
+              "values": [
+                5
+              ]
+            },
+            {
+              "name": "oracle_restore_weight/m",
+              "values": [
+                0.04095099866390228,
+                -0.08190199732780457,
+                0.12285300344228745
+              ]
+            },
+            {
+              "name": "oracle_restore_weight/v",
+              "values": [
+                0.00004990011075278744,
+                0.00019960044301114976,
+                0.00044910094584338367
+              ]
+            }
+          ]
+        },
+        {
+          "step": 6,
+          "original": [
+            0.9394158124923706,
+            -1.938815951347351,
+            2.938215494155884
+          ],
+          "restored": [
+            0.9394158124923706,
+            -1.938815951347351,
+            2.938215494155884
+          ],
+          "restoredWeights": [
+            {
+              "name": "iter",
+              "values": [
+                6
+              ]
+            },
+            {
+              "name": "oracle_restore_weight/m",
+              "values": [
+                0.046855900436639786,
+                -0.09371180087327957,
+                0.14056770503520966
+              ]
+            },
+            {
+              "name": "oracle_restore_weight/v",
+              "values": [
+                0.00005985021562082693,
+                0.00023940086248330772,
+                0.0005386518314480782
+              ]
+            }
+          ]
+        },
+        {
+          "step": 7,
+          "original": [
+            0.9293219447135925,
+            -1.9286221265792847,
+            2.9279215335845947
+          ],
+          "restored": [
+            0.9293219447135925,
+            -1.9286221265792847,
+            2.9279215335845947
+          ],
+          "restoredWeights": [
+            {
+              "name": "iter",
+              "values": [
+                7
+              ]
+            },
+            {
+              "name": "oracle_restore_weight/m",
+              "values": [
+                0.05217031016945839,
+                -0.10434062033891678,
+                0.15651093423366547
+              ]
+            },
+            {
+              "name": "oracle_restore_weight/v",
+              "values": [
+                0.00006979036697885022,
+                0.00027916146791540086,
+                0.0006281131645664573
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "invalidCases": [
+    {
+      "id": "missing-iteration",
+      "weights": [],
+      "nativeError": "InvalidWeights",
+      "typescript": {
+        "ok": false,
+        "errorName": "TypeError",
+        "errorMessage": "Cannot read properties of undefined (reading 'tensor')"
+      }
+    },
+    {
+      "id": "nonfinite-state",
+      "weights": [
+        {
+          "name": "iter",
+          "values": [
+            0
+          ]
+        },
+        {
+          "name": "w/m",
+          "values": [
+            "NaN"
+          ]
+        },
+        {
+          "name": "w/v",
+          "values": [
+            0
+          ]
+        }
+      ],
+      "nativeError": "NonFiniteValue",
+      "typescript": {
+        "ok": true,
+        "value": [
+          {
+            "name": "iter",
+            "values": [
+              0
+            ]
+          },
+          {
+            "name": "w/m",
+            "values": [
+              "NaN"
+            ]
+          },
+          {
+            "name": "w/v",
+            "values": [
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "dimension-mismatch",
+      "weights": [
+        {
+          "name": "iter",
+          "values": [
+            0
+          ]
+        },
+        {
+          "name": "w/m",
+          "values": [
+            0,
+            0
+          ]
+        },
+        {
+          "name": "w/v",
+          "values": [
+            0
+          ]
+        }
+      ],
+      "nativeError": "InvalidWeights",
+      "typescript": {
+        "ok": true,
+        "value": [
+          {
+            "name": "iter",
+            "values": [
+              0
+            ]
+          },
+          {
+            "name": "w/m",
+            "values": [
+              0,
+              0
+            ]
+          },
+          {
+            "name": "w/v",
+            "values": [
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "odd-moment-count",
+      "weights": [
+        {
+          "name": "iter",
+          "values": [
+            0
+          ]
+        },
+        {
+          "name": "w/m",
+          "values": [
+            0
+          ]
+        }
+      ],
+      "nativeError": "InvalidWeights",
+      "typescript": {
+        "ok": true,
+        "value": [
+          {
+            "name": "iter",
+            "values": [
+              0
+            ]
+          },
+          {
+            "name": "w/m",
+            "values": [
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "negative-iteration",
+      "weights": [
+        {
+          "name": "iter",
+          "values": [
+            -1
+          ]
+        }
+      ],
+      "nativeError": "InvalidIteration",
+      "typescript": {
+        "ok": true,
+        "value": [
+          {
+            "name": "iter",
+            "values": [
+              -1
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "cases": [
+    {
+      "id": "scalar-decay",
+      "name": "oracle_weight_scalar",
+      "initial": [
+        1
+      ],
+      "gradient": [
+        0.25
+      ],
+      "decay": 0.1,
+      "checkpoints": {
+        "1": [
+          0.9890000820159912
+        ],
+        "2": [
+          0.9780112504959106
+        ],
+        "5": [
+          0.9451104998588562
+        ],
+        "10": [
+          0.8904947638511658
+        ]
+      },
+      "optimizerWeights": [
+        {
+          "name": "iter",
+          "values": [
+            10
+          ]
+        },
+        {
+          "name": "oracle_weight_scalar/m",
+          "values": [
+            0.1628303825855255
+          ]
+        },
+        {
+          "name": "oracle_weight_scalar/v",
+          "values": [
+            0.0006221950752660632
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vector-decay",
+      "name": "oracle_weight_vector",
+      "initial": [
+        1,
+        -2,
+        3
+      ],
+      "gradient": [
+        0.1,
+        -0.2,
+        0.3
+      ],
+      "decay": 0.01,
+      "checkpoints": {
+        "1": [
+          0.9899000525474548,
+          -1.9898000955581665,
+          2.9897000789642334
+        ],
+        "2": [
+          0.9798011779785156,
+          -1.979601263999939,
+          2.979401111602783
+        ],
+        "5": [
+          0.9495106339454651,
+          -1.9490107297897339,
+          2.9485104084014893
+        ],
+        "10": [
+          0.8990463614463806,
+          -1.898046851158142,
+          2.8970460891723633
+        ]
+      },
+      "optimizerWeights": [
+        {
+          "name": "iter",
+          "values": [
+            10
+          ]
+        },
+        {
+          "name": "oracle_weight_vector/m",
+          "values": [
+            0.06513215601444244,
+            -0.1302643120288849,
+            0.19539646804332733
+          ]
+        },
+        {
+          "name": "oracle_weight_vector/v",
+          "values": [
+            0.0000995512236841023,
+            0.0003982048947364092,
+            0.000895960780326277
+          ]
+        }
+      ]
+    },
+    {
+      "id": "zero-gradient-decay",
+      "name": "oracle_weight_zero",
+      "initial": [
+        1,
+        -2,
+        3
+      ],
+      "gradient": [
+        0,
+        0,
+        0
+      ],
+      "decay": 0.1,
+      "checkpoints": {
+        "1": [
+          0.9990000128746033,
+          -1.9980000257492065,
+          2.996999979019165
+        ],
+        "2": [
+          0.9980010390281677,
+          -1.9960020780563354,
+          2.9940030574798584
+        ],
+        "5": [
+          0.9950100779533386,
+          -1.9900201559066772,
+          2.985030174255371
+        ],
+        "10": [
+          0.9900450110435486,
+          -1.9800900220870972,
+          2.97013521194458
+        ]
+      },
+      "optimizerWeights": [
+        {
+          "name": "iter",
+          "values": [
+            10
+          ]
+        },
+        {
+          "name": "oracle_weight_zero/m",
+          "values": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "oracle_weight_zero/v",
+          "values": [
+            0,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bias-excluded",
+      "name": "oracle_bias",
+      "initial": [
+        1,
+        -2,
+        3
+      ],
+      "gradient": [
+        0,
+        0,
+        0
+      ],
+      "decay": 0.1,
+      "checkpoints": {
+        "1": [
+          1,
+          -2,
+          3
+        ],
+        "2": [
+          1,
+          -2,
+          3
+        ],
+        "5": [
+          1,
+          -2,
+          3
+        ],
+        "10": [
+          1,
+          -2,
+          3
+        ]
+      },
+      "optimizerWeights": [
+        {
+          "name": "iter",
+          "values": [
+            10
+          ]
+        },
+        {
+          "name": "oracle_bias/m",
+          "values": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "oracle_bias/v",
+          "values": [
+            0,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "id": "contains-bias-excluded",
+      "name": "oracle_notabiasweight",
+      "initial": [
+        1
+      ],
+      "gradient": [
+        0
+      ],
+      "decay": 0.1,
+      "checkpoints": {
+        "1": [
+          1
+        ],
+        "2": [
+          1
+        ],
+        "5": [
+          1
+        ],
+        "10": [
+          1
+        ]
+      },
+      "optimizerWeights": [
+        {
+          "name": "iter",
+          "values": [
+            10
+          ]
+        },
+        {
+          "name": "oracle_notabiasweight/m",
+          "values": [
+            0
+          ]
+        },
+        {
+          "name": "oracle_notabiasweight/v",
+          "values": [
+            0
+          ]
+        }
+      ]
+    }
+  ]
+}

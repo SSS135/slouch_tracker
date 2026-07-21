@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "sources": {
+    "constants.ts": "614849727adaf32c07fbb6a6722c39d66c7659587d7b6ec8420524c36fb6519e",
+    "rtmposeFeatures.ts": "c15b0b4e91f67176d95b348fd447b0cb9339ac12d6e326cf72e3dec161592ca5",
+    "rtmposeFeatures.test.ts": "a16a7c4e4352c56ff8a36283f9e9e49f9bfe539209de8db630d9865691b90077"
+  },
+  "oracle": {
+    "runtime": "Node.js 24.15.0 on win32 x64",
+    "tensorflowJs": "4.22.0",
+    "backend": "cpu",
+    "packageLockSha256": "b6b051e76bd1b2220f34bc6f8b56c30468d7a67036e10da3f1ab44d6e761b3dc",
+    "script": "scripts/check-wave1-oracles.ts",
+    "scriptSha256": "2d028503ee6233467c5fb654f54e4d77501b1426d89154554c805dbff8d44924",
+    "command": "npx tsx scripts/check-wave1-oracles.ts"
+  },
+  "epsilon": 0.000001,
+  "backbone": {
+    "shape": [1, 768, 8, 6],
+    "rawLength": 36864,
+    "pooledLength": 768,
+    "poolingAxes": [2, 3],
+    "small": {
+      "shape": [1, 2, 2, 3],
+      "input": [1, 2, 3, 4, 5, 6, -2, -1, 0, 1, 2, 3],
+      "mean": [3.5, 0.5],
+      "max": [6, 3],
+      "std": [1.70782542042993, 1.70782542042993]
+    },
+    "cancellationSensitive": {
+      "length": 48,
+      "first": 100000000,
+      "middleValue": 1,
+      "middleCount": 46,
+      "last": -100000000,
+      "mean": 0.9583333730697632,
+      "std": 20412416
+    },
+    "sparse": {
+      "fill": 0.5,
+      "overrides": [[10, 5.0], [68, 8.0]],
+      "firstMean": [0.59375, 0.65625],
+      "firstMax": [5.0, 8.0],
+      "firstStd": [0.6427183967, 1.0711964981],
+      "remainingMeanMax": 0.5,
+      "remainingStd": 0.001
+    },
+    "negativeConstant": -2.5,
+    "sequential": {
+      "firstMean": 23.5,
+      "lastMean": 36839.5,
+      "firstMax": 47.0,
+      "lastMax": 36863.0,
+      "std": 13.8533992767
+    },
+    "malformedLengths": [36863, 36865]
+  },
+  "gau": {
+    "shape": [1, 17, 256],
+    "rawLength": 4352,
+    "pooledLength": 256,
+    "poolingAxes": [1],
+    "small": {
+      "shape": [1, 3, 2],
+      "input": [1, 10, 3, 20, 5, 40],
+      "mean": [3, 23.333333333333332],
+      "max": [5, 40],
+      "std": [1.6329934680416411, 12.472191329335658]
+    },
+    "sparse": {
+      "fill": 0.3,
+      "overrides": [[1280, 7.0], [2561, 9.0]],
+      "firstMean": [0.6941176471, 0.8117647059],
+      "firstMax": [7.0, 9.0],
+      "firstStd": [1.5764709054, 2.0470590678],
+      "remainingMeanMax": 0.3,
+      "remainingStd": 0.001
+    },
+    "negativeConstant": -3.25,
+    "sequential": {
+      "firstMean": 2048.0,
+      "lastMean": 2303.0,
+      "firstMax": 4096.0,
+      "lastMax": 4351.0,
+      "std": 1254.138671875
+    },
+    "malformedLengths": [4351, 4353]
+  }
+}

@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "compatibility-oracle-inventory-v1",
+  "sources": [
+    {
+      "path": "PORTING.md",
+      "sha256": "a6792660daeb2952c1f285169408f4be88b7180304a2bf890a32b9a74ff89153"
+    },
+    {
+      "path": ".plans/rust-typescript-refactor-plan.md",
+      "sha256": "37b5b7de11a181baffeea07a7cff409de97e7248ac996a3249f188778a358826"
+    },
+    {
+      "path": ".pi-subagents/artifacts/outputs/4ca31fdf-fecf-4c54-9426-d0185d9575b6/oracles/oracle-audit.md",
+      "sha256": "48df792db67efa2e34faa0c56888aff7bd3d45a2589429fdd52d3f7a0fe1f9bb"
+    }
+  ],
+  "generator": {
+    "path": "scripts/oracles/generate-inventory.ts",
+    "sha256": "6a2453c1d19bceb0605dd24cc4899c5f68d1ff858d3ccf5d65890300a2546953",
+    "command": "npx tsx scripts/oracles/generate-inventory.ts --write"
+  },
+  "environment": {
+    "os": "win32",
+    "arch": "x64",
+    "node": "24.15.0",
+    "packageLockSha256": "cef95e334f993f2752776beeb27d737385afdd0530dc8703b53fbacd8056391f",
+    "backend": "inventory",
+    "endianness": "le",
+    "threads": 1,
+    "graphOptimization": "all",
+    "rng": "seedrandom 3.0.5 ARC4 where applicable",
+    "seedEncoding": "JavaScript Number.prototype.toString"
+  },
+  "tolerances": {
+    "numeric": {
+      "absolute": 0.000002,
+      "relative": 0.000002
+    },
+    "iterative": {
+      "absolute": 0.0002
+    },
+    "exact": [
+      "ids",
+      "labels",
+      "shapes",
+      "assignments",
+      "decisionsAwayFromThreshold"
+    ]
+  },
+  "gate": "node scripts/run-gate.mjs compatibility-oracles",
+  "completeness": "Every frozen audit row has a TypeScript generator, committed fixture, and Rust consumer.",
+  "cases": [
+    {
+      "id": "kmeans",
+      "fixture": "src-tauri/fixtures/math/kmeans-v1.json",
+      "rust": "slouch-ml::compatibility_oracles"
+    },
+    {
+      "id": "pca",
+      "fixture": "src-tauri/fixtures/math/pca-v1.json",
+      "rust": "slouch-ml::compatibility_oracles"
+    },
+    {
+      "id": "random-projection",
+      "fixture": "src-tauri/fixtures/math/random-projection-v1.json",
+      "rust": "slouch-ml::compatibility_oracles"
+    },
+    {
+      "id": "cross-validation",
+      "fixture": "src-tauri/fixtures/math/cross-validation-v1.json",
+      "rust": "slouch-ml::compatibility_oracles"
+    },
+    {
+      "id": "adamw",
+      "fixture": "src-tauri/fixtures/classifiers/adamw-v1.json",
+      "rust": "slouch-ml::compatibility_oracles"
+    },
+    {
+      "id": "mlp",
+      "fixture": "src-tauri/fixtures/classifiers/mlp-v1.json",
+      "rust": "slouch-ml::compatibility_oracles"
+    },
+    {
+      "id": "svm",
+      "fixture": "src-tauri/fixtures/classifiers/svm-v1.json",
+      "rust": "slouch-ml::compatibility_oracles"
+    },
+    {
+      "id": "kmeans-logistic",
+      "fixture": "src-tauri/fixtures/classifiers/kmeans-logistic-v1.json",
+      "rust": "slouch-ml::compatibility_oracles"
+    },
+    {
+      "id": "kmeans-prototype",
+      "fixture": "src-tauri/fixtures/classifiers/kmeans-prototype-v1.json",
+      "rust": "slouch-ml::compatibility_oracles"
+    },
+    {
+      "id": "model-envelopes",
+      "fixture": "src-tauri/fixtures/models/model-envelope-v1.json",
+      "rust": "slouch-store::compatibility_oracles"
+    },
+    {
+      "id": "store-operations",
+      "fixture": "src-tauri/fixtures/store/store-operations-v1.json",
+      "rust": "slouch-store::compatibility_oracles"
+    },
+    {
+      "id": "vision-preprocessing-inference",
+      "fixture": "src-tauri/fixtures/vision/vision-inference-v1.json",
+      "rust": "slouch-vision::inference_parity"
+    }
+  ]
+}

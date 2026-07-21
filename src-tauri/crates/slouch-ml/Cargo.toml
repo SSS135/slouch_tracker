@@ -1,0 +1,17 @@
+[package]
+name = "slouch-ml"
+version = "0.1.0"
+description = "Pure-Rust classifiers, feature math, cross-validation, and model training for Slouch Tracker"
+license = "MIT"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+slouch-domain = { workspace = true }
+ndarray = { workspace = true }
+nalgebra = { workspace = true }
+serde = { workspace = true }
+specta = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

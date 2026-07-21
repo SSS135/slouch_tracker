@@ -1,0 +1,296 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "store/store-operations-v1",
+  "sources": [
+    {
+      "path": "src/services/dataset/storage.ts",
+      "sha256": "465e4aacafcff60fb765837b64502c0f76bd2af08f3e27d0cc8faadf93b29b18"
+    },
+    {
+      "path": "src/services/dataset/operations.ts",
+      "sha256": "a0e1f01f9ac7a9b58c3aacb820bc5d4285ab02ec418e44e53b96a818638a79c4"
+    },
+    {
+      "path": "src/services/dataset/types.ts",
+      "sha256": "1573c342afd2ad603a1d0bc14e47b01bdbd1aa3177d8013db5190c7e6b2fda54"
+    },
+    {
+      "path": "src/services/dataset/featureRegistry.ts",
+      "sha256": "875954dd0d073ee181a15d9e7db5e389852a242590b10e2a5ba29f33bef05278"
+    },
+    {
+      "path": "src/services/dataset/__tests__/storage.test.ts",
+      "sha256": "3e9aad7882903db625f98119539955331dbf76b7d404902df04cd3c4aa056e16"
+    },
+    {
+      "path": "src/services/dataset/__tests__/operations.test.ts",
+      "sha256": "aec0fec0e9f9f8470d35a46078bcc583faed1b2c33f2c65a8b769e9a935174dd"
+    }
+  ],
+  "generator": {
+    "path": "scripts/oracles/generate-store-operations.ts",
+    "sha256": "928cd27147b1d7e9a0100715510b1cf4fe83b5f81dcdd0a09d83f90e04b44191",
+    "command": "npx tsx scripts/oracles/generate-store-operations.ts --write"
+  },
+  "environment": {
+    "os": "win32",
+    "arch": "x64",
+    "node": "24.15.0",
+    "packageLockSha256": "cef95e334f993f2752776beeb27d737385afdd0530dc8703b53fbacd8056391f",
+    "backend": "localforage 1.10.0 over fake-indexeddb 6.2.3",
+    "endianness": "le",
+    "threads": 1,
+    "graphOptimization": "all",
+    "rng": "seedrandom 3.0.5 ARC4 where applicable",
+    "seedEncoding": "JavaScript Number.prototype.toString"
+  },
+  "tolerances": {
+    "numeric": {
+      "absolute": 0.000002,
+      "relative": 0.000002
+    },
+    "iterative": {
+      "absolute": 0.0002
+    },
+    "exact": [
+      "ids",
+      "labels",
+      "shapes",
+      "assignments",
+      "decisionsAwayFromThreshold"
+    ]
+  },
+  "fixedClock": {
+    "startMs": 1735689600000,
+    "incrementMs": 1000
+  },
+  "dimensions": {
+    "rtmdet_extracted": 384,
+    "gau_features": 256,
+    "gau_features_max": 256,
+    "gau_features_std": 256,
+    "backbone_features": 768,
+    "backbone_features_max": 768,
+    "backbone_features_std": 768
+  },
+  "nativePolicy": {
+    "applicationId": 1397506888,
+    "userVersion": 1,
+    "foreignKeys": true,
+    "journalMode": "WAL",
+    "busyTimeoutMs": 5000,
+    "synchronous": "NORMAL"
+  },
+  "dualExpectations": [
+    {
+      "case": "arbitrary-feature-length",
+      "typescript": "accepted",
+      "native": "reject InvalidFeatureDimension"
+    },
+    {
+      "case": "nonfinite-feature",
+      "typescript": "legacy paths may accept",
+      "native": "reject non-finite"
+    },
+    {
+      "case": "duck-typed-blob",
+      "typescript": "fast guard may accept",
+      "native": "reject bytes and MIME required"
+    },
+    {
+      "case": "malformed-boundary",
+      "typescript": "weak legacy paths may filter",
+      "native": "reject"
+    },
+    {
+      "case": "schema-version-mismatch",
+      "typescript": "clear all data",
+      "native": "transactional migration or future-version rejection"
+    }
+  ],
+  "operationCases": [
+    {
+      "id": "missing-id-get",
+      "result": null
+    },
+    {
+      "id": "missing-id-update",
+      "ok": false,
+      "error": "Failed to update frame label: Frame with id missing not found"
+    },
+    {
+      "id": "delete-bulk-all-success",
+      "result": {
+        "deleted": 2,
+        "success": true
+      },
+      "nativeResult": {
+        "deleted": 2,
+        "success": true
+      }
+    },
+    {
+      "id": "delete-bulk-partial-failure",
+      "result": {
+        "deleted": 2,
+        "success": true
+      },
+      "nativeResult": {
+        "deleted": 1,
+        "success": true
+      }
+    },
+    {
+      "id": "delete-bulk-all-failure",
+      "result": {
+        "deleted": 2,
+        "success": true
+      },
+      "nativeResult": {
+        "deleted": 0,
+        "success": false
+      }
+    },
+    {
+      "id": "delete-bulk-empty",
+      "result": {
+        "deleted": 0,
+        "success": false
+      },
+      "nativeResult": {
+        "deleted": 0,
+        "success": false
+      }
+    },
+    {
+      "id": "cleanup-unused-zero",
+      "result": {
+        "deleted": 0,
+        "success": true
+      }
+    },
+    {
+      "id": "delete-by-label-zero",
+      "result": {
+        "deleted": 0,
+        "success": true
+      }
+    },
+    {
+      "id": "delete-by-label-success",
+      "result": {
+        "deleted": 2,
+        "success": true
+      }
+    },
+    {
+      "id": "needs-retraining-without-model",
+      "result": true
+    },
+    {
+      "id": "reset-dataset",
+      "frameIds": []
+    }
+  ],
+  "operationContracts": {
+    "deleteBulk": [
+      "all-success",
+      "all-failure",
+      "partial-failure",
+      "empty"
+    ],
+    "resetDataset": "preserves settings and model pair",
+    "resetAllData": "clears frames reservoir models settings",
+    "needsRetrainingOnStorageFailure": true,
+    "defaultDimReductionConfig": {
+      "method": "none",
+      "components": 64
+    }
+  },
+  "cases": [
+    {
+      "operation": "load-empty",
+      "version": 0,
+      "lastModified": 1735689612000,
+      "frameIds": []
+    },
+    {
+      "operation": "save-frame-a",
+      "version": 1,
+      "lastModified": 1735689622000,
+      "frameIds": [
+        "frame-a"
+      ],
+      "featureHashes": {
+        "rtmdet_extracted": "5a3191b8e8755639e4801dc03990fd4ae384ad422a3d4ae0ffd85826fb29fbcd",
+        "gau_features": "e54332d5a0a787124464eb6c10a1629db5e2bcb45c3217c8b5e98d229a3dadc9",
+        "gau_features_max": "e54332d5a0a787124464eb6c10a1629db5e2bcb45c3217c8b5e98d229a3dadc9",
+        "gau_features_std": "e54332d5a0a787124464eb6c10a1629db5e2bcb45c3217c8b5e98d229a3dadc9",
+        "backbone_features": "80fe37228f3b8e31d1565c125cd6e4a138d1d6b6c4828da8a8e2fb5db816ae8c",
+        "backbone_features_max": "80fe37228f3b8e31d1565c125cd6e4a138d1d6b6c4828da8a8e2fb5db816ae8c",
+        "backbone_features_std": "80fe37228f3b8e31d1565c125cd6e4a138d1d6b6c4828da8a8e2fb5db816ae8c"
+      }
+    },
+    {
+      "operation": "save-frame-b",
+      "stats": {
+        "total": 2,
+        "good": 1,
+        "bad": 1,
+        "away": 0,
+        "unused": 0,
+        "imbalanceRatio": 0,
+        "hasMinimumFrames": true,
+        "hasAwayFrames": false
+      },
+      "frameById": "frame-b",
+      "badIds": [
+        "frame-b"
+      ]
+    },
+    {
+      "operation": "overwrite-frame-a",
+      "version": 3,
+      "labels": {
+        "frame-a": "away",
+        "frame-b": "bad"
+      },
+      "stats": {
+        "total": 2,
+        "good": 0,
+        "bad": 1,
+        "away": 1,
+        "unused": 0,
+        "imbalanceRatio": 1,
+        "hasMinimumFrames": false,
+        "hasAwayFrames": true
+      }
+    },
+    {
+      "operation": "update-frame-b-good",
+      "stats": {
+        "total": 2,
+        "good": 1,
+        "bad": 0,
+        "away": 1,
+        "unused": 0,
+        "imbalanceRatio": 1,
+        "hasMinimumFrames": false,
+        "hasAwayFrames": true
+      }
+    },
+    {
+      "operation": "update-unused-deletes",
+      "version": 5,
+      "frameIds": [
+        "frame-a"
+      ]
+    },
+    {
+      "operation": "clear-dataset",
+      "version": 0,
+      "lastModified": 1735689746000,
+      "frameIds": []
+    }
+  ]
+}

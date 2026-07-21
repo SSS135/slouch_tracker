@@ -1,0 +1,1905 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "classifiers/kmeans-logistic-v1",
+  "sources": [
+    {
+      "path": "src/services/ml/kmeansLogisticClassifier.ts",
+      "sha256": "96bc109fcee5c1f5f48b09e7c9439a0fae88458d203c8fd6413c93a8797ddd70"
+    },
+    {
+      "path": "src/services/ml/kmeans.ts",
+      "sha256": "60bf7c712165e24fa7b6deb4c015aa97d27491be86d68739b325c7e4705297d3"
+    },
+    {
+      "path": "src/services/ml/mlpClassifier.ts",
+      "sha256": "ddc116292dc8b3e88cbf0b85dce08cb25d05f362542df466a5f943dcc449140a"
+    },
+    {
+      "path": "src/services/ml/__tests__/kmeansLogisticClassifier.test.ts",
+      "sha256": "7883aa3035f9cdd100c42d160d8e41f33574a7006214589ee6be000bb676655e"
+    }
+  ],
+  "generator": {
+    "path": "scripts/oracles/generate-kmeans-logistic.ts",
+    "sha256": "90e731fa0999792865f4d314411450f8a9d2b50bc60ff282728fee016aa64849",
+    "command": "npx tsx scripts/oracles/generate-kmeans-logistic.ts --write"
+  },
+  "environment": {
+    "os": "win32",
+    "arch": "x64",
+    "node": "24.15.0",
+    "packageLockSha256": "cef95e334f993f2752776beeb27d737385afdd0530dc8703b53fbacd8056391f",
+    "backend": "TensorFlow.js 4.22.0 CPU + pure TypeScript K-Means",
+    "endianness": "le",
+    "threads": 1,
+    "graphOptimization": "all",
+    "rng": "seedrandom 3.0.5 ARC4 where applicable",
+    "seedEncoding": "JavaScript Number.prototype.toString"
+  },
+  "tolerances": {
+    "numeric": {
+      "absolute": 0.000002,
+      "relative": 0.000002
+    },
+    "iterative": {
+      "absolute": 0.0002
+    },
+    "exact": [
+      "ids",
+      "labels",
+      "shapes",
+      "assignments",
+      "decisionsAwayFromThreshold"
+    ]
+  },
+  "legacyCases": [
+    {
+      "id": "legacy-load-absent-weight-decay",
+      "state": {
+        "centroids": [
+          [
+            -1.625,
+            -1.875
+          ],
+          [
+            1.625,
+            1.875
+          ]
+        ],
+        "clusterModels": [
+          {
+            "layerWeights": [
+              [
+                0.038579780608415604,
+                -0.015209855511784554
+              ]
+            ],
+            "layerBiases": [
+              [
+                0.01962020993232727
+              ]
+            ],
+            "layerShapes": [
+              2,
+              1
+            ],
+            "hiddenLayers": 0,
+            "hiddenSize": 64,
+            "classWeights": [
+              1,
+              1
+            ]
+          },
+          {
+            "layerWeights": [
+              [
+                0.038579780608415604,
+                -0.015209855511784554
+              ]
+            ],
+            "layerBiases": [
+              [
+                -0.01962020993232727
+              ]
+            ],
+            "layerShapes": [
+              2,
+              1
+            ],
+            "hiddenLayers": 0,
+            "hiddenSize": 64,
+            "classWeights": [
+              1,
+              1
+            ]
+          }
+        ],
+        "globalModel": {
+          "layerWeights": [
+            [
+              0.03857358172535896,
+              -0.015217810869216919
+            ]
+          ],
+          "layerBiases": [
+            [
+              0.007073752582073212
+            ]
+          ],
+          "layerShapes": [
+            2,
+            1
+          ],
+          "hiddenLayers": 0,
+          "hiddenSize": 64,
+          "classWeights": [
+            1,
+            1
+          ]
+        },
+        "temperature": 1
+      },
+      "params": {
+        "temperature": 1,
+        "maxIterations": 2,
+        "nClusters": 2
+      },
+      "expectedWeightDecayDefault": 1,
+      "probes": [
+        [
+          -2,
+          -2
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          2,
+          2
+        ]
+      ],
+      "loadedProbabilities": [
+        0.506851177461865,
+        0.5000000149011612,
+        0.49314882253813486
+      ]
+    }
+  ],
+  "invalidCases": [
+    {
+      "id": "empty",
+      "operation": "train",
+      "rows": [],
+      "labels": [],
+      "params": {
+        "nClusters": 2,
+        "temperature": 1,
+        "maxIterations": 2,
+        "weightDecay": 1
+      },
+      "nativeError": "EmptyDataset",
+      "typescript": {
+        "ok": false,
+        "errorName": "Error",
+        "errorMessage": "Cannot train on empty dataset"
+      }
+    },
+    {
+      "id": "mismatch",
+      "operation": "train",
+      "rows": [
+        [
+          1,
+          2
+        ]
+      ],
+      "labels": [],
+      "params": {
+        "nClusters": 2,
+        "temperature": 1,
+        "maxIterations": 2,
+        "weightDecay": 1
+      },
+      "nativeError": "LengthMismatch",
+      "typescript": {
+        "ok": false,
+        "errorName": "Error",
+        "errorMessage": "Length mismatch: 1 features, 0 labels"
+      }
+    },
+    {
+      "id": "ragged",
+      "operation": "train",
+      "rows": [
+        [
+          1,
+          2
+        ],
+        [
+          3
+        ]
+      ],
+      "labels": [
+        0,
+        1
+      ],
+      "params": {
+        "nClusters": 2,
+        "temperature": 1,
+        "maxIterations": 2,
+        "weightDecay": 1
+      },
+      "nativeError": "RaggedFeatures",
+      "typescript": {
+        "ok": false,
+        "errorName": "Error",
+        "errorMessage": "Training failed: Model weights contain NaN values. This indicates numerical instability. Try reducing learning rate or increasing regularization."
+      }
+    },
+    {
+      "id": "nonfinite-feature",
+      "operation": "train",
+      "rows": [
+        [
+          "NaN",
+          2
+        ],
+        [
+          3,
+          4
+        ]
+      ],
+      "labels": [
+        0,
+        1
+      ],
+      "params": {
+        "nClusters": 2,
+        "temperature": 1,
+        "maxIterations": 2,
+        "weightDecay": 1
+      },
+      "nativeError": "NonFiniteFeature",
+      "typescript": {
+        "ok": false,
+        "errorName": "Error",
+        "errorMessage": "Training failed: Model weights contain NaN values. This indicates numerical instability. Try reducing learning rate or increasing regularization."
+      }
+    },
+    {
+      "id": "nonpositive-temperature",
+      "operation": "construct",
+      "params": {
+        "nClusters": 2,
+        "temperature": 0,
+        "maxIterations": 2,
+        "weightDecay": 1
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": true,
+        "value": "kmeans_logistic"
+      }
+    },
+    {
+      "id": "malformed-mask",
+      "operation": "load",
+      "params": {
+        "nClusters": 2,
+        "temperature": 1,
+        "maxIterations": 2,
+        "weightDecay": 1
+      },
+      "state": {
+        "centroids": [
+          [
+            -1.625,
+            -1.875
+          ],
+          [
+            1.625,
+            1.875
+          ]
+        ],
+        "clusterModels": [
+          {
+            "layerWeights": [
+              [
+                0.038579780608415604,
+                -0.015209855511784554
+              ]
+            ],
+            "layerBiases": [
+              [
+                -0.01962020993232727
+              ]
+            ],
+            "layerShapes": [
+              2,
+              1
+            ],
+            "hiddenLayers": 0,
+            "hiddenSize": 64,
+            "classWeights": [
+              1,
+              1
+            ]
+          }
+        ],
+        "globalModel": {
+          "layerWeights": [
+            [
+              0.03857358172535896,
+              -0.015217810869216919
+            ]
+          ],
+          "layerBiases": [
+            [
+              0.007073752582073212
+            ]
+          ],
+          "layerShapes": [
+            2,
+            1
+          ],
+          "hiddenLayers": 0,
+          "hiddenSize": 64,
+          "classWeights": [
+            1,
+            1
+          ]
+        },
+        "temperature": 1
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": true,
+        "value": {
+          "state": {
+            "centroids": [
+              [
+                -1.625,
+                -1.875
+              ],
+              [
+                1.625,
+                1.875
+              ]
+            ],
+            "clusterModels": [
+              {
+                "layerWeights": [
+                  [
+                    0.038579780608415604,
+                    -0.015209855511784554
+                  ]
+                ],
+                "layerBiases": [
+                  [
+                    -0.01962020993232727
+                  ]
+                ],
+                "layerShapes": [
+                  2,
+                  1
+                ],
+                "hiddenLayers": 0,
+                "hiddenSize": 64,
+                "classWeights": [
+                  1,
+                  1
+                ]
+              },
+              null
+            ],
+            "globalModel": {
+              "layerWeights": [
+                [
+                  0.03857358172535896,
+                  -0.015217810869216919
+                ]
+              ],
+              "layerBiases": [
+                [
+                  0.007073752582073212
+                ]
+              ],
+              "layerShapes": [
+                2,
+                1
+              ],
+              "hiddenLayers": 0,
+              "hiddenSize": 64,
+              "classWeights": [
+                1,
+                1
+              ]
+            },
+            "temperature": 1
+          },
+          "probabilities": [
+            0.5165351092287903,
+            0.5015682429075241,
+            0.4866056090193294
+          ]
+        }
+      }
+    },
+    {
+      "id": "empty-centroids",
+      "operation": "load",
+      "params": {
+        "nClusters": 2,
+        "temperature": 1,
+        "maxIterations": 2,
+        "weightDecay": 1
+      },
+      "state": {
+        "centroids": [],
+        "clusterModels": [],
+        "globalModel": {
+          "layerWeights": [
+            [
+              0.03857358172535896,
+              -0.015217810869216919
+            ]
+          ],
+          "layerBiases": [
+            [
+              0.007073752582073212
+            ]
+          ],
+          "layerShapes": [
+            2,
+            1
+          ],
+          "hiddenLayers": 0,
+          "hiddenSize": 64,
+          "classWeights": [
+            1,
+            1
+          ]
+        },
+        "temperature": 1
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": true,
+        "value": {
+          "state": {
+            "centroids": [],
+            "clusterModels": [],
+            "globalModel": {
+              "layerWeights": [
+                [
+                  0.03857358172535896,
+                  -0.015217810869216919
+                ]
+              ],
+              "layerBiases": [
+                [
+                  0.007073752582073212
+                ]
+              ],
+              "layerShapes": [
+                2,
+                1
+              ],
+              "hiddenLayers": 0,
+              "hiddenSize": 64,
+              "classWeights": [
+                1,
+                1
+              ]
+            },
+            "temperature": 1
+          },
+          "probabilities": [
+            0,
+            0,
+            0
+          ]
+        }
+      }
+    },
+    {
+      "id": "nonfinite-centroid",
+      "operation": "load",
+      "params": {
+        "nClusters": 2,
+        "temperature": 1,
+        "maxIterations": 2,
+        "weightDecay": 1
+      },
+      "state": {
+        "centroids": [
+          [
+            "NaN",
+            -1.875
+          ],
+          [
+            1.625,
+            1.875
+          ]
+        ],
+        "clusterModels": [
+          {
+            "layerWeights": [
+              [
+                0.038579780608415604,
+                -0.015209855511784554
+              ]
+            ],
+            "layerBiases": [
+              [
+                0.01962020993232727
+              ]
+            ],
+            "layerShapes": [
+              2,
+              1
+            ],
+            "hiddenLayers": 0,
+            "hiddenSize": 64,
+            "classWeights": [
+              1,
+              1
+            ]
+          },
+          {
+            "layerWeights": [
+              [
+                0.038579780608415604,
+                -0.015209855511784554
+              ]
+            ],
+            "layerBiases": [
+              [
+                -0.01962020993232727
+              ]
+            ],
+            "layerShapes": [
+              2,
+              1
+            ],
+            "hiddenLayers": 0,
+            "hiddenSize": 64,
+            "classWeights": [
+              1,
+              1
+            ]
+          }
+        ],
+        "globalModel": {
+          "layerWeights": [
+            [
+              0.03857358172535896,
+              -0.015217810869216919
+            ]
+          ],
+          "layerBiases": [
+            [
+              0.007073752582073212
+            ]
+          ],
+          "layerShapes": [
+            2,
+            1
+          ],
+          "hiddenLayers": 0,
+          "hiddenSize": 64,
+          "classWeights": [
+            1,
+            1
+          ]
+        },
+        "temperature": 1
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": true,
+        "value": {
+          "state": {
+            "centroids": [
+              [
+                "NaN",
+                -1.875
+              ],
+              [
+                1.625,
+                1.875
+              ]
+            ],
+            "clusterModels": [
+              {
+                "layerWeights": [
+                  [
+                    0.038579780608415604,
+                    -0.015209855511784554
+                  ]
+                ],
+                "layerBiases": [
+                  [
+                    0.01962020993232727
+                  ]
+                ],
+                "layerShapes": [
+                  2,
+                  1
+                ],
+                "hiddenLayers": 0,
+                "hiddenSize": 64,
+                "classWeights": [
+                  1,
+                  1
+                ]
+              },
+              {
+                "layerWeights": [
+                  [
+                    0.038579780608415604,
+                    -0.015209855511784554
+                  ]
+                ],
+                "layerBiases": [
+                  [
+                    -0.01962020993232727
+                  ]
+                ],
+                "layerShapes": [
+                  2,
+                  1
+                ],
+                "hiddenLayers": 0,
+                "hiddenSize": 64,
+                "classWeights": [
+                  1,
+                  1
+                ]
+              }
+            ],
+            "globalModel": {
+              "layerWeights": [
+                [
+                  0.03857358172535896,
+                  -0.015217810869216919
+                ]
+              ],
+              "layerBiases": [
+                [
+                  0.007073752582073212
+                ]
+              ],
+              "layerShapes": [
+                2,
+                1
+              ],
+              "hiddenLayers": 0,
+              "hiddenSize": 64,
+              "classWeights": [
+                1,
+                1
+              ]
+            },
+            "temperature": 1
+          },
+          "probabilities": [
+            "NaN",
+            "NaN",
+            "NaN"
+          ]
+        }
+      }
+    },
+    {
+      "id": "nonfinite-global-mlp",
+      "operation": "load",
+      "params": {
+        "nClusters": 2,
+        "temperature": 1,
+        "maxIterations": 2,
+        "weightDecay": 1
+      },
+      "state": {
+        "centroids": [
+          [
+            -1.625,
+            -1.875
+          ],
+          [
+            1.625,
+            1.875
+          ]
+        ],
+        "clusterModels": [
+          {
+            "layerWeights": [
+              [
+                0.038579780608415604,
+                -0.015209855511784554
+              ]
+            ],
+            "layerBiases": [
+              [
+                0.01962020993232727
+              ]
+            ],
+            "layerShapes": [
+              2,
+              1
+            ],
+            "hiddenLayers": 0,
+            "hiddenSize": 64,
+            "classWeights": [
+              1,
+              1
+            ]
+          },
+          {
+            "layerWeights": [
+              [
+                0.038579780608415604,
+                -0.015209855511784554
+              ]
+            ],
+            "layerBiases": [
+              [
+                -0.01962020993232727
+              ]
+            ],
+            "layerShapes": [
+              2,
+              1
+            ],
+            "hiddenLayers": 0,
+            "hiddenSize": 64,
+            "classWeights": [
+              1,
+              1
+            ]
+          }
+        ],
+        "globalModel": {
+          "layerWeights": [
+            [
+              "NaN",
+              -0.015217810869216919
+            ]
+          ],
+          "layerBiases": [
+            [
+              0.007073752582073212
+            ]
+          ],
+          "layerShapes": [
+            2,
+            1
+          ],
+          "hiddenLayers": 0,
+          "hiddenSize": 64,
+          "classWeights": [
+            1,
+            1
+          ]
+        },
+        "temperature": 1
+      },
+      "nativeError": "InvalidState",
+      "typescript": {
+        "ok": true,
+        "value": {
+          "state": {
+            "centroids": [
+              [
+                -1.625,
+                -1.875
+              ],
+              [
+                1.625,
+                1.875
+              ]
+            ],
+            "clusterModels": [
+              {
+                "layerWeights": [
+                  [
+                    0.038579780608415604,
+                    -0.015209855511784554
+                  ]
+                ],
+                "layerBiases": [
+                  [
+                    0.01962020993232727
+                  ]
+                ],
+                "layerShapes": [
+                  2,
+                  1
+                ],
+                "hiddenLayers": 0,
+                "hiddenSize": 64,
+                "classWeights": [
+                  1,
+                  1
+                ]
+              },
+              {
+                "layerWeights": [
+                  [
+                    0.038579780608415604,
+                    -0.015209855511784554
+                  ]
+                ],
+                "layerBiases": [
+                  [
+                    -0.01962020993232727
+                  ]
+                ],
+                "layerShapes": [
+                  2,
+                  1
+                ],
+                "hiddenLayers": 0,
+                "hiddenSize": 64,
+                "classWeights": [
+                  1,
+                  1
+                ]
+              }
+            ],
+            "globalModel": {
+              "layerWeights": [
+                [
+                  "NaN",
+                  -0.015217810869216919
+                ]
+              ],
+              "layerBiases": [
+                [
+                  0.007073752582073212
+                ]
+              ],
+              "layerShapes": [
+                2,
+                1
+              ],
+              "hiddenLayers": 0,
+              "hiddenSize": 64,
+              "classWeights": [
+                1,
+                1
+              ]
+            },
+            "temperature": 1
+          },
+          "probabilities": [
+            0.506851177461865,
+            0.5000000149011612,
+            0.49314882253813486
+          ]
+        }
+      }
+    }
+  ],
+  "cases": [
+    {
+      "id": "manual-mixed-temp1",
+      "params": {
+        "nClusters": 2,
+        "temperature": 1,
+        "maxIterations": 2,
+        "weightDecay": 1
+      },
+      "rows": [
+        [
+          -3,
+          -2
+        ],
+        [
+          -2,
+          -3
+        ],
+        [
+          -1,
+          -1
+        ],
+        [
+          -0.5,
+          -1.5
+        ],
+        [
+          0.5,
+          1.5
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          2
+        ]
+      ],
+      "labels": [
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1
+      ],
+      "probes": [
+        [
+          -2,
+          -2
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          2,
+          2
+        ]
+      ],
+      "state": {
+        "centroids": [
+          [
+            -1.625,
+            -1.875
+          ],
+          [
+            1.625,
+            1.875
+          ]
+        ],
+        "clusterModels": [
+          {
+            "layerWeights": [
+              [
+                0.038579780608415604,
+                -0.015209855511784554
+              ]
+            ],
+            "layerBiases": [
+              [
+                0.01962020993232727
+              ]
+            ],
+            "layerShapes": [
+              2,
+              1
+            ],
+            "hiddenLayers": 0,
+            "hiddenSize": 64,
+            "classWeights": [
+              1,
+              1
+            ]
+          },
+          {
+            "layerWeights": [
+              [
+                0.038579780608415604,
+                -0.015209855511784554
+              ]
+            ],
+            "layerBiases": [
+              [
+                -0.01962020993232727
+              ]
+            ],
+            "layerShapes": [
+              2,
+              1
+            ],
+            "hiddenLayers": 0,
+            "hiddenSize": 64,
+            "classWeights": [
+              1,
+              1
+            ]
+          }
+        ],
+        "globalModel": {
+          "layerWeights": [
+            [
+              0.03857358172535896,
+              -0.015217810869216919
+            ]
+          ],
+          "layerBiases": [
+            [
+              0.007073752582073212
+            ]
+          ],
+          "layerShapes": [
+            2,
+            1
+          ],
+          "hiddenLayers": 0,
+          "hiddenSize": 64,
+          "classWeights": [
+            1,
+            1
+          ]
+        },
+        "temperature": 1
+      },
+      "trainingTrace": {
+        "selectedK": 2,
+        "assignments": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1
+        ],
+        "centroids": [
+          [
+            -1.625,
+            -1.875
+          ],
+          [
+            1.625,
+            1.875
+          ]
+        ],
+        "clusterModelMask": [
+          true,
+          true
+        ]
+      },
+      "routingWeights": [
+        [
+          0.9926884502371378,
+          0.007311549762862149
+        ],
+        [
+          0.5,
+          0.5
+        ],
+        [
+          0.007311549762862149,
+          0.9926884502371378
+        ]
+      ],
+      "probabilities": [
+        0.506851177461865,
+        0.5000000149011612,
+        0.49314882253813486
+      ],
+      "loadedProbabilities": [
+        0.506851177461865,
+        0.5000000149011612,
+        0.49314882253813486
+      ]
+    },
+    {
+      "id": "manual-separated-temp-half",
+      "params": {
+        "nClusters": 2,
+        "temperature": 0.5,
+        "maxIterations": 2,
+        "weightDecay": 1
+      },
+      "rows": [
+        [
+          -3,
+          -2
+        ],
+        [
+          -2.2,
+          -3
+        ],
+        [
+          -1,
+          -0.8
+        ],
+        [
+          0.35,
+          0.8
+        ],
+        [
+          0.8,
+          1.7
+        ],
+        [
+          1.2,
+          1
+        ],
+        [
+          2.4,
+          3.2
+        ],
+        [
+          3.3,
+          2.1
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -2,
+          -2
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          2,
+          2
+        ]
+      ],
+      "state": {
+        "centroids": [
+          [
+            -2.066666603088379,
+            -1.933333396911621
+          ],
+          [
+            1.6100000143051147,
+            1.7599998712539673
+          ]
+        ],
+        "clusterModels": [
+          null,
+          null
+        ],
+        "globalModel": {
+          "layerWeights": [
+            [
+              0.038565922528505325,
+              0.024571627378463745
+            ]
+          ],
+          "layerBiases": [
+            [
+              0.019888583570718765
+            ]
+          ],
+          "layerShapes": [
+            2,
+            1
+          ],
+          "hiddenLayers": 0,
+          "hiddenSize": 64,
+          "classWeights": [
+            1,
+            1
+          ]
+        },
+        "temperature": 0.5
+      },
+      "trainingTrace": {
+        "selectedK": 2,
+        "assignments": [
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "centroids": [
+          [
+            -2.066666603088379,
+            -1.933333396911621
+          ],
+          [
+            1.6100000143051147,
+            1.7599998712539673
+          ]
+        ],
+        "clusterModelMask": [
+          false,
+          false
+        ]
+      },
+      "routingWeights": [
+        [
+          0.9999641578691825,
+          0.000035842130817454756
+        ],
+        [
+          0.29123823817636385,
+          0.708761761823636
+        ],
+        [
+          0.000030449230865938613,
+          0.999969550769134
+        ]
+      ],
+      "probabilities": [
+        0.5265715718269348,
+        0.4950280189514159,
+        0.46352398395538325
+      ],
+      "loadedProbabilities": [
+        0.5265715718269348,
+        0.4950280189514159,
+        0.46352398395538325
+      ]
+    },
+    {
+      "id": "manual-separated-temp-two",
+      "params": {
+        "nClusters": 2,
+        "temperature": 2,
+        "maxIterations": 2,
+        "weightDecay": 1
+      },
+      "rows": [
+        [
+          -3,
+          -2
+        ],
+        [
+          -2.2,
+          -3
+        ],
+        [
+          -1,
+          -0.8
+        ],
+        [
+          0.35,
+          0.8
+        ],
+        [
+          0.8,
+          1.7
+        ],
+        [
+          1.2,
+          1
+        ],
+        [
+          2.4,
+          3.2
+        ],
+        [
+          3.3,
+          2.1
+        ]
+      ],
+      "labels": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "probes": [
+        [
+          -2,
+          -2
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          2,
+          2
+        ]
+      ],
+      "state": {
+        "centroids": [
+          [
+            -2.066666603088379,
+            -1.933333396911621
+          ],
+          [
+            1.6100000143051147,
+            1.7599998712539673
+          ]
+        ],
+        "clusterModels": [
+          null,
+          null
+        ],
+        "globalModel": {
+          "layerWeights": [
+            [
+              0.038565922528505325,
+              0.024571627378463745
+            ]
+          ],
+          "layerBiases": [
+            [
+              0.019888583570718765
+            ]
+          ],
+          "layerShapes": [
+            2,
+            1
+          ],
+          "hiddenLayers": 0,
+          "hiddenSize": 64,
+          "classWeights": [
+            1,
+            1
+          ]
+        },
+        "temperature": 2
+      },
+      "trainingTrace": {
+        "selectedK": 2,
+        "assignments": [
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "centroids": [
+          [
+            -2.066666603088379,
+            -1.933333396911621
+          ],
+          [
+            1.6100000143051147,
+            1.7599998712539673
+          ]
+        ],
+        "clusterModelMask": [
+          false,
+          false
+        ]
+      },
+      "routingWeights": [
+        [
+          0.9281816650703723,
+          0.07181833492962772
+        ],
+        [
+          0.44464176031135805,
+          0.555358239688642
+        ],
+        [
+          0.06914776296353381,
+          0.9308522370364661
+        ]
+      ],
+      "probabilities": [
+        0.5265715718269348,
+        0.495028018951416,
+        0.4635239839553833
+      ],
+      "loadedProbabilities": [
+        0.5265715718269348,
+        0.495028018951416,
+        0.4635239839553833
+      ]
+    },
+    {
+      "id": "two-sample-auto-k1",
+      "params": {
+        "nClusters": 0,
+        "temperature": 1,
+        "maxIterations": 2,
+        "weightDecay": 1
+      },
+      "rows": [
+        [
+          -1,
+          -0.8
+        ],
+        [
+          1.3,
+          1
+        ]
+      ],
+      "labels": [
+        0,
+        1
+      ],
+      "probes": [
+        [
+          -2,
+          -2
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          2,
+          2
+        ]
+      ],
+      "state": {
+        "centroids": [
+          [
+            0.1499999761581421,
+            0.09999999403953552
+          ]
+        ],
+        "clusterModels": [
+          {
+            "layerWeights": [
+              [
+                0.03857077658176422,
+                0.02457626536488533
+              ]
+            ],
+            "layerBiases": [
+              [
+                -0.008241708390414715
+              ]
+            ],
+            "layerShapes": [
+              2,
+              1
+            ],
+            "hiddenLayers": 0,
+            "hiddenSize": 64,
+            "classWeights": [
+              1,
+              1
+            ]
+          }
+        ],
+        "globalModel": {
+          "layerWeights": [
+            [
+              0.03857077658176422,
+              0.02457626536488533
+            ]
+          ],
+          "layerBiases": [
+            [
+              -0.008241708390414715
+            ]
+          ],
+          "layerShapes": [
+            2,
+            1
+          ],
+          "hiddenLayers": 0,
+          "hiddenSize": 64,
+          "classWeights": [
+            1,
+            1
+          ]
+        },
+        "temperature": 1
+      },
+      "trainingTrace": {
+        "selectedK": 1,
+        "assignments": [
+          0,
+          0
+        ],
+        "centroids": [
+          [
+            0.1499999761581421,
+            0.09999999403953552
+          ]
+        ],
+        "clusterModelMask": [
+          true
+        ]
+      },
+      "routingWeights": [
+        [
+          1
+        ],
+        [
+          1
+        ],
+        [
+          1
+        ]
+      ],
+      "probabilities": [
+        0.5335833132266998,
+        0.5020604133605957,
+        0.47052115201950073
+      ],
+      "loadedProbabilities": [
+        0.5335833132266998,
+        0.5020604133605957,
+        0.47052115201950073
+      ]
+    },
+    {
+      "id": "auto-selection-normal-range",
+      "params": {
+        "nClusters": 0,
+        "temperature": 1,
+        "maxIterations": 1,
+        "weightDecay": 1
+      },
+      "rows": [
+        [
+          0,
+          0
+        ],
+        [
+          5.05,
+          0
+        ],
+        [
+          10.1,
+          0
+        ],
+        [
+          0.15000000000000002,
+          0.03
+        ],
+        [
+          5.2,
+          0.03
+        ],
+        [
+          10,
+          0.03
+        ],
+        [
+          0.05,
+          0.06
+        ],
+        [
+          5.1,
+          0.06
+        ],
+        [
+          10.15,
+          0.06
+        ],
+        [
+          0.2,
+          0.09
+        ],
+        [
+          5,
+          0.09
+        ],
+        [
+          10.05,
+          0.09
+        ],
+        [
+          0.1,
+          0.12
+        ],
+        [
+          5.15,
+          0.12
+        ],
+        [
+          10.2,
+          0.12
+        ],
+        [
+          0,
+          0.15
+        ],
+        [
+          5.05,
+          0.15
+        ],
+        [
+          10.1,
+          0.15
+        ],
+        [
+          0.15000000000000002,
+          0.18
+        ],
+        [
+          5.2,
+          0.18
+        ],
+        [
+          10,
+          0.18
+        ],
+        [
+          0.05,
+          0.21
+        ],
+        [
+          5.1,
+          0.21
+        ],
+        [
+          10.15,
+          0.21
+        ],
+        [
+          0.2,
+          0.24
+        ],
+        [
+          5,
+          0.24
+        ],
+        [
+          10.05,
+          0.24
+        ],
+        [
+          0.1,
+          0.27
+        ],
+        [
+          5.15,
+          0.27
+        ],
+        [
+          10.2,
+          0.27
+        ]
+      ],
+      "labels": [
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1,
+        0,
+        1
+      ],
+      "probes": [
+        [
+          -2,
+          -2
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          2,
+          2
+        ]
+      ],
+      "state": {
+        "centroids": [
+          [
+            0.10000000149011612,
+            0.13499999046325684
+          ],
+          [
+            10.100000381469727,
+            0.13499999046325684
+          ],
+          [
+            5.099999904632568,
+            0.13499999046325684
+          ]
+        ],
+        "clusterModels": [
+          {
+            "layerWeights": [
+              [
+                0.008873810060322285,
+                0.014726503752171993
+              ]
+            ],
+            "layerBiases": [
+              [
+                -0.009998363442718983
+              ]
+            ],
+            "layerShapes": [
+              2,
+              1
+            ],
+            "hiddenLayers": 0,
+            "hiddenSize": 64,
+            "classWeights": [
+              1,
+              1
+            ]
+          },
+          {
+            "layerWeights": [
+              [
+                0.008862633258104324,
+                0.014722450636327267
+              ]
+            ],
+            "layerBiases": [
+              [
+                -0.009999911300837994
+              ]
+            ],
+            "layerShapes": [
+              2,
+              1
+            ],
+            "hiddenLayers": 0,
+            "hiddenSize": 64,
+            "classWeights": [
+              1,
+              1
+            ]
+          },
+          {
+            "layerWeights": [
+              [
+                0.008862638846039772,
+                -0.005273113027215004
+              ]
+            ],
+            "layerBiases": [
+              [
+                -0.009999891743063927
+              ]
+            ],
+            "layerShapes": [
+              2,
+              1
+            ],
+            "hiddenLayers": 0,
+            "hiddenSize": 64,
+            "classWeights": [
+              1,
+              1
+            ]
+          }
+        ],
+        "globalModel": {
+          "layerWeights": [
+            [
+              0.008862636052072048,
+              -0.0052722664549946785
+            ]
+          ],
+          "layerBiases": [
+            [
+              -0.009999891743063927
+            ]
+          ],
+          "layerShapes": [
+            2,
+            1
+          ],
+          "hiddenLayers": 0,
+          "hiddenSize": 64,
+          "classWeights": [
+            1,
+            1
+          ]
+        },
+        "temperature": 1
+      },
+      "trainingTrace": {
+        "selectedK": 3,
+        "assignments": [
+          0,
+          2,
+          1,
+          0,
+          2,
+          1,
+          0,
+          2,
+          1,
+          0,
+          2,
+          1,
+          0,
+          2,
+          1,
+          0,
+          2,
+          1,
+          0,
+          2,
+          1,
+          0,
+          2,
+          1,
+          0,
+          2,
+          1,
+          0,
+          2,
+          1
+        ],
+        "centroids": [
+          [
+            0.10000000149011612,
+            0.13499999046325684
+          ],
+          [
+            10.100000381469727,
+            0.13499999046325684
+          ],
+          [
+            5.099999904632568,
+            0.13499999046325684
+          ]
+        ],
+        "clusterModelMask": [
+          true,
+          true,
+          true
+        ]
+      },
+      "routingWeights": [
+        [
+          0.9880113520269985,
+          0.00009103425077884952,
+          0.01189761372222265
+        ],
+        [
+          0.9928043870198062,
+          0.00004820146102644555,
+          0.007147411519167382
+        ],
+        [
+          0.7203676831633786,
+          0.002535018056005248,
+          0.27709729878061623
+        ]
+      ],
+      "probabilities": [
+        0.5141768550058823,
+        0.502499582958089,
+        0.4934727871104308
+      ],
+      "loadedProbabilities": [
+        0.5141768550058823,
+        0.502499582958089,
+        0.4934727871104308
+      ]
+    }
+  ]
+}
