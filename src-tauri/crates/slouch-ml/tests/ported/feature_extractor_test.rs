@@ -743,3 +743,98 @@ fn calibrated_falls_back_to_z_score_when_reference_class_is_empty() {
         assert!((calibrated_value - z_value).abs() < 1e-9);
     }
 }
+
+/// An upright COCO-17 pose whose head/trunk geometry shifts with `seed`, so a batch
+/// of these carries real variance for torso_invariant (a 7-dim computed feature).
+fn create_torso_mock(seed: usize) -> MockFeatures {
+    let t = seed as f64;
+    let points: [(f64, f64); 17] = [
+        (0.50, 0.20 + t * 0.006), // nose — head flexion varies with seed
+        (0.47, 0.18),             // left eye
+        (0.53, 0.18),             // right eye
+        (0.45, 0.20),             // left ear
+        (0.55, 0.20),             // right ear
+        (0.40 - t * 0.001, 0.35), // left shoulder
+        (0.60 + t * 0.001, 0.35), // right shoulder
+        (0.38, 0.50),             // left elbow
+        (0.62, 0.50),             // right elbow
+        (0.37, 0.62),             // left wrist
+        (0.63, 0.62),             // right wrist
+        (0.44, 0.65),             // left hip
+        (0.56, 0.65),             // right hip
+        (0.44, 0.80),             // left knee
+        (0.56, 0.80),             // right knee
+        (0.44, 0.95),             // left ankle
+        (0.56, 0.95),             // right ankle
+    ];
+    MockFeatures {
+        features: BTreeMap::new(),
+        keypoints: points
+            .iter()
+            .map(|(x, y)| Keypoint::new(*x, *y, 0.9))
+            .collect(),
+        bbox: BoundingBox {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 1.0,
+            y2: 1.0,
+            score: 0.9,
+            width: 1.0,
+            height: 1.0,
+        },
+    }
+}
+
+#[test]
+fn pca_clamped_to_feature_dimensions_records_effective_count_and_round_trips() {
+    // torso_invariant is 7-dimensional, so PCA with 30 requested components cannot
+    // exceed rank 7 no matter how many rows are fitted — the user's failing
+    // configuration. The extractor must degrade to 7 and stay internally consistent
+    // through serialize/deserialize instead of the loader rejecting it.
+    let mut extractor = FeatureExtractor::new(config(
+        vec![FeatureId::TorsoInvariant],
+        NormalizationMode::None,
+        DimensionalityReductionMethod::Pca,
+        30,
+    ));
+    let features = (0..30).map(create_torso_mock).collect::<Vec<_>>();
+    let labels = (0..30usize).map(|index| (index % 2) as i32).collect::<Vec<_>>();
+    extractor.fit(&features, &labels).unwrap();
+
+    assert_eq!(extractor.get_output_dimensions(), 7);
+    let serialized = extractor.to_json().unwrap();
+    assert_eq!(serialized.concatenated_dimensions, 7);
+    assert_eq!(serialized.dim_reduction_config.components, 7);
+
+    // from_json is the exact validator (reached via Model::from_json) that previously
+    // rejected the model with "PCA state dimensions do not match extractor
+    // configuration"; it must now accept the clamped state.
+    let restored = FeatureExtractor::<MockFeatures>::from_json(serialized).unwrap();
+    assert_eq!(restored.get_output_dimensions(), 7);
+    let transformed = restored.transform(&create_torso_mock(999)).unwrap();
+    assert_eq!(transformed.len(), 7);
+}
+
+#[test]
+fn pca_clamped_by_sample_count_records_effective_count_and_round_trips() {
+    // GAU is 256-dimensional but only 10 rows are fitted, so PCA caps at rows - 1 = 9
+    // and the serialized config must record 9, agreeing with the fitted state.
+    let mut extractor = FeatureExtractor::new(config(
+        vec![GAU],
+        NormalizationMode::None,
+        DimensionalityReductionMethod::Pca,
+        50,
+    ));
+    let (features, labels) = create_mock_dataset(10);
+    extractor.fit(&features, &labels).unwrap();
+
+    assert_eq!(extractor.get_output_dimensions(), 9);
+    let serialized = extractor.to_json().unwrap();
+    assert_eq!(serialized.dim_reduction_config.components, 9);
+    assert_eq!(serialized.concatenated_dimensions, RTMPOSE_GAU_POOLED_DIMS);
+
+    let restored = FeatureExtractor::<MockFeatures>::from_json(serialized).unwrap();
+    assert_eq!(restored.get_output_dimensions(), 9);
+    let transformed = restored.transform(&create_mock_features(999)).unwrap();
+    assert_eq!(transformed.len(), 9);
+}

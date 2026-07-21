@@ -81,3 +81,27 @@ sha2 = { workspace = true }
 # SetProcessInformation / SetPriorityClass and their types.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+# Debug builds otherwise decode/encode camera MJPEG at opt-level 0, which is far
+# too slow for the ~30 fps preview, the processed-view path, and the new N-frame
+# temporal-smoothing decode. Compile just the hot codec crates with optimizations
+# while the rest of the workspace stays debug-friendly. Profile overrides must
+# live in the workspace-root manifest (this file). Crate names verified against
+# Cargo.lock: mozjpeg(-sys) is nokhwa-core's MJPEG decoder; image + zune-jpeg +
+# zune-core are the decode/encode path used by `image::codecs::jpeg`.
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+[profile.dev.package.zune-core]
+opt-level = 3
+[profile.dev.package.image]
+opt-level = 3
+[profile.dev.package.mozjpeg]
+opt-level = 3
+[profile.dev.package.mozjpeg-sys]
+opt-level = 3
+# The real processed-view bottleneck in dev is opt-0 per-pixel math in
+# slouch-vision (process_latest averaging fold, CLAHE LAB conversions), not the
+# JPEG codec. It is rarely edited, so full optimization here costs a one-time
+# compile hit but no ongoing incremental-build penalty.
+[profile.dev.package.slouch-vision]
+opt-level = 3

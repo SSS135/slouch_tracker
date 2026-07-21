@@ -286,7 +286,39 @@ describe('PostureTrackerApp native view integration', () => {
     await renderReady();
     await loadInference();
     await fireEvent.click(screen.getByRole('button', { name: 'Good' }));
-    await waitFor(() => expect(mocks.training.trainAndDeploy).toHaveBeenCalledWith({ doCV: false }));
+    await waitFor(() => expect(mocks.training.trainAndDeploy).toHaveBeenCalledWith(expect.objectContaining({ doCV: false })));
+  });
+
+  it('reloads active model metadata once a background auto-retrain deploys a model', async () => {
+    // Regression: the silent auto-retrain (frame save -> trainAndDeploy) deployed
+    // a posture model in the runtime but never reloaded metadata, so hasModel and
+    // the status badge stayed at "No Model Trained" while the app already
+    // classified. The deploy must refresh metadata via onModelDeployed.
+    mocks.dataset.stats.refetch.mockResolvedValue({ data: { hasMinimumFrames: true } });
+    mocks.native.getActiveModelMetadata
+      .mockResolvedValueOnce({ posture: null, presence: null })
+      .mockResolvedValue({
+        posture: { classifierId: 'mlp', featureTypes: ['engineered_features'], trainedAt: 100 },
+        presence: null,
+      });
+    mocks.training.trainAndDeploy.mockImplementation((options?: { onModelDeployed?: () => void }) => {
+      options?.onModelDeployed?.();
+      return Promise.resolve(true);
+    });
+
+    await renderReady();
+    await loadInference();
+    expect(screen.getByText('No Model Trained')).toBeInTheDocument();
+    const callsBefore = mocks.native.getActiveModelMetadata.mock.calls.length;
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Good' }));
+
+    await waitFor(() => expect(mocks.training.trainAndDeploy).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(mocks.native.getActiveModelMetadata.mock.calls.length).toBeGreaterThan(callsBefore),
+    );
+    // Posture-only pair (presence null) must present as scoring, not "No Model Trained".
+    await waitFor(() => expect(screen.queryByText('No Model Trained')).not.toBeInTheDocument());
   });
 
   it('does not block capture handling on deferred native persistence', async () => {
@@ -347,7 +379,7 @@ describe('PostureTrackerApp native view integration', () => {
     await renderReady();
     await fireEvent.keyDown(window, { key: 'u' });
     await waitFor(() => expect(mocks.dataset.undo.mutateAsync).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(mocks.training.trainAndDeploy).toHaveBeenCalledWith({ doCV: false }));
+    await waitFor(() => expect(mocks.training.trainAndDeploy).toHaveBeenCalledWith(expect.objectContaining({ doCV: false })));
     await waitFor(() => expect(mocks.notification.showSuccess).toHaveBeenCalledWith('Last dataset change undone.'));
   });
 

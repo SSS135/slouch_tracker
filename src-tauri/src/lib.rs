@@ -2,9 +2,9 @@ mod actors;
 mod api;
 mod bindings;
 mod errors;
-mod power;
 #[cfg(test)]
 mod native_runtime_resources_parity;
+mod power;
 
 pub fn export_bindings(path: impl AsRef<std::path::Path>) -> Result<(), String> {
     bindings::export(path)
@@ -75,8 +75,10 @@ pub fn run() {
         // Per-frame PULL preview: the webview GETs `slouchcam://…/frame` each rAF
         // and gets the freshest MJPEG frame (foreground) or 204 (no frame /
         // background). A path containing "processed" serves the detector-input
-        // frame instead (post-preprocessing JPEG, refreshed at detection rate);
-        // any other path serves the raw preview frame.
+        // frame instead (post-preprocessing JPEG). Each /processed pull also stamps
+        // live demand so the capture loop refreshes that frame at capture rate while
+        // it is watched, falling back to the ~1fps detection refresh when idle; any
+        // other path serves the raw preview frame.
         // The webview origin (dev: http://127.0.0.1:5174; prod: tauri://localhost)
         // differs from this custom-scheme host, so the frame must be CORS-allowed;
         // without it privacy-mode grid sampling and thumbnail reads fail as opaque
@@ -84,6 +86,9 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("slouchcam", |ctx, request, responder| {
             let state = ctx.app_handle().state::<api::AppState>();
             let bytes = if request.uri().path().contains("processed") {
+                // Stamp live demand so the capture loop keeps the processed frame
+                // fresh at capture rate while the view is being pulled.
+                state.camera.note_processed_request();
                 state.camera.processed_frame_bytes()
             } else {
                 state.camera.latest_frame_bytes()

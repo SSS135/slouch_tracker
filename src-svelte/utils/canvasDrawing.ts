@@ -265,7 +265,23 @@ export function drawHumanLikeSkeleton(
   const fillColor = color.replace(')', `, ${fillOpacity})`).replace('rgb', 'rgba');
   const strokeColor = 'white';
 
+  // A torso whose four corners are all clamped to the image boundary is a
+  // degenerate detection (keypoints pinned to y≈0 / x≈0 when a person is only
+  // partially in frame). Filling that quad paints a full-width bar across the
+  // frame edge, so skip it — mirroring the per-limb boundary guard below. A
+  // legitimate torso keeps at least one corner in the interior.
+  const torsoDegenerate =
+    isValid(leftShoulder) &&
+    isValid(rightShoulder) &&
+    isValid(leftHip) &&
+    isValid(rightHip) &&
+    isAtImageBoundary(leftShoulder) &&
+    isAtImageBoundary(rightShoulder) &&
+    isAtImageBoundary(leftHip) &&
+    isAtImageBoundary(rightHip);
+
   if (
+    !torsoDegenerate &&
     isValid(leftShoulder) &&
     isValid(rightShoulder) &&
     isValid(leftHip) &&

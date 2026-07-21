@@ -47,7 +47,7 @@ describe('SettingsTab processed view toggle', () => {
     const toggle = screen.getByRole('checkbox', { name: /show processed view/i });
     expect(toggle).toBeEnabled();
     expect(toggle).not.toBeChecked();
-    expect(screen.getByText(/exactly what the detector sees/i)).toBeInTheDocument();
+    expect(screen.getByText(/shows the detector's preprocessing live/i)).toBeInTheDocument();
   });
 
   it('reports toggle changes through onProcessedViewChange', async () => {

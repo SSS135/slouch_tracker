@@ -4,16 +4,16 @@ use serde_json::json;
 use slouch_domain::{feature_registry, FeatureId, ModelCategory};
 
 #[test]
-fn registry_contains_all_sixteen_unique_selectable_features() {
+fn registry_contains_all_seventeen_unique_selectable_features() {
     let registry = feature_registry();
-    assert_eq!(registry.len(), 16);
+    assert_eq!(registry.len(), 17);
     assert_eq!(
         registry
             .iter()
             .map(|item| item.id)
             .collect::<BTreeSet<_>>()
             .len(),
-        16
+        17
     );
     assert!(registry.iter().all(|item| item.user_selectable));
 }
@@ -56,6 +56,7 @@ fn dimensions_storage_and_model_categories_match_current_registry() {
         (FeatureId::PostureRaw, 5, 0, ModelCategory::Posture),
         (FeatureId::RawKeypoints, 34, 0, ModelCategory::Posture),
         (FeatureId::PostureGeometry, 10, 0, ModelCategory::Posture),
+        (FeatureId::TorsoInvariant, 7, 0, ModelCategory::Posture),
     ];
     for (id, dimensions, storage, model) in expected {
         let metadata = id.metadata();

@@ -7,10 +7,26 @@
 
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Serializer};
 
 use super::async_utils::{batch_process_async, AsyncUtilsError, BatchProcessOptions};
 use super::config::TRAINING_CONFIG;
+
+/// Serializes an integral seed (for example `42.0`) as an integer so downstream
+/// consumers that model the seed as an unsigned integer accept it verbatim,
+/// while non-integral or out-of-range seeds keep their floating-point form. The
+/// seed itself stays an `f64` to preserve the source's JavaScript `number`
+/// semantics; only the on-the-wire encoding changes.
+fn serialize_integral_seed<S>(value: &f64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    if value.is_finite() && value.fract() == 0.0 && *value >= 0.0 && *value <= u64::MAX as f64 {
+        serializer.serialize_u64(*value as u64)
+    } else {
+        serializer.serialize_f64(*value)
+    }
+}
 
 /// Serialized random-projection state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -19,6 +35,7 @@ pub struct RandomProjectionState {
     pub projection_matrix: Vec<Vec<f64>>,
     pub n_components: usize,
     pub n_features: usize,
+    #[serde(serialize_with = "serialize_integral_seed")]
     pub seed: f64,
 }
 
@@ -499,5 +516,40 @@ impl SeedRandom {
         }
 
         (numerator + extra as f64) / denominator
+    }
+}
+
+#[cfg(test)]
+mod serialization_tests {
+    use super::RandomProjectionState;
+
+    fn state(seed: f64) -> RandomProjectionState {
+        RandomProjectionState {
+            projection_matrix: vec![vec![0.1, 0.2]],
+            n_components: 1,
+            n_features: 2,
+            seed,
+        }
+    }
+
+    #[test]
+    fn integral_seed_serializes_as_an_integer() {
+        // Guards the model bridge: the wire schema types the seed as `u64`, so an
+        // integral seed must serialize as an integer rather than `42.0`.
+        let value = serde_json::to_value(state(42.0)).expect("serialize state");
+        assert!(
+            value["seed"].is_u64(),
+            "integral seed must serialize as an integer, got {}",
+            value["seed"]
+        );
+        assert_eq!(value["seed"], serde_json::json!(42));
+    }
+
+    #[test]
+    fn integral_seed_round_trips_back_to_f64() {
+        let serialized = serde_json::to_value(state(42.0)).expect("serialize state");
+        let restored: RandomProjectionState =
+            serde_json::from_value(serialized).expect("deserialize state");
+        assert_eq!(restored.seed, 42.0);
     }
 }

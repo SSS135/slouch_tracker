@@ -1,7 +1,7 @@
 <script lang="ts">
   import { NOTIFICATION_EVENT } from '@/hooks/useNotification';
   import type { ClassifierConfig, ClassifierId, ParameterDefinition_Serialize, ParameterValue } from '@generated/bindings';
-  import { useTrainingConfig } from '@/contexts/TrainingConfigContext';
+  import { coerceParamValue, defaultParams, useTrainingConfig } from '@/contexts/TrainingConfigContext';
   import RadioGroup from '../ui/RadioGroup.svelte';
   import Slider from '../ui/Slider.svelte';
 
@@ -45,8 +45,7 @@
       const defaultId = 'mlp';
       showClassifierResetNotification();
       const definition = trainingConfig.classifiers.find((entry) => entry.id === defaultId);
-      const params = Object.fromEntries(Object.entries(definition?.params ?? {}).map(([name, param]) => [name, param.default]));
-      onChange({ classifierId: defaultId, params });
+      onChange({ classifierId: defaultId, params: defaultParams(definition) });
     }
   });
 
@@ -75,8 +74,7 @@
 
     const definition = trainingConfig.classifiers.find((entry) => entry.id === classifierId);
     if (!definition) return;
-    const params = Object.fromEntries(Object.entries(definition.params).map(([name, param]) => [name, param.default]));
-    onChange({ classifierId: classifierId as ClassifierId, params });
+    onChange({ classifierId: classifierId as ClassifierId, params: defaultParams(definition) });
   }
 
   function handleParamChange(paramName: string, value: ParameterValue): void {
@@ -84,9 +82,12 @@
       return;
     }
 
+    // Coerce integer-typed params (e.g. maxIterations, k) so slider float drift never reaches the
+    // native backend, whose settings/model schemas type these fields as unsigned integers.
+    const coerced = coerceParamValue(currentDef?.params[paramName], value);
     onChange({
       ...config,
-      params: { ...config.params, [paramName]: value },
+      params: { ...config.params, [paramName]: coerced },
     });
   }
 

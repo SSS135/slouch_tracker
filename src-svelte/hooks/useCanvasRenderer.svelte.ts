@@ -93,10 +93,6 @@ const SAMPLE_UNFOCUSED_INTERVAL_MS = 1000;
 // Privacy grid + skeleton repaint cap (cheap: tiny-grid upscale + vector skeleton).
 const RENDER_FOCUSED_INTERVAL_MS = 1000 / 30;
 const RENDER_UNFOCUSED_INTERVAL_MS = 1000 / 2;
-// Processed-view pump rate: the processed frame only changes at the ~1fps
-// detection rate, so a modest poll (still chained on decode, with the same 204
-// backoff) is enough and keeps the idle cost near zero.
-const PROCESSED_VIDEO_INTERVAL_MS = 1000 / 3;
 // Retry gap after a 204 (no fresh frame) or a decode error.
 const NO_FRAME_BACKOFF_MS = 150;
 const GRID_SMOOTHING_ALPHA = 0.1;
@@ -235,15 +231,11 @@ export function useCanvasRenderer(
 
     const startAll = (): void => {
       const myEpoch = ++epoch;
-      const videoInterval = processedView
-        ? // New processed content only lands ~1/sec; unfocused stays at the
-          // regular slow rate.
-          focused
-          ? PROCESSED_VIDEO_INTERVAL_MS
-          : VIDEO_UNFOCUSED_INTERVAL_MS
-        : focused
-          ? VIDEO_FOCUSED_INTERVAL_MS
-          : VIDEO_UNFOCUSED_INTERVAL_MS;
+      // Both the raw and processed feeds pump at the focus-dependent video rate. A
+      // focused processed view pumps at ~30fps: this displays smoothly AND is the
+      // demand signal that drives the Rust capture-rate processed-frame refresh
+      // (unfocused stays at the slower rate, matching the Rust fallback).
+      const videoInterval = focused ? VIDEO_FOCUSED_INTERVAL_MS : VIDEO_UNFOCUSED_INTERVAL_MS;
       const sampleInterval = focused ? SAMPLE_FOCUSED_INTERVAL_MS : SAMPLE_UNFOCUSED_INTERVAL_MS;
       const renderInterval = focused ? RENDER_FOCUSED_INTERVAL_MS : RENDER_UNFOCUSED_INTERVAL_MS;
       const alive = (): boolean => !disposed && isForeground && epoch === myEpoch;

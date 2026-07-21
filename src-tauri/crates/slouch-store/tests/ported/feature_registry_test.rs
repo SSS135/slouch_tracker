@@ -275,6 +275,7 @@ fn malformed_sources_return_errors_or_missing_values_without_panicking() {
         FeatureId::PostureRaw,
         FeatureId::RawKeypoints,
         FeatureId::PostureGeometry,
+        FeatureId::TorsoInvariant,
     ] {
         // Oracle contract: these keypoint-driven extractors return null (never throw)
         // on missing/short keypoints (featureRegistry.test.ts:250-264).

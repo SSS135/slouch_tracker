@@ -2,7 +2,8 @@ use std::fmt;
 
 use serde::Serialize;
 use slouch_domain::{
-    Keypoint, LEFT_EAR, LEFT_EYE, LEFT_SHOULDER, NOSE, RIGHT_EAR, RIGHT_EYE, RIGHT_SHOULDER,
+    Keypoint, LEFT_EAR, LEFT_EYE, LEFT_HIP, LEFT_SHOULDER, NOSE, RIGHT_EAR, RIGHT_EYE, RIGHT_HIP,
+    RIGHT_SHOULDER,
 };
 
 use super::binning::{soft_bin_with_fixed_edges, BinningError};
@@ -14,6 +15,15 @@ use super::constants::{
 const MIN_DENOMINATOR: f64 = 0.001;
 const MIN_KEYPOINTS_REQUIRED: usize = 7;
 const RAW_KEYPOINT_COUNT: usize = 17;
+
+/// Absent-keypoint guard for the torso-invariant feature. RTMPose emits all 17
+/// keypoints every frame, but occluded/out-of-frame joints (notably the hips of a
+/// seated user) come back with a near-zero SimCC activation score. A keypoint at or
+/// below this bar is treated as absent so it cannot fabricate a bogus torso axis;
+/// residual quality is still surfaced through the feature's `min_conf` dim rather
+/// than being filtered here. Kept low on purpose — this is an absence guard, not a
+/// quality threshold — so genuinely weak-but-present joints still inform the model.
+const MIN_KEYPOINT_CONFIDENCE: f64 = 0.1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct GeometricFeatureResult {
@@ -547,6 +557,157 @@ pub fn extract_posture_geometry_features(
     ]))
 }
 
+/// Torso-anchored posture geometry (7 dims), scale/translation-invariant.
+///
+/// Every other posture feature measures the head against image-vertical spans, so
+/// head flexion ("looking down") and trunk slouch alias onto the same numbers. This
+/// feature is the only one that uses the hips: it builds the shoulder-hip torso axis
+/// and expresses head pose *relative to the trunk*, letting a classifier separate the
+/// two failure modes.
+///
+/// Axis-mixing note: keypoints arrive image-normalized and ANISOTROPIC (`x` by width,
+/// `y` by height; see `inference_worker::transform_keypoints`), so any cross-axis
+/// quantity carries a constant per-camera W/H warp. Same-axis ratios (dims 3, 4, 5, 6)
+/// are warp-free by construction; the two angle dims (1, 2) accept the constant warp
+/// exactly like the existing `head_rotation` feature — it is fixed per camera and
+/// absorbed by z-score normalization.
+///
+/// Robustness: the four torso-dependent dims (1, 2, 4, 5) emit a neutral `0.0` when the
+/// shoulders or hips are absent (low confidence) or the axis is geometrically
+/// degenerate, via the same `compute_ratio`/guard convention used elsewhere; no dim can
+/// be NaN or infinite.
+pub fn extract_torso_invariant_features(
+    keypoints: &[Keypoint],
+) -> Result<Option<Vec<f32>>, EngineeredFeaturesError> {
+    // Hips (indices 11/12) are required, so demand the full lower-body index range
+    // rather than the 7-keypoint head/shoulder minimum the other extractors use.
+    if keypoints.len() < RIGHT_HIP + 1 {
+        return Ok(None);
+    }
+
+    let nose = keypoints[NOSE];
+    let left_ear = keypoints[LEFT_EAR];
+    let right_ear = keypoints[RIGHT_EAR];
+    let left_shoulder = keypoints[LEFT_SHOULDER];
+    let right_shoulder = keypoints[RIGHT_SHOULDER];
+    let left_hip = keypoints[LEFT_HIP];
+    let right_hip = keypoints[RIGHT_HIP];
+
+    let shoulder_center = midpoint(left_shoulder, right_shoulder);
+    let hip_center = midpoint(left_hip, right_hip);
+
+    // Head anchor E: ear centre, falling back to the nose only when BOTH ears are
+    // absent (a single reliable ear still yields a usable centre).
+    let ear_center =
+        if left_ear.score < MIN_KEYPOINT_CONFIDENCE && right_ear.score < MIN_KEYPOINT_CONFIDENCE {
+            Midpoint {
+                x: nose.x,
+                y: nose.y,
+            }
+        } else {
+            midpoint(left_ear, right_ear)
+        };
+
+    let min_conf = min_confidence(&[
+        nose.score,
+        left_ear.score,
+        right_ear.score,
+        left_shoulder.score,
+        right_shoulder.score,
+        left_hip.score,
+        right_hip.score,
+    ]);
+
+    // The torso axis is trustworthy only when both shoulders and both hips are present;
+    // an absent hip would otherwise fabricate a large, meaningless axis.
+    let torso_reliable = left_shoulder.score >= MIN_KEYPOINT_CONFIDENCE
+        && right_shoulder.score >= MIN_KEYPOINT_CONFIDENCE
+        && left_hip.score >= MIN_KEYPOINT_CONFIDENCE
+        && right_hip.score >= MIN_KEYPOINT_CONFIDENCE;
+
+    // Torso vector T = shoulder_center - hip_center (mostly vertical). |T| is computed
+    // normally despite the cross-axis warp; it only gates degeneracy, not a stored dim.
+    let torso_x = shoulder_center.x - hip_center.x;
+    let torso_y = shoulder_center.y - hip_center.y;
+    let torso_len = (torso_x * torso_x + torso_y * torso_y).sqrt();
+    // Same-axis vertical extent of the torso; the y/y denominator for dims 4 and 5.
+    let torso_len_y = as_feature((shoulder_center.y - hip_center.y).abs(), min_conf);
+
+    let shoulder_width = compute_shoulder_width(keypoints)?;
+    let inter_ear = compute_inter_ear_distance(keypoints)?;
+
+    // Dim 1 — trunk lean vs image vertical (signed). The torso vector T = SC - HC
+    // points up-image, i.e. toward negative y (image coordinates increase downward),
+    // so the deviation from the vertical axis is atan2(T.x, -T.y): 0 is a plumb trunk
+    // and the magnitude grows as it tilts. Depends only on shoulders + hips, never E,
+    // which is exactly what lets it stay fixed while dim 2 tracks head flexion.
+    let torso_inclination = if torso_reliable && torso_len >= MIN_DENOMINATOR {
+        torso_x.atan2(-torso_y)
+    } else {
+        0.0
+    };
+
+    // Dim 2 — head flexion RELATIVE to the trunk: the signed angle of the neck vector
+    // (shoulder_center -> E) against the torso axis T. This is the disambiguator —
+    // "looking down" moves this while leaving dim 1 (which ignores E) unchanged.
+    let neck_x = ear_center.x - shoulder_center.x;
+    let neck_y = ear_center.y - shoulder_center.y;
+    let neck_len = (neck_x * neck_x + neck_y * neck_y).sqrt();
+    let neck_vs_torso_angle =
+        if torso_reliable && torso_len >= MIN_DENOMINATOR && neck_len >= MIN_DENOMINATOR {
+            // atan2(cross, dot) of the neck vector relative to the torso axis; signed.
+            (neck_x * torso_y - neck_y * torso_x).atan2(neck_x * torso_x + neck_y * torso_y)
+        } else {
+            0.0
+        };
+
+    // Dim 3 — forward-head horizontal offset, same-axis (x span / x-dominant width).
+    let forward_head_ratio = compute_ratio(
+        as_feature(ear_center.x - shoulder_center.x, min_conf),
+        shoulder_width,
+    )
+    .value;
+
+    // Dim 4 — head drop normalized by the torso's vertical extent, same-axis (y / y);
+    // yaw-robust because torso height barely changes as the trunk rotates in yaw.
+    let head_drop_torso_norm = if torso_reliable {
+        compute_ratio(
+            as_feature(shoulder_center.y - ear_center.y, min_conf),
+            torso_len_y,
+        )
+        .value
+    } else {
+        0.0
+    };
+
+    // Dim 5 — shoulder-line tilt relative to the hip-line, normalized same-axis (y / y).
+    let shoulder_hip_tilt = if torso_reliable {
+        compute_ratio(
+            as_feature(
+                (left_shoulder.y - right_shoulder.y) - (left_hip.y - right_hip.y),
+                min_conf,
+            ),
+            torso_len_y,
+        )
+        .value
+    } else {
+        0.0
+    };
+
+    // Dim 6 — dimensionless lean-in / face-proximity proxy, same-axis (x-dominant / x).
+    let lean_in_ratio = compute_ratio(inter_ear, shoulder_width).value;
+
+    Ok(Some(vec![
+        torso_inclination as f32,
+        neck_vs_torso_angle as f32,
+        forward_head_ratio as f32,
+        head_drop_torso_norm as f32,
+        shoulder_hip_tilt as f32,
+        lean_in_ratio as f32,
+        min_conf as f32,
+    ]))
+}
+
 pub fn extract_raw_keypoints(
     keypoints: Option<&[Keypoint]>,
 ) -> Result<Option<Vec<f32>>, EngineeredFeaturesError> {
@@ -575,6 +736,16 @@ fn midpoint(first: Keypoint, second: Keypoint) -> Midpoint {
     Midpoint {
         x: (first.x + second.x) / 2.0,
         y: (first.y + second.y) / 2.0,
+    }
+}
+
+/// Wraps a raw span/length into a `GeometricFeatureResult` so it can flow through
+/// `compute_ratio`'s degenerate-denominator guard with a shared confidence.
+fn as_feature(value: f64, min_confidence: f64) -> GeometricFeatureResult {
+    GeometricFeatureResult {
+        value,
+        min_confidence,
+        valid: true,
     }
 }
 

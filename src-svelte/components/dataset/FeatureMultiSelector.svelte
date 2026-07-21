@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { FeatureId } from '@generated/bindings';
   import { useTrainingConfig } from '@/contexts/TrainingConfigContext';
+  import { canonicalizeFeatureIds } from '@/services/dataset/featureOrder';
 
   export interface FeatureMultiSelectorProps {
     postureSelected: FeatureId[];
@@ -46,15 +47,21 @@
     return dims.toString();
   }
 
+  // Emit selections already canonicalized (unique + ascending registry order). The append branch
+  // otherwise produces click-order lists that violate the native contract; canonicalizing here keeps
+  // the payload valid regardless of the order checkboxes were toggled. The context canonicalizes
+  // again at its boundary, so this is a redundant-but-idempotent guarantee.
+  const registryOrder = (): FeatureId[] => trainingConfig.features.map((feature) => feature.id);
+
   function handlePostureToggle(featureType: FeatureId): void {
     if (disabled) return;
 
     const isSelected = postureSelected.includes(featureType);
     if (isSelected) {
       if (postureSelected.length === 1) return;
-      onPostureChange(postureSelected.filter((feature) => feature !== featureType));
+      onPostureChange(canonicalizeFeatureIds(postureSelected.filter((feature) => feature !== featureType), registryOrder()));
     } else {
-      onPostureChange([...postureSelected, featureType]);
+      onPostureChange(canonicalizeFeatureIds([...postureSelected, featureType], registryOrder()));
     }
   }
 
@@ -64,9 +71,9 @@
     const isSelected = presenceSelected.includes(featureType);
     if (isSelected) {
       if (presenceSelected.length === 1) return;
-      onPresenceChange(presenceSelected.filter((feature) => feature !== featureType));
+      onPresenceChange(canonicalizeFeatureIds(presenceSelected.filter((feature) => feature !== featureType), registryOrder()));
     } else {
-      onPresenceChange([...presenceSelected, featureType]);
+      onPresenceChange(canonicalizeFeatureIds([...presenceSelected, featureType], registryOrder()));
     }
   }
 </script>

@@ -38,6 +38,58 @@ where
     Ok(value)
 }
 
+/// Accepts a `u64` serialized either as an integer or as an integral,
+/// non-negative floating-point value (for example `42.0`).
+///
+/// The native random-projection seed is modeled as an `f64` in `slouch-ml`
+/// (a straight port of the JavaScript `number` seed), so when a stored model is
+/// bridged to this wire schema through `serde_json::to_value` an integral seed
+/// arrives as a JSON float. A strict `u64` field would reject `42.0` and make an
+/// otherwise valid model impossible to load. This deserializer tolerates that
+/// shape while still rejecting non-integral, negative, non-finite, or
+/// out-of-range values. It relies on `deserialize_any`, which both of the
+/// self-describing formats used for model state (JSON and MessagePack) support.
+fn deserialize_integral_u64<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct IntegralU64Visitor;
+
+    impl serde::de::Visitor<'_> for IntegralU64Visitor {
+        type Value = u64;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("an unsigned integer or an integral, non-negative number")
+        }
+
+        fn visit_u64<E>(self, value: u64) -> Result<u64, E> {
+            Ok(value)
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<u64, E>
+        where
+            E: serde::de::Error,
+        {
+            u64::try_from(value).map_err(|_| E::custom("value must be a non-negative integer"))
+        }
+
+        fn visit_f64<E>(self, value: f64) -> Result<u64, E>
+        where
+            E: serde::de::Error,
+        {
+            if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value > u64::MAX as f64
+            {
+                return Err(E::custom(
+                    "value must be a finite, non-negative, integral number",
+                ));
+            }
+            Ok(value as u64)
+        }
+    }
+
+    deserializer.deserialize_any(IntegralU64Visitor)
+}
+
 /// JSON-compatible value used only for diagnostic response details.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -215,6 +267,7 @@ pub struct RandomProjectionState {
     pub projection_matrix: Vec<Vec<f64>>,
     pub n_components: usize,
     pub n_features: usize,
+    #[serde(deserialize_with = "deserialize_integral_u64")]
     pub seed: u64,
 }
 
@@ -497,5 +550,44 @@ impl InferenceResponseResult {
             validate_classification_result(&classification).map_err(|error| error.to_string())?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RandomProjectionState;
+    use serde_json::json;
+
+    fn state_json(seed: serde_json::Value) -> serde_json::Value {
+        json!({
+            "projectionMatrix": [[1.0, 2.0]],
+            "nComponents": 1,
+            "nFeatures": 2,
+            "seed": seed,
+        })
+    }
+
+    #[test]
+    fn random_projection_seed_accepts_integral_float() {
+        // A stored model reconstructs its `f64` seed (42.0) and bridges it to the
+        // wire schema as a JSON float. This is the exact shape that previously
+        // crashed startup with "invalid type: floating point `42.0`, expected u64".
+        let state: RandomProjectionState =
+            serde_json::from_value(state_json(json!(42.0))).expect("integral float seed loads");
+        assert_eq!(state.seed, 42);
+    }
+
+    #[test]
+    fn random_projection_seed_accepts_plain_integer() {
+        let state: RandomProjectionState =
+            serde_json::from_value(state_json(json!(7))).expect("integer seed loads");
+        assert_eq!(state.seed, 7);
+    }
+
+    #[test]
+    fn random_projection_seed_rejects_non_integral_negative_and_nonfinite() {
+        assert!(serde_json::from_value::<RandomProjectionState>(state_json(json!(42.5))).is_err());
+        assert!(serde_json::from_value::<RandomProjectionState>(state_json(json!(-1.0))).is_err());
+        assert!(serde_json::from_value::<RandomProjectionState>(state_json(json!(-3))).is_err());
     }
 }

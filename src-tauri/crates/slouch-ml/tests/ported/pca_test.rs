@@ -374,3 +374,70 @@ fn frozen_tolerance_rejects_values_between_two_and_ten_e_minus_six() {
     assert!(within_frozen_tolerance(1.0 + 1.9e-6, 1.0));
     assert!(!within_frozen_tolerance(1.0 + 5e-6, 1.0));
 }
+
+/// Deterministic, non-degenerate data so PCA has variance in every column without
+/// depending on any RNG. Distinct per-row/column values keep the covariance full
+/// rank up to `min(n - 1, d)`.
+fn synthetic_matrix(n: usize, d: usize) -> Vec<Vec<f64>> {
+    (0..n)
+        .map(|row| {
+            (0..d)
+                .map(|column| {
+                    let a = ((row as f64) * 0.7 + 1.0) * ((column as f64) + 1.0);
+                    a.sin() + 0.5 * (((row * d + column) as f64) * 0.3).cos()
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn assert_clamped_round_trip(n: usize, d: usize, requested: isize, expected: usize) {
+    let data = synthetic_matrix(n, d);
+    let mut transformer = PcaTransformer::new();
+    transformer.fit(&data, requested).unwrap();
+
+    // The requested count exceeds what the data supports, so PCA degrades to the
+    // effective rank instead of failing.
+    assert_eq!(transformer.get_output_dimension(), expected);
+    let projected = transformer.transform(&data).unwrap();
+    assert_eq!(projected.len(), n);
+    assert_eq!(projected[0].len(), expected);
+
+    // The serialized state carries the effective count and survives the loader's
+    // dimension validation (from_json runs validate_serialized_state).
+    let state = transformer.to_json().unwrap();
+    assert_eq!(state.n_components, expected);
+    assert_eq!(state.n_features, d);
+    assert_eq!(state.components.len(), expected);
+    assert!(state.components.iter().all(|row| row.len() == d));
+    let restored = PcaTransformer::from_json(state).unwrap();
+    assert_eq!(restored.get_output_dimension(), expected);
+    let restored_projected = restored.transform(&data).unwrap();
+    assert_eq!(restored_projected[0].len(), expected);
+}
+
+#[test]
+fn clamps_requested_components_to_n_features_on_exact_path() {
+    // 7-dim feature (the user's torso_invariant) with pca components 30: the exact
+    // path (d <= 64) caps at n_features = 7.
+    assert_clamped_round_trip(20, 7, 30, 7);
+}
+
+#[test]
+fn clamps_requested_components_to_sample_rank_on_exact_path() {
+    // Few rows: the centered-data rank (n - 1 = 4) is the binding limit, d <= 64.
+    assert_clamped_round_trip(5, 8, 10, 4);
+}
+
+#[test]
+fn clamps_requested_components_to_n_features_on_randomized_path() {
+    // d = 70 > 64 takes the randomized fast path; the retained rank still caps at
+    // n_features = 70 when the request (90) exceeds it.
+    assert_clamped_round_trip(100, 70, 90, 70);
+}
+
+#[test]
+fn clamps_requested_components_to_sample_rank_on_randomized_path() {
+    // Deep features (d = 200 > 64, randomized) with only 10 rows: rank caps at n - 1.
+    assert_clamped_round_trip(10, 200, 50, 9);
+}

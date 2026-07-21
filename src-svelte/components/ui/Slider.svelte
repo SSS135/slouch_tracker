@@ -110,20 +110,34 @@
     return nearestIndex;
   }
 
-  // Match React's mount-time useState initializer: later prop updates do not
-  // overwrite an in-progress local interaction.
-  let localValue = $state(untrack(() => (
-    useFixedValues
-      ? findNearestIndex(value)
+  function positionForValue(currentValue: number): number {
+    return useFixedValues
+      ? findNearestIndex(currentValue)
       : scale === 'exponential'
-        ? valueToPosition(value, minimumValue, maximumValue, scale)
-        : value
-  )));
+        ? valueToPosition(currentValue, minimumValue, maximumValue, scale)
+        : currentValue;
+  }
+
+  // Slider position is local state so an in-progress drag or inline edit is
+  // never yanked by an echoed prop update. It seeds from the mount value and
+  // re-syncs whenever the bound value changes while the user is not interacting;
+  // without that re-sync the slider stays frozen on whatever placeholder the
+  // parent held before its async-loaded settings resolved.
+  let localValue = $state(untrack(() => positionForValue(value)));
   let isEditing = $state(false);
+  let isInteracting = $state(false);
   let inputValue = $state('');
   let valueInput = $state<HTMLInputElement | null>(null);
   let interactionTooltipVisible = $state(false);
   const tooltipId = `slider-tooltip-${++nextSliderId}`;
+
+  $effect(() => {
+    const synced = positionForValue(value);
+    if (isEditing || isInteracting) return;
+    untrack(() => {
+      if (localValue !== synced) localValue = synced;
+    });
+  });
 
   $effect(() => {
     if (isEditing && valueInput) valueInput.focus();
@@ -281,8 +295,8 @@
       step={sliderStep}
       value={localValue}
       oninput={handleChange}
-      onfocus={() => { interactionTooltipVisible = true; }}
-      onblur={() => { interactionTooltipVisible = false; }}
+      onfocus={() => { interactionTooltipVisible = true; isInteracting = true; }}
+      onblur={() => { interactionTooltipVisible = false; isInteracting = false; }}
       disabled={disabled}
       aria-label={accessibilityLabel || label}
       aria-valuetext={sliderValueText}

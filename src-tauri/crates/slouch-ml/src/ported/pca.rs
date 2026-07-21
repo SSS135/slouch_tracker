@@ -626,8 +626,7 @@ mod fast_path_tests {
         let mean = column_means(&data, d);
         let centered = centered_data(&data, &mean);
 
-        let (full_components, full_variance) =
-            compute_reduction_full(&centered, n, d, k).unwrap();
+        let (full_components, full_variance) = compute_reduction_full(&centered, n, d, k).unwrap();
         let (fast_components, fast_variance) =
             compute_reduction_randomized(&centered, n, d, k).unwrap();
 
@@ -670,12 +669,20 @@ mod fast_path_tests {
         assert_eq!(state.n_components, 30);
         assert_eq!(state.n_features, d);
         assert_eq!(state.components.len(), 30);
-        assert!(state.components.iter().all(|component| component.len() == d));
+        assert!(state
+            .components
+            .iter()
+            .all(|component| component.len() == d));
         let variance = state.explained_variance.as_ref().unwrap();
         assert_eq!(variance.len(), 30);
-        assert!(variance.iter().all(|value| value.is_finite() && *value >= 0.0));
+        assert!(variance
+            .iter()
+            .all(|value| value.is_finite() && *value >= 0.0));
         for pair in variance.windows(2) {
-            assert!(pair[0] >= pair[1] - 1e-12, "explained variance not descending");
+            assert!(
+                pair[0] >= pair[1] - 1e-12,
+                "explained variance not descending"
+            );
         }
         assert!(variance.iter().sum::<f64>() <= 1.0 + 1e-9);
 
@@ -695,7 +702,11 @@ mod fast_path_tests {
         let (components, _) = compute_reduction_randomized(&centered, n, d, k).unwrap();
 
         for component in &components {
-            let norm = component.iter().map(|value| value * value).sum::<f64>().sqrt();
+            let norm = component
+                .iter()
+                .map(|value| value * value)
+                .sum::<f64>()
+                .sqrt();
             assert!((norm - 1.0).abs() < 1e-6, "component not unit norm: {norm}");
         }
         for left in 0..components.len() {
@@ -705,11 +716,17 @@ mod fast_path_tests {
                     .zip(&components[right])
                     .map(|(a, b)| a * b)
                     .sum();
-                assert!(dot.abs() < 1e-5, "components {left},{right} not orthogonal: {dot}");
+                assert!(
+                    dot.abs() < 1e-5,
+                    "components {left},{right} not orthogonal: {dot}"
+                );
             }
         }
 
         let (again, _) = compute_reduction_randomized(&centered, n, d, k).unwrap();
-        assert_eq!(components, again, "seeded randomized fit must be reproducible");
+        assert_eq!(
+            components, again,
+            "seeded randomized fit must be reproducible"
+        );
     }
 }

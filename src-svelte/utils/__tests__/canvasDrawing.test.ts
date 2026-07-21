@@ -142,6 +142,47 @@ describe('canvasDrawing', () => {
         expect(mockCtx.rotate).toHaveBeenCalledTimes(3);
       });
 
+      it('should draw the torso quad for interior shoulder/hip corners', () => {
+        const smoothedKeypoints = createIsolatedKeypoints();
+        activate(smoothedKeypoints, 5, 0.4, 0.3);
+        activate(smoothedKeypoints, 6, 0.6, 0.3);
+        activate(smoothedKeypoints, 11, 0.42, 0.7);
+        activate(smoothedKeypoints, 12, 0.58, 0.7);
+
+        drawHumanLikeSkeleton(
+          mockCtx,
+          smoothedKeypoints,
+          canvasWidth,
+          canvasHeight,
+          canvasWidth,
+          canvasHeight,
+        );
+
+        // moveTo/lineTo are only used by the torso quad path.
+        expect(mockCtx.moveTo).toHaveBeenCalledTimes(1);
+      });
+
+      it('should skip the torso quad when all four corners are at the boundary', () => {
+        // Regression: a partial detection clamped to y≈0 painted a full-width bar
+        // across the top of the frame. The degenerate torso must be skipped.
+        const smoothedKeypoints = createIsolatedKeypoints();
+        activate(smoothedKeypoints, 5, 0.4, 0.005);
+        activate(smoothedKeypoints, 6, 0.6, 0.005);
+        activate(smoothedKeypoints, 11, 0.42, 0.005);
+        activate(smoothedKeypoints, 12, 0.58, 0.005);
+
+        drawHumanLikeSkeleton(
+          mockCtx,
+          smoothedKeypoints,
+          canvasWidth,
+          canvasHeight,
+          canvasWidth,
+          canvasHeight,
+        );
+
+        expect(mockCtx.moveTo).not.toHaveBeenCalled();
+      });
+
       it('should respect 0.01 boundary threshold for limbs', () => {
         const atThresholdKeypoints = createIsolatedKeypoints();
         activate(atThresholdKeypoints, 5, 0.4, 0.01);

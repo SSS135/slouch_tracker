@@ -12,11 +12,12 @@ use slouch_ml::ported::constants::{
     POSTURE_GEOMETRY_DIMS, POSTURE_RAW_DIMS, RAW_KEYPOINTS_DIMS, RTMDET_ENGINEERED_DIMS,
     RTMDET_EXTRACTED_DIMS, RTMDET_EXTRACTED_STORAGE_COST, RTMPOSE_BACKBONE_POOLED_DIMS,
     RTMPOSE_BACKBONE_POOLED_STORAGE_COST, RTMPOSE_GAU_POOLED_DIMS, RTMPOSE_GAU_POOLED_STORAGE_COST,
+    TORSO_INVARIANT_DIMS,
 };
 use slouch_ml::ported::engineered_features::{
     extract_engineered_features, extract_joint_2d_features, extract_joint_3d_features,
     extract_joint_4d_features, extract_posture_geometry_features, extract_posture_raw_features,
-    extract_raw_keypoints, EngineeredFeaturesError,
+    extract_raw_keypoints, extract_torso_invariant_features, EngineeredFeaturesError,
 };
 use slouch_ml::ported::rtmdet_engineered_features::{
     extract_keypoint_scores_feature, extract_rtm_det_engineered_features,
@@ -47,10 +48,11 @@ pub const FEATURE_POSTURE_RAW: FeatureType = FeatureType::PostureRaw;
 pub const FEATURE_KEYPOINT_SCORES: FeatureType = FeatureType::KeypointScores;
 pub const FEATURE_RAW_KEYPOINTS: FeatureType = FeatureType::RawKeypoints;
 pub const FEATURE_POSTURE_GEOMETRY: FeatureType = FeatureType::PostureGeometry;
+pub const FEATURE_TORSO_INVARIANT: FeatureType = FeatureType::TorsoInvariant;
 
 /// Valid feature type identifiers, in the same insertion order as the source
 /// object registry.
-pub const FEATURE_TYPES: [FeatureType; 16] = FeatureType::ALL;
+pub const FEATURE_TYPES: [FeatureType; 17] = FeatureType::ALL;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExtractorKind {
@@ -64,6 +66,7 @@ enum ExtractorKind {
     KeypointScores,
     RawKeypoints,
     PostureGeometry,
+    TorsoInvariant,
 }
 
 /// Metadata and extraction behavior for one feature type.
@@ -266,6 +269,15 @@ impl FeatureDefinition {
                 Some(false),
                 ExtractorKind::PostureGeometry,
             ),
+            FeatureType::TorsoInvariant => Self::computed(
+                id,
+                "Torso-Invariant Geometry",
+                "7 scale/translation-invariant torso-anchored features separating head flexion from trunk slouch (7 dims)",
+                TORSO_INVARIANT_DIMS,
+                Some(ModelCategory::Posture),
+                Some(false),
+                ExtractorKind::TorsoInvariant,
+            ),
         }
     }
 
@@ -297,12 +309,15 @@ impl FeatureDefinition {
             ExtractorKind::PostureGeometry => {
                 Ok(extract_posture_geometry_features(container.keypoints())?)
             }
+            ExtractorKind::TorsoInvariant => {
+                Ok(extract_torso_invariant_features(container.keypoints())?)
+            }
         }
     }
 }
 
 /// Registry of all available feature types.
-pub const FEATURE_REGISTRY: [FeatureDefinition; 16] = [
+pub const FEATURE_REGISTRY: [FeatureDefinition; 17] = [
     FeatureDefinition::from_feature_type(FEATURE_BACKBONE_AVG),
     FeatureDefinition::from_feature_type(FEATURE_BACKBONE_MAX),
     FeatureDefinition::from_feature_type(FEATURE_BACKBONE_STD),
@@ -319,6 +334,7 @@ pub const FEATURE_REGISTRY: [FeatureDefinition; 16] = [
     FeatureDefinition::from_feature_type(FEATURE_KEYPOINT_SCORES),
     FeatureDefinition::from_feature_type(FEATURE_RAW_KEYPOINTS),
     FeatureDefinition::from_feature_type(FEATURE_POSTURE_GEOMETRY),
+    FeatureDefinition::from_feature_type(FEATURE_TORSO_INVARIANT),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -390,7 +406,7 @@ pub fn get_feature_dimensions(feature_type: &str) -> Result<usize, UnknownFeatur
 }
 
 /// Return all feature identifiers in registry order.
-pub fn get_all_feature_types() -> [FeatureType; 16] {
+pub fn get_all_feature_types() -> [FeatureType; 17] {
     FEATURE_TYPES
 }
 

@@ -37,6 +37,20 @@ describe('PostureStatusBadge Component', () => {
     });
   });
 
+  describe('Posture-only deployment', () => {
+    it('never shows "No Model Trained" once a posture model is active, even with no presence model', () => {
+      // A posture-only pair (0 away frames -> presence training skipped) still has
+      // hasModel true; presence probability comes from the RTMDet fallback. The
+      // badge must present scoring, not the no-model state.
+      const data = createMockClassificationResult(0.9, 0.8);
+
+      renderBadge({ hasModel: true, data, presenceThreshold: 0.5 });
+
+      expect(screen.queryByText('No Model Trained')).not.toBeInTheDocument();
+      expect(screen.getByText('Good Posture')).toBeInTheDocument();
+    });
+  });
+
   describe('Person Away State', () => {
     it('should display "Person Away" when person is not detected', () => {
       renderBadge({ hasModel: true, data: undefined });

@@ -174,6 +174,7 @@ pub const JOINT_4D_DIMS: usize = ENGINEERED_4D_DIMS;
 pub const RTMDET_ENGINEERED_DIMS: usize = 81 + (6 * NUM_SOFT_BINS);
 pub const POSTURE_RAW_DIMS: usize = 5;
 pub const POSTURE_GEOMETRY_DIMS: usize = 10;
+pub const TORSO_INVARIANT_DIMS: usize = 7;
 pub const KEYPOINT_SCORES_DIMS: usize = 17;
 pub const RAW_KEYPOINTS_DIMS: usize = 34;
 

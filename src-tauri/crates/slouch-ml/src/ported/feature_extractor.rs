@@ -298,6 +298,20 @@ where
                     .collect::<Vec<_>>();
                 let mut transformer = PcaTransformer::new();
                 transformer.fit(&data, self.dim_reduction_config.components as isize)?;
+                // PCA yields at most min(fit_rows - 1, n_features) components. Record the
+                // EFFECTIVE count as the config's component count so the serialized config,
+                // the fitted PCA state (`n_components`), `get_output_dimensions`, and the
+                // model-container validator all agree. A requested count larger than the data
+                // can support then degrades to the effective rank instead of writing a state
+                // whose `n_components` disagrees with the config the loader re-validates.
+                let effective_components = transformer.get_output_dimension();
+                if effective_components < self.dim_reduction_config.components {
+                    log_info(&format!(
+                        "[FEATURE_EXTRACTOR] PCA components reduced {} -> {} (limited by fitted data)",
+                        self.dim_reduction_config.components, effective_components
+                    ));
+                }
+                self.dim_reduction_config.components = effective_components;
                 log_info("[FEATURE_EXTRACTOR] PCA fitted");
                 Some(DimensionalityReducer::Pca(transformer))
             }

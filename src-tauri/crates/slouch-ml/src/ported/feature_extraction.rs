@@ -12,7 +12,7 @@ use slouch_domain::{BboxAccessor, FeatureId, FeatureSource, PostureFrame};
 use super::engineered_features::{
     extract_engineered_features, extract_joint_2d_features, extract_joint_3d_features,
     extract_joint_4d_features, extract_posture_geometry_features, extract_posture_raw_features,
-    extract_raw_keypoints, EngineeredFeaturesError,
+    extract_raw_keypoints, extract_torso_invariant_features, EngineeredFeaturesError,
 };
 use super::rtmdet_engineered_features::{
     extract_keypoint_scores_feature, extract_rtm_det_engineered_features,
@@ -214,6 +214,8 @@ where
             FeatureId::RawKeypoints => extract_raw_keypoints(Some(container.keypoints()))
                 .map_err(FeatureExtractionError::from),
             FeatureId::PostureGeometry => extract_posture_geometry_features(container.keypoints())
+                .map_err(FeatureExtractionError::from),
+            FeatureId::TorsoInvariant => extract_torso_invariant_features(container.keypoints())
                 .map_err(FeatureExtractionError::from),
         };
 

@@ -1286,10 +1286,20 @@ pub use camera::{CameraActor, CameraDeviceInfo, CameraMode, InferenceUiResult};
 
 mod camera {
     use super::*;
+    use std::collections::VecDeque;
 
     const MIN_INTERVAL_SECONDS: f64 = 0.05;
     // When settings are momentarily unreadable, back off briefly instead of hot-looping.
     const DETECTION_RETRY: Duration = Duration::from_millis(500);
+    // Ring of the most recent encoded camera buffers kept for temporal smoothing.
+    // Sized to the maximum smoothing_frames (validated 1..=10) so a detection can
+    // always pull the configured number of *consecutive* frames: Foreground fills
+    // the ring at capture rate; Background bursts to top it up before a detection.
+    const FRAME_RING_CAPACITY: usize = 10;
+    // A processed-view pull within this window counts as live demand: the capture
+    // loop keeps the processed preview fresh at capture rate. ~2s absorbs the
+    // unfocused ~2fps pump and brief scheduling gaps without ever latching on.
+    const PROCESSED_DEMAND_WINDOW: Duration = Duration::from_secs(2);
 
     /// UI-facing inference summary pushed after each native detection. No pixels:
     /// only the one-use token, presence/posture verdict, and overlay geometry cross
@@ -1339,9 +1349,16 @@ mod camera {
     /// State the capture thread publishes and callers read without the mailbox.
     struct CameraShared {
         latest_frame: Mutex<Option<Vec<u8>>>,
-        // JPEG of the exact preprocessed RGBA the detector last saw (post
-        // CLAHE/blur/temporal smoothing); refreshed at detection rate.
+        // JPEG of the exact preprocessed RGBA the detector sees (post
+        // CLAHE/blur/temporal smoothing). Refreshed at capture rate (~30fps) while
+        // the processed view is actively watched, otherwise at the ~1fps detection
+        // rate by the dispatcher (the idle fallback).
         processed_frame: Mutex<Option<Vec<u8>>>,
+        // Instant of the most recent `slouchcam …/processed` pull. The capture loop
+        // treats a stamp within PROCESSED_DEMAND_WINDOW as live demand and drives
+        // the processed-view preview at capture rate; stale/absent means zero extra
+        // work. Touched ~30x/s from the protocol thread.
+        processed_requested_at: Mutex<Option<Instant>>,
         latest_result: Mutex<Option<InferenceUiResult>>,
         status: Mutex<CameraStatus>,
         sink: Mutex<Option<ResultSink>>,
@@ -1352,10 +1369,29 @@ mod camera {
             Self {
                 latest_frame: Mutex::new(None),
                 processed_frame: Mutex::new(None),
+                processed_requested_at: Mutex::new(None),
                 latest_result: Mutex::new(None),
                 status: Mutex::new(CameraStatus::Idle),
                 sink: Mutex::new(None),
             }
+        }
+
+        /// Records that the webview just pulled the processed-view frame, marking
+        /// the view as actively watched so the capture loop keeps it fresh.
+        fn note_processed_request(&self) {
+            if let Ok(mut guard) = self.processed_requested_at.lock() {
+                *guard = Some(Instant::now());
+            }
+        }
+
+        /// True when a processed-view pull landed within `window` — i.e. the view
+        /// is being watched right now. A single cheap check per captured frame.
+        fn processed_demand_active(&self, window: Duration) -> bool {
+            self.processed_requested_at
+                .lock()
+                .ok()
+                .and_then(|guard| *guard)
+                .is_some_and(|at| at.elapsed() < window)
         }
 
         fn set_status(&self, status: CameraStatus) {
@@ -1506,6 +1542,12 @@ mod camera {
             self.shared.processed_frame.lock().ok()?.clone()
         }
 
+        /// Records a `slouchcam …/processed` pull so the capture loop keeps the
+        /// processed preview fresh at capture rate while the view is watched.
+        pub fn note_processed_request(&self) {
+            self.shared.note_processed_request();
+        }
+
         #[allow(dead_code)]
         pub fn latest_result(&self) -> Option<InferenceUiResult> {
             self.shared.latest_result.lock().ok()?.clone()
@@ -1567,11 +1609,14 @@ mod camera {
     }
 
     /// A single detection unit of work handed from the capture thread to the
-    /// detection dispatcher: the freshest camera buffer plus the settings snapshot
-    /// used to preprocess it. The buffer clone this carries is the only
-    /// per-detection copy the capture thread pays.
+    /// detection dispatcher: the last `smoothing_frames` *consecutive* camera
+    /// buffers (oldest→newest) plus the settings snapshot used to preprocess them.
+    /// The dispatcher ingests them in order, so temporal smoothing averages frames
+    /// captured ~33 ms apart (camera rate) rather than the ~1 fps detection cadence.
+    /// The final buffer is the frame detection actually runs on. These clones are
+    /// the only per-detection copies the capture thread pays.
     struct DetectionJob {
-        buffer: Buffer,
+        buffers: Vec<Buffer>,
         settings: CameraSettings,
     }
 
@@ -1746,6 +1791,21 @@ mod camera {
         // are re-encoded before storing; MJPEG cameras store the buffer verbatim.
         let mut frame_format = FrameFormat::MJPEG;
         let mut next_detection = Instant::now();
+        // Processed-view fast path (Foreground, demand-driven). Its own preprocessor
+        // keeps temporal-smoothing state independent of the dispatcher's detection
+        // preprocessor. `preview_active` tracks the demand edge so the ring is reset
+        // and settings refreshed exactly when demand (re)starts; `cached_settings`
+        // feeds this per-frame path without a storage read every frame (refreshed at
+        // each detection tick and on demand start).
+        let mut preview_preprocessor = NativePreprocessor::default();
+        let mut preview_active = false;
+        let mut cached_settings: Option<CameraSettings> = None;
+        // Ring of the most recent encoded camera buffers (oldest→newest). Foreground
+        // pushes every captured frame (~30 fps) so it naturally holds consecutive
+        // frames; Background pushes ~1 fps and bursts to top it up just before a
+        // detection. A detection dispatches the last `smoothing_frames` entries so
+        // temporal smoothing averages true camera-rate frames.
+        let mut frame_ring: VecDeque<Buffer> = VecDeque::with_capacity(FRAME_RING_CAPACITY);
 
         loop {
             if camera.is_some() {
@@ -1783,6 +1843,8 @@ mod camera {
                         &dispatcher,
                         &mut next_detection,
                         &mut frame_format,
+                        &mut preview_active,
+                        &mut frame_ring,
                     ) {
                         break;
                     }
@@ -1807,6 +1869,47 @@ mod camera {
                         // guarantees valid JPEG. (The frontend stops fetching when the
                         // window is minimized/hidden, so nothing renders then.)
                         store_preview_frame(&buffer, frame_format, &shared);
+
+                        // Record every captured frame in the temporal ring. Foreground
+                        // reaches here ~30x/s so the ring holds consecutive frames;
+                        // Background reaches here ~1x/s and is topped up by a burst
+                        // just before dispatch (below).
+                        push_frame_ring(&mut frame_ring, buffer.clone());
+
+                        // Demand-driven processed-view fast path: while the webview is
+                        // actively pulling /processed (Foreground only), also
+                        // preprocess + JPEG-encode this frame into the processed cell
+                        // at capture rate so the processed view stays smooth. Outside
+                        // the demand window this costs a single timestamp check — the
+                        // dispatcher's ~1fps store remains the fallback.
+                        let demand = mode == CameraMode::Foreground
+                            && shared.processed_demand_active(PROCESSED_DEMAND_WINDOW);
+                        if demand {
+                            if !preview_active {
+                                // Demand just (re)started: drop stale temporal history
+                                // and take a fresh settings snapshot so the first
+                                // processed frame is correct.
+                                preview_preprocessor.reset();
+                                cached_settings = storage.get_camera_settings().ok();
+                                preview_active = true;
+                            }
+                            if let Some(settings) = cached_settings.as_ref() {
+                                if let Err(error) = run_preview_processing(
+                                    &buffer,
+                                    &mut preview_preprocessor,
+                                    settings,
+                                    &shared,
+                                ) {
+                                    log::debug!(target: "camera", "processed-view preview update skipped: {error}");
+                                }
+                            }
+                        } else if preview_active {
+                            // Demand lapsed (view off or backgrounded): reset so stale
+                            // frames can't bleed into a later re-enable.
+                            preview_preprocessor.reset();
+                            preview_active = false;
+                        }
+
                         if Instant::now() >= next_detection {
                             match storage.get_camera_settings() {
                                 Ok(settings) => {
@@ -1816,18 +1919,41 @@ mod camera {
                                                 .capture_interval_seconds
                                                 .max(MIN_INTERVAL_SECONDS),
                                         );
-                                    // Hand the freshest frame to the detection
-                                    // dispatcher, but only when it is idle: exactly
-                                    // one detection in flight, always the newest
-                                    // frame, never a backlog. The buffer is cloned
-                                    // once here (the sole per-detection copy); while
-                                    // the dispatcher runs inference this loop keeps
-                                    // storing preview frames at ~30 fps.
+                                    // Keep the per-frame preview path on fresh settings
+                                    // without a storage read every frame.
+                                    cached_settings = Some(settings.clone());
+                                    // Hand the freshest consecutive frames to the
+                                    // detection dispatcher, but only when it is idle:
+                                    // exactly one detection in flight, always the
+                                    // newest frames, never a backlog. While the
+                                    // dispatcher runs inference this loop keeps storing
+                                    // preview frames at ~30 fps.
                                     if !dispatcher.is_busy() {
-                                        dispatcher.submit(DetectionJob {
-                                            buffer: buffer.clone(),
-                                            settings,
-                                        });
+                                        let want = usize::from(settings.smoothing_frames).max(1);
+                                        // Background wakes only ~once per detection, so
+                                        // the ring holds ~1 fps-spaced frames. Pull the
+                                        // remaining consecutive frames now (bounded:
+                                        // ~33 ms each, N-1 reads once per detection) so
+                                        // smoothing averages true camera-rate frames.
+                                        // Foreground already filled the ring at capture
+                                        // rate, so it never bursts.
+                                        if mode == CameraMode::Background && want > 1 {
+                                            burst_fill_ring(
+                                                &mut camera,
+                                                &mut frame_ring,
+                                                want,
+                                                frame_format,
+                                                &shared,
+                                            );
+                                        }
+                                        // Dispatch the last `want` consecutive frames
+                                        // (oldest→newest); the newest is the frame
+                                        // detection runs on. These clones are the sole
+                                        // per-detection copies.
+                                        let start = frame_ring.len().saturating_sub(want);
+                                        let buffers: Vec<Buffer> =
+                                            frame_ring.iter().skip(start).cloned().collect();
+                                        dispatcher.submit(DetectionJob { buffers, settings });
                                     }
                                 }
                                 Err(error) => {
@@ -1861,6 +1987,8 @@ mod camera {
                             &dispatcher,
                             &mut next_detection,
                             &mut frame_format,
+                            &mut preview_active,
+                            &mut frame_ring,
                         ) {
                             break;
                         }
@@ -1890,6 +2018,8 @@ mod camera {
         dispatcher: &DetectionDispatcher,
         next_detection: &mut Instant,
         frame_format: &mut FrameFormat,
+        preview_active: &mut bool,
+        frame_ring: &mut VecDeque<Buffer>,
     ) -> bool {
         match command {
             CameraCommand::Start { reply } => {
@@ -1913,6 +2043,12 @@ mod camera {
                         *camera = Some(opened);
                         *frame_format = negotiated;
                         dispatcher.request_reset();
+                        // Re-seed the processed-view preview on the next demand frame
+                        // so a restart never bleeds pre-restart frames into it.
+                        *preview_active = false;
+                        // Drop pre-restart frames so the first post-restart detection
+                        // never smooths across the stream break.
+                        frame_ring.clear();
                         *next_detection = Instant::now();
                         shared.set_status(CameraStatus::Streaming(*mode));
                         let _ = reply.send(Ok(()));
@@ -1974,30 +2110,31 @@ mod camera {
         // Enumerate the device's supported formats and pick the best MJPEG one by
         // frame rate. `compatible_camera_formats` needs &mut and may fail on some
         // backends; on failure we fall back to a settings-resolution MJPEG request.
-        let chosen = camera
-            .compatible_camera_formats()
-            .ok()
-            .and_then(|formats| {
-                formats
-                    .into_iter()
-                    .filter(|candidate| candidate.format() == FrameFormat::MJPEG)
-                    .max_by_key(|candidate| {
-                        let fps = i64::from(candidate.frame_rate());
-                        // Prefer the highest fps that is still <= 30; if every MJPEG
-                        // mode exceeds 30, fall back to the smallest (closest to 30
-                        // from above). `group` ranks <=30 above >30; within a group the
-                        // fps key sorts the winner to the top.
-                        let (group, fps_key) = if fps <= 30 { (1_i64, fps) } else { (0_i64, -fps) };
-                        let width = i64::from(candidate.width());
-                        let height = i64::from(candidate.height());
-                        // Tie-break among equal fps: prefer ~640x480. On this MSMF
-                        // backend the effective capture rate is resolution-dependent
-                        // (720p+ pins to ~1fps), and 640x480 is still detection-friendly.
-                        let in_range = i64::from((320..=640).contains(&width));
-                        let distance = (width - 640).abs() + (height - 480).abs();
-                        (group, fps_key, in_range, -distance)
-                    })
-            });
+        let chosen = camera.compatible_camera_formats().ok().and_then(|formats| {
+            formats
+                .into_iter()
+                .filter(|candidate| candidate.format() == FrameFormat::MJPEG)
+                .max_by_key(|candidate| {
+                    let fps = i64::from(candidate.frame_rate());
+                    // Prefer the highest fps that is still <= 30; if every MJPEG
+                    // mode exceeds 30, fall back to the smallest (closest to 30
+                    // from above). `group` ranks <=30 above >30; within a group the
+                    // fps key sorts the winner to the top.
+                    let (group, fps_key) = if fps <= 30 {
+                        (1_i64, fps)
+                    } else {
+                        (0_i64, -fps)
+                    };
+                    let width = i64::from(candidate.width());
+                    let height = i64::from(candidate.height());
+                    // Tie-break among equal fps: prefer ~640x480. On this MSMF
+                    // backend the effective capture rate is resolution-dependent
+                    // (720p+ pins to ~1fps), and 640x480 is still detection-friendly.
+                    let in_range = i64::from((320..=640).contains(&width));
+                    let distance = (width - 640).abs() + (height - 480).abs();
+                    (group, fps_key, in_range, -distance)
+                })
+        });
 
         match chosen {
             Some(format) => {
@@ -2148,6 +2285,68 @@ mod camera {
         }
     }
 
+    /// Processed-view preview update: preprocess the current camera frame through
+    /// the preview-only preprocessor (temporal state independent of detection) and
+    /// store the JPEG in the processed cell. Mirrors `run_detection` minus the
+    /// inference round-trip; runs at capture rate while the view is watched.
+    fn run_preview_processing(
+        buffer: &Buffer,
+        preprocessor: &mut NativePreprocessor,
+        settings: &CameraSettings,
+        shared: &CameraShared,
+    ) -> Result<(), ApiError> {
+        let image = decode_rgba(buffer).map_err(ApiError::InvalidRequest)?;
+        preprocessor
+            .ingest_camera_frame(image, settings)
+            .map_err(ApiError::InvalidRequest)?;
+        let processed = preprocessor
+            .process_latest(settings)
+            .map_err(ApiError::InvalidRequest)?;
+        store_processed_frame(&processed, shared);
+        Ok(())
+    }
+
+    /// Pushes one captured buffer into the temporal ring, evicting the oldest so it
+    /// never exceeds `FRAME_RING_CAPACITY` (the maximum smoothing window).
+    fn push_frame_ring(ring: &mut VecDeque<Buffer>, frame: Buffer) {
+        ring.push_back(frame);
+        while ring.len() > FRAME_RING_CAPACITY {
+            ring.pop_front();
+        }
+    }
+
+    /// Background top-up: the capture loop wakes only ~once per detection, so the
+    /// ring lacks consecutive frames. Pulls extra frames back-to-back at the
+    /// device's pacing until the ring holds `want` fresh consecutive frames (the
+    /// just-captured frame is already at the back, so this reads `want - 1` more),
+    /// so temporal smoothing averages ~33 ms-apart frames. Bounded to `want - 1`
+    /// reads (≤ 9), once per detection. A transient read failure just shortens this
+    /// detection's window; the next main-loop read surfaces a real disconnect.
+    fn burst_fill_ring(
+        camera: &mut Option<Camera>,
+        ring: &mut VecDeque<Buffer>,
+        want: usize,
+        frame_format: FrameFormat,
+        shared: &CameraShared,
+    ) {
+        let Some(active) = camera.as_mut() else {
+            return;
+        };
+        for _ in 1..want {
+            match active.frame() {
+                Ok(buffer) => {
+                    // Keep the preview on the freshest (detected-on) frame too.
+                    store_preview_frame(&buffer, frame_format, shared);
+                    push_frame_ring(ring, buffer);
+                }
+                Err(error) => {
+                    log::warn!(target: "camera", "smoothing burst frame read failed: {error}");
+                    break;
+                }
+            }
+        }
+    }
+
     fn run_detection(
         job: &DetectionJob,
         preprocessor: &mut NativePreprocessor,
@@ -2155,10 +2354,22 @@ mod camera {
         inference: &InferenceActor,
         shared: &CameraShared,
     ) -> Result<(), ApiError> {
-        let image = decode_rgba(&job.buffer).map_err(ApiError::InvalidRequest)?;
-        preprocessor
-            .ingest_camera_frame(image, &job.settings)
-            .map_err(ApiError::InvalidRequest)?;
+        // Ingest the consecutive camera-rate frames in capture order, then process
+        // once. A ring of exactly `smoothing_frames` frames is dispatched and the
+        // preprocessor keeps the same window size, so `process_latest` averages this
+        // detection's own consecutive frames — the previous detection's frames are
+        // fully evicted by the time the last one is ingested.
+        if job.buffers.is_empty() {
+            return Err(ApiError::InvalidRequest(
+                "detection job carried no frames".into(),
+            ));
+        }
+        for buffer in &job.buffers {
+            let image = decode_rgba(buffer).map_err(ApiError::InvalidRequest)?;
+            preprocessor
+                .ingest_camera_frame(image, &job.settings)
+                .map_err(ApiError::InvalidRequest)?;
+        }
         let processed = preprocessor
             .process_latest(&job.settings)
             .map_err(ApiError::InvalidRequest)?;

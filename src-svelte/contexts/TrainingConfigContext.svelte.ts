@@ -6,10 +6,13 @@ import type {
   FeatureId,
   FeatureMetadata_Serialize,
   NormalizationMode,
+  ParameterDefinition_Serialize,
+  ParameterValue,
   TrainingSettings_Deserialize,
   TrainingSettings_Serialize,
 } from '@generated/bindings';
 import { nativeClient } from '../lib/native/client';
+import { canonicalizeFeatureIds } from '../services/dataset/featureOrder';
 import { logger } from '../services/logging/logger';
 
 export interface TrainingConfig {
@@ -38,10 +41,16 @@ export interface TrainingConfigContextValue {
   reload(): Promise<void>;
 }
 
+// Defaults selected by in-app cross-validated benchmarking (2026-07): posture features
+// [backbone_features_max, gau_features_max] + MLP logistic head (hiddenLayers 0) with class
+// weighting + PCA(30) + z-score scored best (posture balanced ~74%, slouch-recall ~0.88),
+// far above the old engineered_features/no-reduction default (~54% / 0.375 recall).
+// classifierConfig.params holds only the deviations from the registry defaults;
+// applySettings overlays them onto the full registry parameter set.
 export const DEFAULT_CONFIG: TrainingConfig = {
-  classifierConfig: { classifierId: 'mlp', params: {} },
-  dimReductionConfig: { method: 'none', components: 64 },
-  postureFeatureTypes: ['engineered_features'],
+  classifierConfig: { classifierId: 'mlp', params: { hiddenLayers: 0, useClassWeights: true } },
+  dimReductionConfig: { method: 'pca', components: 30 },
+  postureFeatureTypes: ['backbone_features_max', 'gau_features_max'],
   presenceFeatureTypes: ['rtmdet_engineered', 'keypoint_scores'],
   normalizationMode: 'z_score',
   cvFolds: 5,
@@ -56,12 +65,65 @@ const cloneDefault = (): TrainingConfig => ({
   presenceFeatureTypes: [...DEFAULT_CONFIG.presenceFeatureTypes],
 });
 
-function defaultParams(metadata: ClassifierMetadata_Serialize | undefined): ClassifierConfig['params'] {
-  return Object.fromEntries(Object.entries(metadata?.params ?? {}).map(([name, definition]) => [name, definition.default]));
+// A registry parameter is integer-valued when it is explicitly declared `integer`, or when it is a
+// numeric range/number whose step is a whole number (e.g. maxIterations step 10, knn k / kmeans
+// nClusters step 1). Such values must reach the native backend as integers: UI sliders can
+// accumulate floating-point drift (99.999…) and the native settings/model schemas type these
+// fields as unsigned integers, which reject non-integer JSON. Fractional-step params (learningRate,
+// weightDecay, temperature, labelSmoothing, …) are genuine floats and are left untouched.
+function isIntegerParam(definition: ParameterDefinition_Serialize | undefined): boolean {
+  if (!definition) return false;
+  const type: string = definition.type;
+  if (type === 'integer') return true;
+  if (type === 'range' || type === 'number') {
+    const step = definition.step;
+    return typeof step === 'number' && Number.isInteger(step) && step >= 1;
+  }
+  return false;
 }
 
-function serialize(config: TrainingConfig): TrainingSettings_Deserialize {
-  return { ...config, featureTypes: null, lastUpdated: Date.now() };
+export function coerceParamValue(
+  definition: ParameterDefinition_Serialize | undefined,
+  value: ParameterValue,
+): ParameterValue {
+  return typeof value === 'number' && isIntegerParam(definition) ? Math.round(value) : value;
+}
+
+// Build a full parameter set from a classifier's registry defaults, coercing every integer-typed
+// param so registry values (and any future fractional defaults) can never inject a float into the
+// pipeline. This is the single source of truth for "params from registry" across every emission
+// point (context defaults + classifier switch/reset in the selector UI).
+export function defaultParams(metadata: ClassifierMetadata_Serialize | undefined): ClassifierConfig['params'] {
+  return Object.fromEntries(
+    Object.entries(metadata?.params ?? {}).map(([name, definition]) => [name, coerceParamValue(definition, definition.default)]),
+  );
+}
+
+// Build the fresh/reset classifier config from a registry entry. The base is the full set of
+// registry defaults (so every parameter is present for validation and the UI); for the app-wide
+// default classifier we overlay DEFAULT_CONFIG's benchmarked parameter overrides on top.
+function defaultClassifierConfig(classifier: ClassifierMetadata_Serialize | undefined): ClassifierConfig {
+  if (!classifier) return cloneDefault().classifierConfig;
+  const params = classifier.id === DEFAULT_CONFIG.classifierConfig.classifierId
+    ? { ...defaultParams(classifier), ...DEFAULT_CONFIG.classifierConfig.params }
+    : defaultParams(classifier);
+  return { classifierId: classifier.id, params };
+}
+
+// Canonicalize both feature lists at the native boundary so the payload always satisfies the
+// backend's unique-and-ascending contract, no matter how the config was assembled (click order,
+// legacy stored settings, or an out-of-order reconcile).
+function serialize(
+  config: TrainingConfig,
+  registryOrder: readonly FeatureId[],
+): TrainingSettings_Deserialize {
+  return {
+    ...config,
+    postureFeatureTypes: canonicalizeFeatureIds(config.postureFeatureTypes, registryOrder),
+    presenceFeatureTypes: canonicalizeFeatureIds(config.presenceFeatureTypes, registryOrder),
+    featureTypes: null,
+    lastUpdated: Date.now(),
+  };
 }
 
 export function createTrainingConfigContext(): TrainingConfigContextValue {
@@ -78,6 +140,7 @@ export function createTrainingConfigContext(): TrainingConfigContextValue {
   let loadGeneration = 0;
 
   const registriesLoaded = (): boolean => classifierRegistryLoaded && featureRegistryLoaded;
+  const registryOrder = (): FeatureId[] => features.map((entry) => entry.id);
 
   const applySettings = (saved: TrainingSettings_Serialize | null): void => {
     const savedClassifier = classifiers.find((entry) => entry.id === saved?.classifierConfig.classifierId);
@@ -94,19 +157,15 @@ export function createTrainingConfigContext(): TrainingConfigContextValue {
     config = saved ? {
       classifierConfig: savedClassifier
         ? { classifierId: savedClassifier.id, params: saved.classifierConfig.params }
-        : classifier
-          ? { classifierId: classifier.id, params: defaultParams(classifier) }
-          : cloneDefault().classifierConfig,
+        : defaultClassifierConfig(classifier),
       dimReductionConfig: saved.dimReductionConfig,
-      postureFeatureTypes: saved.postureFeatureTypes,
-      presenceFeatureTypes: saved.presenceFeatureTypes,
+      postureFeatureTypes: canonicalizeFeatureIds(saved.postureFeatureTypes, registryOrder()),
+      presenceFeatureTypes: canonicalizeFeatureIds(saved.presenceFeatureTypes, registryOrder()),
       normalizationMode: saved.normalizationMode ?? DEFAULT_CONFIG.normalizationMode,
       cvFolds: saved.cvFolds,
     } : {
       ...cloneDefault(),
-      classifierConfig: classifier
-        ? { classifierId: classifier.id, params: defaultParams(classifier) }
-        : cloneDefault().classifierConfig,
+      classifierConfig: defaultClassifierConfig(classifier),
     };
   };
 
@@ -150,7 +209,7 @@ export function createTrainingConfigContext(): TrainingConfigContextValue {
     if (debounce) clearTimeout(debounce);
     debounce = setTimeout(() => {
       debounce = null;
-      void nativeClient.saveTrainingSettings(serialize(config)).catch((cause: unknown) => {
+      void nativeClient.saveTrainingSettings(serialize(config, registryOrder())).catch((cause: unknown) => {
         logger.error('training', 'Failed to persist native training settings:', cause);
       });
     }, 300);
@@ -162,7 +221,7 @@ export function createTrainingConfigContext(): TrainingConfigContextValue {
       if (debounce) clearTimeout(debounce);
       debounce = null;
       if (!ready || userRevision === 0) return;
-      void nativeClient.saveTrainingSettings(serialize(config)).catch((cause: unknown) => {
+      void nativeClient.saveTrainingSettings(serialize(config, registryOrder())).catch((cause: unknown) => {
         logger.error('training', 'Failed to flush native training settings on unload:', cause);
       });
     };
@@ -179,15 +238,15 @@ export function createTrainingConfigContext(): TrainingConfigContextValue {
     get error() { return error; },
     updateClassifierConfig: (classifierConfig) => { if (ready) { config = { ...config, classifierConfig }; userRevision += 1; } },
     updateDimReductionConfig: (dimReductionConfig) => { if (ready) { config = { ...config, dimReductionConfig }; userRevision += 1; } },
-    updatePostureFeatureTypes: (postureFeatureTypes) => { if (ready) { config = { ...config, postureFeatureTypes }; userRevision += 1; } },
-    updatePresenceFeatureTypes: (presenceFeatureTypes) => { if (ready) { config = { ...config, presenceFeatureTypes }; userRevision += 1; } },
+    updatePostureFeatureTypes: (postureFeatureTypes) => { if (ready) { config = { ...config, postureFeatureTypes: canonicalizeFeatureIds(postureFeatureTypes, registryOrder()) }; userRevision += 1; } },
+    updatePresenceFeatureTypes: (presenceFeatureTypes) => { if (ready) { config = { ...config, presenceFeatureTypes: canonicalizeFeatureIds(presenceFeatureTypes, registryOrder()) }; userRevision += 1; } },
     updateNormalizationMode: (normalizationMode) => { if (ready) { config = { ...config, normalizationMode }; userRevision += 1; } },
     updateCvFolds: (cvFolds) => { if (ready) { config = { ...config, cvFolds }; userRevision += 1; } },
     async flushToStorage() {
       if (!ready) throw new Error(error ? `Training settings are unavailable: ${error}` : 'Training settings are still loading.');
       if (debounce) clearTimeout(debounce);
       debounce = null;
-      await nativeClient.saveTrainingSettings(serialize(config));
+      await nativeClient.saveTrainingSettings(serialize(config, registryOrder()));
     },
     reconcile(settings) {
       loadGeneration += 1;

@@ -927,3 +927,104 @@ fn frames_missing_features_fail_the_affected_role_before_backend_training() {
         .iter()
         .any(|call| call == "save_posture"));
 }
+
+/// Backend that mimics the real one clamping PCA to the selected features' rank: it
+/// returns a fitted model whose serialized config records the EFFECTIVE component
+/// count (7) while the requested count in settings stays 30.
+struct ClampingPcaBackend;
+
+impl TrainingBackend for ClampingPcaBackend {
+    fn calibrate_feature_bins(
+        &mut self,
+        _samples: &[FeatureContainer],
+        _log_engineered: bool,
+        _logger: &dyn TrainingLogger,
+    ) {
+    }
+    fn cross_validate(
+        &mut self,
+        _config: &FeatureExtractorConfig,
+        _classifier: &ClassifierConfig,
+        _frames: &[PostureFrame],
+        _labels: &[i32],
+        _cv_folds: usize,
+    ) -> Result<Option<TrainingMetrics>, String> {
+        Ok(Some(metrics()))
+    }
+    fn fit(
+        &mut self,
+        config: &FeatureExtractorConfig,
+        _classifier: &ClassifierConfig,
+        _frames: &[PostureFrame],
+        _labels: &[i32],
+    ) -> Result<SerializedModel, String> {
+        let dims = 7;
+        Ok(SerializedModel {
+            feature_extractor: SerializedFeatureExtractor {
+                feature_types: config
+                    .feature_types
+                    .iter()
+                    .map(|feature| feature.as_str().to_owned())
+                    .collect(),
+                normalization_mode: slouch_ml::ported::types::NormalizationMode::None,
+                dim_reduction_config: slouch_ml::ported::types::DimensionalityReductionConfig {
+                    method: slouch_ml::ported::types::DimensionalityReductionMethod::Pca,
+                    components: dims,
+                },
+                concatenated_dimensions: dims,
+                normalization_mean: None,
+                normalization_std: None,
+                dim_reduction_transformer: None,
+            },
+            classifier: SerializedClassifier {
+                classifier_id: "gaussian_nb".into(),
+                state: SerializedClassifierState::GaussianNb(SerializedGaussianNb {
+                    class_means: [vec![0.0; dims], vec![1.0; dims]],
+                    class_variances: [vec![1.0; dims], vec![1.0; dims]],
+                    class_priors: [0.5, 0.5],
+                    epsilon: 1e-9,
+                }),
+            },
+            trained_at: 0.0,
+            version: 0.0,
+        })
+    }
+    fn release_training_buffers(&mut self) {}
+}
+
+#[test]
+fn pca_component_clamp_surfaces_as_a_posture_warning() {
+    // torso_invariant (7 dims) with PCA components 30 clamps to 7. The pipeline must
+    // append a visible degradation warning to the posture result rather than failing.
+    let mut pca_settings = settings();
+    pca_settings.dim_reduction_config = DimensionalityReductionConfig {
+        method: DimensionalityReductionMethod::Pca,
+        components: 30,
+    };
+    pca_settings.posture_feature_types = vec![FeatureId::TorsoInvariant];
+    let storage = TestStorage {
+        state: Arc::new(Mutex::new(StorageState::default())),
+        datasets: VecDeque::from([Ok(Some(dataset_of(&[FrameLabel::Good, FrameLabel::Bad])))]),
+        settings: Ok(Some(pca_settings)),
+        reservoir: Ok(vec![]),
+        fail_posture_save: false,
+        fail_presence_save: false,
+    };
+    let mut worker = TrainingWorker::with_clock(
+        storage,
+        ClampingPcaBackend,
+        TestLogger::default(),
+        FixedClock(1234.0),
+    );
+    let response = worker.handle_message(TrainingWorkerMessage::Train { payload: None });
+    let [TrainingWorkerResponse::Result { result, .. }] = &response[..] else {
+        panic!("expected result: {response:?}")
+    };
+    let posture = result.posture_result.as_ref().expect("posture result");
+    assert!(
+        posture.warnings.iter().any(|warning| warning
+            == "PCA components reduced 30\u{2192}7 (selected features have only 7 dimensions)"),
+        "expected PCA clamp warning, got {:?}",
+        posture.warnings
+    );
+}

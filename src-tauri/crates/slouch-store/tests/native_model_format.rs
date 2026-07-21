@@ -11,8 +11,9 @@ use slouch_domain::{
     NormalizationMode as DomainNormalizationMode, ParameterValue, PostureFrame, Thumbnail,
     TrainingMetrics, TrainingSettings, UiSettings,
 };
+use slouch_ml::ported::pca::SerializedPca;
 use slouch_ml::ported::types::{
-    DimensionalityReductionConfig as MlReductionConfig,
+    DimReductionTransformer, DimensionalityReductionConfig as MlReductionConfig,
     DimensionalityReductionMethod as MlReductionMethod, KnnKernel, NormalizationMode,
     SerializedClassifier, SerializedClassifierState, SerializedFeatureExtractor,
     SerializedGaussianNb, SerializedKMeansLogistic, SerializedKMeansPrototype, SerializedKnn,
@@ -184,6 +185,70 @@ fn models() -> Vec<SerializedModel> {
             version: 1.0,
         })
         .collect()
+}
+
+#[test]
+fn clamped_pca_model_round_trips_through_container() {
+    // A PCA model whose requested components were clamped to the feature rank records
+    // the EFFECTIVE count everywhere: reduction.output_dimension, the PCA state's
+    // n_components, and the classifier input dimension are all 7 (torso_invariant's
+    // width). The container encodes and decodes without the dimension validator
+    // rejecting it — the writer being honest is what keeps the format consistent.
+    let dims = 7;
+    let components: Vec<Vec<f64>> = (0..dims)
+        .map(|row| {
+            (0..dims)
+                .map(|column| if row == column { 1.0 } else { 0.0 })
+                .collect()
+        })
+        .collect();
+    let model = SerializedModel {
+        feature_extractor: SerializedFeatureExtractor {
+            feature_types: vec![FeatureId::TorsoInvariant.as_str().into()],
+            normalization_mode: NormalizationMode::None,
+            dim_reduction_config: MlReductionConfig {
+                method: MlReductionMethod::Pca,
+                components: dims,
+            },
+            concatenated_dimensions: dims,
+            normalization_mean: None,
+            normalization_std: None,
+            dim_reduction_transformer: Some(DimReductionTransformer::Pca(SerializedPca {
+                components,
+                mean: vec![0.0; dims],
+                n_components: dims,
+                n_features: dims,
+                explained_variance: Some(vec![0.4, 0.2, 0.15, 0.1, 0.08, 0.05, 0.02]),
+            })),
+        },
+        classifier: SerializedClassifier {
+            classifier_id: "gaussian_nb".into(),
+            state: SerializedClassifierState::GaussianNb(SerializedGaussianNb {
+                class_means: [vec![0.0; dims], vec![1.0; dims]],
+                class_variances: [vec![1.0; dims], vec![1.0; dims]],
+                class_priors: [0.5, 0.5],
+                epsilon: 1e-9,
+            }),
+        },
+        trained_at: 1_700_000_000_000.0,
+        version: 1.0,
+    };
+
+    let bytes =
+        encode_model(&model, ModelRole::Posture, 1, [1; 32], None).expect("encode clamped PCA SLMD");
+    let (decoded, _envelope) = decode_model(&bytes).expect("decode clamped PCA SLMD");
+    assert_eq!(
+        decoded.feature_extractor.dim_reduction_config.components,
+        dims
+    );
+    assert_eq!(decoded.feature_extractor.concatenated_dimensions, dims);
+    match decoded.feature_extractor.dim_reduction_transformer {
+        Some(DimReductionTransformer::Pca(state)) => {
+            assert_eq!(state.n_components, dims);
+            assert_eq!(state.n_features, dims);
+        }
+        other => panic!("expected a PCA transformer, got {other:?}"),
+    }
 }
 
 fn settings(

@@ -189,7 +189,7 @@ export type ExpandedBbox = {
 	expanded: BoundingBox,
 };
 
-export type FeatureId = "backbone_features" | "backbone_features_max" | "backbone_features_std" | "gau_features" | "gau_features_max" | "gau_features_std" | "rtmdet_extracted" | "rtmdet_engineered" | "engineered_features" | "joint_2d" | "joint_3d" | "joint_4d" | "posture_raw" | "keypoint_scores" | "raw_keypoints" | "posture_geometry";
+export type FeatureId = "backbone_features" | "backbone_features_max" | "backbone_features_std" | "gau_features" | "gau_features_max" | "gau_features_std" | "rtmdet_extracted" | "rtmdet_engineered" | "engineered_features" | "joint_2d" | "joint_3d" | "joint_4d" | "posture_raw" | "keypoint_scores" | "raw_keypoints" | "posture_geometry" | "torso_invariant";
 
 export type FeatureMetadata = FeatureMetadata_Serialize | FeatureMetadata_Deserialize;
 

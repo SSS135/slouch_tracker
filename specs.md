@@ -94,7 +94,7 @@ Trained models are serialized as **model container v1** (`src-tauri/model-format
 - Metadata and parameter schemas: `src-tauri/crates/slouch-domain/src/classifier.rs` (`ClassifierId`, `ClassifierMetadata`)
 - The Svelte UI auto-generates parameter controls from `get_classifier_registry` — no frontend changes needed for new parameters.
 
-### Feature Types (16, registry-driven)
+### Feature Types (17, registry-driven)
 
 Defined in `src-tauri/crates/slouch-domain/src/feature.rs`; served via `get_feature_registry`.
 
@@ -109,6 +109,7 @@ Defined in `src-tauri/crates/slouch-domain/src/feature.rs`; served via `get_feat
 - `joint_2d` / `joint_3d` / `joint_4d` — joint histograms (81 / 125 / 625 dims)
 - `posture_raw` — 5 raw geometric features
 - `posture_geometry` — 10 scale/translation-invariant geometric posture features from head and shoulder keypoints
+- `torso_invariant` — 7 scale/translation-invariant torso-anchored features (shoulder-hip axis) separating head flexion from trunk slouch; the only posture feature that uses the hips
 - `keypoint_scores` (17 dims), `raw_keypoints` (34 dims)
 
 ### Normalization & Dimensionality Reduction

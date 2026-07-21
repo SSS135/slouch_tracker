@@ -138,7 +138,7 @@
           <span class="checkbox-description">
             {settings.privacyMode
               ? 'Unavailable in privacy mode - the feed stays obscured.'
-              : 'Displays exactly what the detector sees; updates at detection rate.'}
+              : "Shows the detector's preprocessing live (CLAHE, blur, smoothing). Note: temporal smoothing appears time-compressed at preview rate."}
           </span>
         </span>
       </label>

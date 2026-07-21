@@ -158,7 +158,15 @@
     await datasetOps.invalidateAll();
     const refreshed = await datasetOps.stats.refetch();
     if (refreshed.data?.hasMinimumFrames) {
-      void training.trainAndDeploy({ doCV: false }).catch((cause: unknown) => {
+      // The silent auto-retrain deploys a model in the background. Without
+      // reloading metadata once it lands, hasModel (and the status badge) would
+      // keep reading the pre-train value — showing "No Model Trained" while the
+      // runtime already classifies. onModelDeployed fires only after the
+      // persist-then-publish deploy succeeds (posture-only pairs included).
+      void training.trainAndDeploy({
+        doCV: false,
+        onModelDeployed: () => { void handleTrainingComplete(); },
+      }).catch((cause: unknown) => {
         notification.showError(`Automatic retraining failed: ${cause instanceof Error ? cause.message : String(cause)}`);
       });
     }

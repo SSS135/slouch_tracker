@@ -361,17 +361,32 @@ fn initialize_inference_state(state: &AppState) -> Result<(), ApiError> {
         ));
     }
 
-    let pair = state
-        .storage
-        .load_active_model_pair()
-        .map_err(map_storage_read)?;
-    if let Some((posture, presence)) = pair {
-        let load_result = load_runtime_pair(state, posture.as_ref(), presence.as_ref());
-        if let Err(error) = load_result {
+    // A corrupt or incompatible active model must never take the whole app down
+    // at startup. Native detection (RTMDet/RTMPose) is already initialized above;
+    // if the trained classifier pair cannot be loaded or published, surface it in
+    // the log and continue with no active classifier so the user can retrain,
+    // rather than aborting the setup hook (which crash-loops the application).
+    match state.storage.load_active_model_pair() {
+        Ok(Some((posture, presence))) => {
+            if let Err(error) = load_runtime_pair(state, posture.as_ref(), presence.as_ref()) {
+                log::error!(
+                    target: "inference",
+                    "active model could not be published to the inference runtime; continuing with no trained model (retrain to restore): {error}"
+                );
+                let _ = state.inference.send(
+                    slouch_domain::ported::messages::schemas::InferenceWorkerMessage::UnloadClassifier,
+                );
+            }
+        }
+        Ok(None) => {}
+        Err(error) => {
+            log::error!(
+                target: "inference",
+                "active model could not be loaded from storage; continuing with no trained model (retrain to restore): {error}"
+            );
             let _ = state.inference.send(
                 slouch_domain::ported::messages::schemas::InferenceWorkerMessage::UnloadClassifier,
             );
-            return Err(error);
         }
     }
     state.inference_ready.store(true, Ordering::Release);
@@ -1768,5 +1783,60 @@ mod tests {
         assert!(ensure_quiescent_mutation(false, false, "mutation").is_ok());
         assert!(ensure_quiescent_mutation(true, false, "mutation").is_err());
         assert!(ensure_quiescent_mutation(false, true, "mutation").is_err());
+    }
+
+    #[test]
+    fn storage_model_to_wire_accepts_integral_random_projection_seed() {
+        use slouch_ml::ported::random_projection::RandomProjectionState;
+        use slouch_ml::ported::types::{
+            DimReductionTransformer, DimensionalityReductionConfig, DimensionalityReductionMethod,
+            NormalizationMode, SerializedClassifier, SerializedClassifierState,
+            SerializedFeatureExtractor, SerializedModel, SerializedSvm,
+        };
+
+        // Reproduces the crash-loop bridge: a stored model whose random-projection
+        // seed reconstructs as `42.0` (f64) must cross into the wire schema, whose
+        // seed field is a `u64`. Before the fix this returned an Internal error
+        // ("invalid type: floating point `42.0`, expected u64").
+        let model = SerializedModel {
+            feature_extractor: SerializedFeatureExtractor {
+                feature_types: vec!["gau_features".into()],
+                normalization_mode: NormalizationMode::None,
+                dim_reduction_config: DimensionalityReductionConfig {
+                    method: DimensionalityReductionMethod::RandomProjection,
+                    components: 2,
+                },
+                concatenated_dimensions: 3,
+                normalization_mean: None,
+                normalization_std: None,
+                dim_reduction_transformer: Some(DimReductionTransformer::RandomProjection(
+                    RandomProjectionState {
+                        projection_matrix: vec![vec![0.1, 0.2, 0.3], vec![0.4, 0.5, 0.6]],
+                        n_components: 2,
+                        n_features: 3,
+                        seed: 42.0,
+                    },
+                )),
+            },
+            classifier: SerializedClassifier {
+                classifier_id: "svm".into(),
+                state: SerializedClassifierState::Svm(SerializedSvm {
+                    weights: vec![0.1, 0.2],
+                    bias: 0.0,
+                    class_weights: [1.0, 1.0],
+                }),
+            },
+            trained_at: 1_700_000_000_000.0,
+            version: 1.0,
+        };
+
+        let wire = super::storage_model_to_wire(&model)
+            .expect("bridge must accept an integral random-projection seed");
+        match wire.feature_extractor.dim_reduction_transformer {
+            Some(slouch_domain::ported::messages::schemas::DimensionalityReductionTransformer::RandomProjection(state)) => {
+                assert_eq!(state.seed, 42);
+            }
+            other => panic!("expected a random-projection transformer, got {other:?}"),
+        }
     }
 }

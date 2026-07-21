@@ -607,14 +607,28 @@ where
         };
         model.trained_at = self.clock.now_millis();
         model.version = MODEL_VERSION;
+        let mut warnings = vec![match &metrics {
+            Some(_) => format!("Using {cv_folds}-fold CV ({} samples)", frames.len()),
+            None => "CV skipped - not enough frames for a purged time-ordered holdout. Metrics unavailable; collect more frames spread over time.".to_owned(),
+        }];
+        // Surface a soft degradation when PCA could not honor the requested component
+        // count. The fitted extractor records the EFFECTIVE count it clamped to; compare
+        // it against the requested count from settings so the user sees why their model
+        // has fewer dimensions than they asked for instead of a hard training failure.
+        if settings.dim_reduction_config.method == DimensionalityReductionMethod::Pca {
+            if let Some(warning) = pca_component_clamp_warning(
+                settings.dim_reduction_config.components,
+                model.feature_extractor.dim_reduction_config.components,
+                model.feature_extractor.concatenated_dimensions,
+            ) {
+                warnings.push(warning);
+            }
+        }
         let result = TrainingResult {
             success: true,
             metrics: metrics.clone().unwrap_or_else(empty_metrics),
             dim_reduction_method: settings.dim_reduction_config.method,
-            warnings: vec![match metrics {
-                Some(_) => format!("Using {cv_folds}-fold CV ({} samples)", frames.len()),
-                None => "CV skipped - not enough frames for a purged time-ordered holdout. Metrics unavailable; collect more frames spread over time.".into(),
-            }],
+            warnings,
             errors: Vec::new(),
         };
         self.backend.release_training_buffers();
@@ -780,6 +794,29 @@ fn has_minimum_per_class(first: usize, second: usize) -> bool {
     first >= MIN_FRAMES_PER_CLASS && second >= MIN_FRAMES_PER_CLASS
 }
 
+/// Builds the user-facing warning when PCA reduced the requested component count to
+/// the effective rank the data supported. PCA fits at most `min(requested, fit_rows
+/// - 1, n_features)` components; when the result equals `n_features` the selected
+/// features were too low-dimensional, otherwise the fitted sample count was the
+/// limit. Returns `None` when the request was honored in full.
+fn pca_component_clamp_warning(
+    requested: usize,
+    effective: usize,
+    n_features: usize,
+) -> Option<String> {
+    if effective >= requested {
+        return None;
+    }
+    let reason = if effective >= n_features {
+        format!("selected features have only {n_features} dimensions")
+    } else {
+        "limited by dataset size".to_owned()
+    };
+    Some(format!(
+        "PCA components reduced {requested}\u{2192}{effective} ({reason})"
+    ))
+}
+
 fn error_response(error: impl Into<String>) -> TrainingWorkerResponse {
     TrainingWorkerResponse::Error {
         error: error.into(),
@@ -795,6 +832,27 @@ mod tests {
     fn posture_requires_good_and_bad() {
         assert!(!has_minimum_per_class(0, 1));
         assert!(has_minimum_per_class(1, 1));
+    }
+
+    #[test]
+    fn pca_clamp_warning_distinguishes_dims_and_samples_limits() {
+        // Requested honored in full: no warning.
+        assert_eq!(pca_component_clamp_warning(7, 7, 7), None);
+        assert_eq!(pca_component_clamp_warning(5, 16, 256), None);
+
+        // Feature-dimension limited: effective equals the concatenated feature width
+        // (the user's torso_invariant + pca 30 case: 7-dim selection caps rank at 7).
+        assert_eq!(
+            pca_component_clamp_warning(30, 7, 7).as_deref(),
+            Some("PCA components reduced 30\u{2192}7 (selected features have only 7 dimensions)")
+        );
+
+        // Sample limited: effective is below the feature width, so the fitted row
+        // count (rows - 1) was the binding constraint.
+        assert_eq!(
+            pca_component_clamp_warning(50, 9, 256).as_deref(),
+            Some("PCA components reduced 50\u{2192}9 (limited by dataset size)")
+        );
     }
 
     #[test]

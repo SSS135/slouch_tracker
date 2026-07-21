@@ -51,10 +51,12 @@ pub enum FeatureTypeSchema {
     RawKeypoints,
     #[serde(rename = "posture_geometry")]
     PostureGeometry,
+    #[serde(rename = "torso_invariant")]
+    TorsoInvariant,
 }
 
 impl FeatureTypeSchema {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::BackboneFeatures,
         Self::BackboneFeaturesMax,
         Self::BackboneFeaturesStd,
@@ -71,6 +73,7 @@ impl FeatureTypeSchema {
         Self::KeypointScores,
         Self::RawKeypoints,
         Self::PostureGeometry,
+        Self::TorsoInvariant,
     ];
 }
 

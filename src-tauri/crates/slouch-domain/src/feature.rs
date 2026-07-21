@@ -38,10 +38,12 @@ pub enum FeatureId {
     RawKeypoints,
     #[serde(rename = "posture_geometry")]
     PostureGeometry,
+    #[serde(rename = "torso_invariant")]
+    TorsoInvariant,
 }
 
 impl FeatureId {
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::BackboneFeatures,
         Self::BackboneFeaturesMax,
         Self::BackboneFeaturesStd,
@@ -58,6 +60,7 @@ impl FeatureId {
         Self::KeypointScores,
         Self::RawKeypoints,
         Self::PostureGeometry,
+        Self::TorsoInvariant,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -78,6 +81,7 @@ impl FeatureId {
             Self::KeypointScores => "keypoint_scores",
             Self::RawKeypoints => "raw_keypoints",
             Self::PostureGeometry => "posture_geometry",
+            Self::TorsoInvariant => "torso_invariant",
         }
     }
 
@@ -99,6 +103,7 @@ impl FeatureId {
       Self::KeypointScores => FeatureMetadata::computed(self, "Keypoint Scores", "Confidence scores for all 17 keypoints (17 dims)", 17, None, Some(false)),
       Self::RawKeypoints => FeatureMetadata::computed(self, "Raw Keypoints", "Raw x,y coordinates for all 17 keypoints (34 dims)", 34, Some(ModelCategory::Posture), Some(false)),
       Self::PostureGeometry => FeatureMetadata::computed(self, "Posture Geometry (invariant)", "10 scale/translation-invariant geometric posture features from head and shoulder keypoints", 10, Some(ModelCategory::Posture), Some(false)),
+      Self::TorsoInvariant => FeatureMetadata::computed(self, "Torso-Invariant Geometry", "7 scale/translation-invariant torso-anchored features separating head flexion from trunk slouch (7 dims)", 7, Some(ModelCategory::Posture), Some(false)),
     }
     }
 }
@@ -199,6 +204,6 @@ impl FeatureMetadata {
     }
 }
 
-pub fn feature_registry() -> [FeatureMetadata; 16] {
+pub fn feature_registry() -> [FeatureMetadata; 17] {
     FeatureId::ALL.map(FeatureId::metadata)
 }

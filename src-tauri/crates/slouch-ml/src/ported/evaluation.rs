@@ -302,7 +302,10 @@ where
                     );
                     return Ok(None);
                 }
-                eprintln!("[CV] Created {} shuffled stratified folds", stratified.len());
+                eprintln!(
+                    "[CV] Created {} shuffled stratified folds",
+                    stratified.len()
+                );
                 (stratified, CvType::ShuffledStratified)
             } else {
                 eprintln!(
