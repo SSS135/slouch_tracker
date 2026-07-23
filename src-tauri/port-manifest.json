@@ -5,7 +5,7 @@
   "verificationInputs": {
     ".plans/rust-typescript-refactor-plan.md": "37b5b7de11a181baffeea07a7cff409de97e7248ac996a3249f188778a358826",
     "PORTING.md": "a444c12d89218bfa70673b16b4bea4e5aaa4bccbfb579256af0dece71d38e545",
-    "package-lock.json": "aa81d40f7d9056eb283d8298017f705c4cb810ae3a1775545689045f42851bdf",
+    "package-lock.json": "e8fda87ac074f9b5ea8d5f3f93a5949535d2a973b96f4091be1ca8616e865202",
     "src-tauri/Cargo.lock": "0c2d0f199dd9ba33541f73730906bf5c71ea40e9c0d46e36068e17fc79291d34",
     "src-tauri/tauri.conf.json": "4785e096882e364ea601aca49d151d981d50031f09acfb1332ee6948689752a5",
     "src-tauri/resource-lock.json": "9100b98eb7845da5068cf0ec95fc3dc6786ade84c934eacb2d9f00c6c069a563",
