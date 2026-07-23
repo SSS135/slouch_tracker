@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="380" viewBox="0 0 1200 380" role="img" aria-labelledby="title desc">
+  <title id="title">Slouch Tracker — on-device posture detection for Windows</title>
+  <desc id="desc">Dark hero banner. Left: the name Slouch Tracker and its promise — it watches your webcam and warns you when you slouch, and nothing leaves your machine. Built with Tauri 2, Rust, ONNX Runtime, DirectML and SQLite. Right: two camera-viewport cards showing the app's skeleton avatar — an upright figure labeled Good in green, and a slumped forward-headed figure labeled Slouching in red.</desc>
+
+  <defs>
+    <!-- Subtle lightening toward the figure, suggesting the blurred camera feed -->
+    <radialGradient id="feed-glow" cx="0.5" cy="0.58" r="0.8">
+      <stop offset="0" stop-color="#222b35"/>
+      <stop offset="1" stop-color="#1a2129"/>
+    </radialGradient>
+  </defs>
+
+  <g id="bg">
+    <rect width="1200" height="380" rx="24" fill="#10151b"/>
+  </g>
+
+  <g id="title-block">
+    <text id="eyebrow" x="64" y="98" font-family='ui-monospace, "Cascadia Mono", SFMono-Regular, Menlo, monospace' font-size="19" letter-spacing="3" fill="#8b96a1">ON-DEVICE POSTURE DETECTION · WINDOWS</text>
+    <text id="project-name" x="64" y="178" font-family='"Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif' font-size="78" font-weight="700" fill="#f2f5f8">Slouch Tracker</text>
+    <text id="promise-line-1" x="64" y="224" font-family='"Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif' font-size="27" fill="#c3ccd5">Watches your webcam and warns you when</text>
+    <text id="promise-line-2" x="64" y="264" font-family='"Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif' font-size="27" fill="#c3ccd5">you slouch. Nothing leaves your machine.</text>
+    <text id="metadata-row" x="64" y="308" font-family='ui-monospace, "Cascadia Mono", SFMono-Regular, Menlo, monospace' font-size="18" fill="#8b96a1">Tauri 2 · Rust · ONNX Runtime · DirectML · SQLite</text>
+  </g>
+
+  <!-- Upright figure, privacy-mode camera card -->
+  <g id="card-good" transform="translate(690 64)">
+    <rect width="212" height="252" rx="18" fill="url(#feed-glow)" stroke="#2a333d" stroke-width="1.5"/>
+    <line id="desk-good" x1="16" y1="188" x2="104" y2="188" stroke="#2a333d" stroke-width="4" stroke-linecap="round"/>
+    <g id="figure-good">
+      <!-- spine, neck, upper arm, forearm: white outline pass then blue core pass -->
+      <path d="M132 210 L127 124 M127 124 L124 86 M127 124 L94 158 M94 158 L48 168" fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round"/>
+      <path d="M132 210 L127 124 M127 124 L124 86 M127 124 L94 158 M94 158 L48 168" fill="none" stroke="#4da3ee" stroke-width="15" stroke-linecap="round"/>
+      <circle id="head-good" cx="123" cy="78" r="30" fill="#4da3ee" stroke="#ffffff" stroke-width="6"/>
+      <circle id="eye-good" cx="100" cy="74" r="6" fill="#142028"/>
+      <circle id="ear-good" cx="128" cy="78" r="5" fill="#f5a83c" stroke="#ffffff" stroke-width="2"/>
+      <g id="keypoints-good" fill="#f5a83c" stroke="#ffffff" stroke-width="2">
+        <circle cx="127" cy="124" r="5"/><!-- shoulder -->
+        <circle cx="94" cy="158" r="5"/><!-- elbow -->
+        <circle cx="132" cy="210" r="5"/><!-- hip -->
+      </g>
+    </g>
+    <g id="chip-good">
+      <rect x="16" y="16" width="70" height="30" rx="8" fill="#3dbb6e"/>
+      <text x="51" y="38" text-anchor="middle" font-family='"Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif' font-size="20" font-weight="700" fill="#ffffff">Good</text>
+    </g>
+  </g>
+
+  <!-- Slumped figure: spine bowed ~35°, head displaced forward and down -->
+  <g id="card-bad" transform="translate(924 64)">
+    <rect width="212" height="252" rx="18" fill="url(#feed-glow)" stroke="#2a333d" stroke-width="1.5"/>
+    <line id="desk-bad" x1="16" y1="188" x2="104" y2="188" stroke="#2a333d" stroke-width="4" stroke-linecap="round"/>
+    <g id="figure-bad">
+      <path d="M132 210 Q146 164 88 148 M88 148 L62 130 M88 148 L72 172 M72 172 L32 166" fill="none" stroke="#ffffff" stroke-width="24" stroke-linecap="round"/>
+      <path d="M132 210 Q146 164 88 148 M88 148 L62 130 M88 148 L72 172 M72 172 L32 166" fill="none" stroke="#4da3ee" stroke-width="15" stroke-linecap="round"/>
+      <circle id="head-bad" cx="54" cy="122" r="30" fill="#4da3ee" stroke="#ffffff" stroke-width="6"/>
+      <circle id="eye-bad" cx="33" cy="126" r="6" fill="#142028"/>
+      <circle id="ear-bad" cx="58" cy="118" r="5" fill="#f5a83c" stroke="#ffffff" stroke-width="2"/>
+      <g id="keypoints-bad" fill="#f5a83c" stroke="#ffffff" stroke-width="2">
+        <circle cx="88" cy="148" r="5"/><!-- shoulder -->
+        <circle cx="72" cy="172" r="5"/><!-- elbow -->
+        <circle cx="132" cy="210" r="5"/><!-- hip -->
+      </g>
+    </g>
+    <g id="chip-bad">
+      <rect x="16" y="16" width="128" height="30" rx="8" fill="#f25c54"/>
+      <text x="80" y="38" text-anchor="middle" font-family='"Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif' font-size="20" font-weight="700" fill="#ffffff">Slouching</text>
+    </g>
+  </g>
+</svg>

@@ -1,34 +1,46 @@
-# Slouch Tracker
+<p align="center">
+  <img src="./assets/readme/hero.svg" width="100%" alt="Slouch Tracker — on-device webcam posture detection for Windows. Upright posture is detected as good; a slouched, head-forward posture is detected as slouching.">
+</p>
 
-**Privacy-first webcam posture tracker for Windows. All detection and model training run on-device; nothing ever leaves your machine.**
+<p align="center">
+  <a href="https://github.com/SSS135/slouch_tracker/releases"><img src="https://img.shields.io/github/v/release/SSS135/slouch_tracker" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT">
+  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6" alt="Platform: Windows 10/11">
+  <img src="https://img.shields.io/badge/Tauri-2-24C8DB" alt="Tauri 2">
+  <img src="https://img.shields.io/badge/Rust-1.88%2B-DEA584" alt="Rust 1.88+">
+  <img src="https://img.shields.io/badge/Svelte-5-FF3E00" alt="Svelte 5">
+</p>
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6)
-![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB)
-![Rust](https://img.shields.io/badge/Rust-1.88%2B-DEA584)
-![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00)
+**Slouch Tracker watches your webcam, estimates your body pose in real time, and warns you when you start slouching.** Everything — camera capture, ML inference, model training, and storage — runs locally in native Rust; there are no cloud services, no accounts, and no telemetry. The only network access the app ever makes is a one-time ~245 MB pose-model download on first launch (see [About the installer](#about-the-installer)); after that it runs fully offline.
 
-Slouch Tracker watches your webcam, estimates your body pose in real time, and warns you when you start slouching. It runs entirely as a native Windows desktop app: the camera, ML inference, feature extraction, model training, and storage are all handled locally in Rust. There are no cloud services and no accounts. The app's only network access, ever, is a one-time download of the pose-detection model on first launch (see [About the installer](#about-the-installer)); after that it runs fully offline.
-
-## Features
-
-- Real-time posture detection: RTMDet-nano finds the person, NLF-L estimates 17 keypoints plus 3D depth, and both run on DirectML through native ONNX Runtime (the Rust `ort` crate).
-- Train your own models: collect and label your own frames, then train a personalized classifier in-app. Six classifier types (`mlp`, `knn`, `svm`, `kmeans_prototype`, `gaussian_nb`, `kmeans_logistic`), with parameter controls generated from the classifier registry.
-- Flexible features: 12 selectable feature types (RTMDet features, NLF-L 3D-depth features, geometric and keypoint features), plus normalization (`z_score`/`layer`/`none`) and dimensionality reduction (`pca`/`random_projection`/`none`).
-- In-app data collection: capture frames with the `G` (good), `B` (bad), and `A` (away) keys, or with the global hotkeys `Ctrl+Win+G` / `Ctrl+Win+B` / `Ctrl+Win+A`, which work while the app is unfocused.
-- Cross-validated training: one click, optional k-fold cross-validation with reported metrics, progress streamed live over a Tauri channel.
-- Local SQLite storage for frames, keypoints, feature vectors, thumbnails, settings, and trained models.
-- Dataset export and import as portable `.slouchpack` archives via native file dialogs.
-- Privacy mode: obscures the live preview while detection keeps running.
-- Focus-aware power use: ~30 fps preview when focused, detection at ~1 fps in every mode, and EcoQoS efficiency mode when the window is backgrounded. Typical CPU usage is 1 to 2%.
-
-## Screenshots
+## See it working
 
 Privacy mode with the live skeleton avatar. Detection keeps running while the camera feed stays obscured:
 
 | Good posture | Bad posture |
 |---|---|
-| ![Good posture detected](docs/screenshots/good-posture.png) | ![Bad posture detected](docs/screenshots/bad-posture.png) |
+| ![Good posture detected: upright skeleton avatar over the obscured camera feed](docs/screenshots/good-posture.png) | ![Bad posture detected: slouched skeleton avatar over the obscured camera feed](docs/screenshots/bad-posture.png) |
+
+## How it works
+
+<p align="center">
+  <img src="./assets/readme/pipeline.svg" width="100%" alt="Detection pipeline: webcam frames go to RTMDet-nano person detection on CPU, then NLF-L pose estimation on DirectML producing 17 keypoints plus 3D depth, then your own in-app-trained classifier decides good, bad, or away — about 1 frame per second, entirely on this machine.">
+</p>
+
+RTMDet-nano finds the person on the CPU; NLF-L then estimates 17 keypoints plus 3D depth on the GPU through the DirectML execution provider, both running on native ONNX Runtime (the Rust `ort` crate). A classifier you train in-app on your own labeled frames makes the final call: good, bad, or away. Detection runs at ~1 fps in every window mode; the preview renders at ~30 fps while the window is focused. Typical CPU usage is 1 to 2%.
+
+Slouch Tracker is a Tauri 2 app: a Rust backend workspace (the `app` crate plus `slouch-domain`, `slouch-ml`, `slouch-vision`, `slouch-store`) with a deliberately thin Svelte 5 UI. The camera is owned natively (nokhwa, MJPEG) and previewed in the webview through a custom `slouchcam://` URI scheme; the frontend talks to Rust through generated [Specta](https://github.com/specta-rs/specta) bindings, with three raw-byte MessagePack commands reserved for bulk image data. See [specs.md](specs.md) for the full architecture.
+
+## Features
+
+- Train your own models: collect and label your own frames, then train a personalized classifier in-app — with optional k-fold cross-validation, reported metrics, and progress streamed live.
+- Six classifier types (`mlp`, `knn`, `svm`, `kmeans_prototype`, `gaussian_nb`, `kmeans_logistic`), with parameter controls generated from the classifier registry.
+- 12 selectable feature types (RTMDet features, NLF-L 3D-depth features, geometric and keypoint features), plus normalization (`z_score`/`layer`/`none`) and dimensionality reduction (`pca`/`random_projection`/`none`).
+- Fast data collection: capture frames with the `G` (good), `B` (bad), and `A` (away) keys, or with the global hotkeys `Ctrl+Win+G` / `Ctrl+Win+B` / `Ctrl+Win+A`, which work while the app is unfocused.
+- Local SQLite storage for frames, keypoints, feature vectors, thumbnails, settings, and trained models.
+- Dataset export and import as portable `.slouchpack` archives via native file dialogs.
+- Privacy mode: obscures the live preview while detection keeps running.
+- Focus-aware power behavior: EcoQoS efficiency mode when the window is backgrounded, with detection continuing at the rates above.
 
 ## Installation
 
@@ -74,6 +86,37 @@ If a machine will never have internet access, place the pose model manually befo
    - If the file is present and the hash matches, the app starts normally and makes no network requests at all.
    - If the file is present but corrupt (hash mismatch), the app reports that the pose model is invalid and offers to re-download it; replace it with a correct copy to stay fully offline.
 
+## Usage
+
+The app is a single window: a live camera viewport with overlay controls, plus a slide-in panel with Settings, Collect, and Training tabs.
+
+Capture keys (while the app is focused):
+
+| Key | Action |
+|-----|--------|
+| `G` | Capture a *good posture* frame |
+| `B` | Capture a *bad posture* frame |
+| `A` | Capture an *away* frame |
+| `C` | Clear sampled frames |
+| `U` | Undo last dataset change |
+
+Global hotkeys (work while the app is unfocused): `Ctrl+Win+G` / `Ctrl+Win+B` / `Ctrl+Win+A` capture good / bad / away with an audio confirmation beep.
+
+Training workflow:
+
+1. Collect labeled frames for *good*, *bad*, and *away* postures.
+2. Open the Training tab, pick features, classifier, normalization, and reduction, and press **Train**.
+3. Review the cross-validation metrics. The trained model is deployed automatically for live detection.
+
+The app tracks whether the model needs retraining as you add data, so you can keep refining it as your dataset grows.
+
+## Privacy
+
+- Everything runs locally: detection, feature extraction, and training are native Rust on your own machine, with no telemetry. The only network use, ever, is the one-time pose-model download on first launch (see [About the installer](#about-the-installer)), and even that is avoidable by pre-placing the model (see [Fully offline installation](#fully-offline-installation)).
+- Your data stays on disk: frames, keypoints, feature vectors, thumbnails, settings, and trained models live in a local SQLite database under your user app-data directory.
+- Privacy mode obscures the live preview (blurred) while detection continues, so you can keep tracking without a visible camera feed on screen.
+- Datasets leave the machine only when you export a `.slouchpack` file through a native save dialog.
+
 ## Build from source
 
 ### Prerequisites
@@ -109,41 +152,6 @@ npm run tauri:build:win
 > `call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"`.
 
 > Pose model for dev builds: development and release builds do not bundle the NLF-L pose model. On first launch the app downloads it automatically, or you can pre-place `nlf_l_crop_fp16.onnx` (SHA-256 `33bd300cd5a65681a5d671debd82a63f842c7420443cd9bb7424ca7aef82cca8`) at either `src-tauri\resources\models\nlf_l_crop_fp16.onnx` or the app-data path `%APPDATA%\com.slouchtracker.main\models\nlf_l_crop_fp16.onnx`. See [Fully offline installation](#fully-offline-installation).
-
-## Usage
-
-The app is a single window: a live camera viewport with overlay controls, plus a slide-in panel with Settings, Collect, and Training tabs.
-
-Capture keys (while the app is focused):
-
-| Key | Action |
-|-----|--------|
-| `G` | Capture a *good posture* frame |
-| `B` | Capture a *bad posture* frame |
-| `A` | Capture an *away* frame |
-| `C` | Clear sampled frames |
-| `U` | Undo last dataset change |
-
-Global hotkeys (work while the app is unfocused): `Ctrl+Win+G` / `Ctrl+Win+B` / `Ctrl+Win+A` capture good / bad / away with an audio confirmation beep.
-
-Training workflow:
-
-1. Collect labeled frames for *good*, *bad*, and *away* postures.
-2. Open the Training tab, pick features, classifier, normalization, and reduction, and press **Train**.
-3. Review the cross-validation metrics. The trained model is deployed automatically for live detection.
-
-The app tracks whether the model needs retraining as you add data, so you can keep refining it as your dataset grows.
-
-## Privacy
-
-- Everything runs locally. Detection, feature extraction, and training are native Rust on your own machine. The app's only network use, ever, is the one-time download of the pose-detection model on first launch (see [About the installer](#about-the-installer)), and you can avoid even that by pre-placing the model (see [Fully offline installation](#fully-offline-installation)). There is no telemetry.
-- Your data stays on disk. Frames, keypoints, feature vectors, thumbnails, settings, and trained models live in a local SQLite database under your user app-data directory.
-- Privacy mode obscures the live preview (blurred) while detection continues, so you can keep tracking without a visible camera feed on screen.
-- Datasets leave the machine only when you export a `.slouchpack` file through a native save dialog.
-
-## Architecture
-
-Slouch Tracker is a Tauri 2 app with a Rust backend workspace and a deliberately thin Svelte 5 UI. The `src-tauri/` workspace splits into the `app` crate plus `slouch-domain` (DTOs, validation, registries), `slouch-ml` (classifiers, feature math, cross-validation, training), `slouch-vision` (ONNX sessions, preprocessing, the RTMDet + NLF-L inference worker), and `slouch-store` (SQLite storage, model container format, dataset archives). The camera is captured natively (nokhwa, MJPEG) and previewed in the webview through a custom `slouchcam://` URI scheme; detection runs on a dedicated Rust dispatcher thread. The frontend talks to Rust through generated [Specta](https://github.com/specta-rs/specta) bindings, with three raw-byte MessagePack commands reserved for moving bulk image data. See [specs.md](specs.md) for the full architecture.
 
 ## Development
 

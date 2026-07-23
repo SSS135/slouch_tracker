@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-labelledby="title desc">
+  <title id="title">Slouch Tracker detection pipeline</title>
+  <desc id="desc">Four-stage diagram of the on-device detection pipeline running at about one frame per second: webcam MJPEG frames flow into RTMDet-nano person detection on the CPU, then into the NLF-L pose model on DirectML producing 17 keypoints and 3D depth, then into the user's own classifier trained in-app on good, bad, and away labels, which outputs a posture status and alert.</desc>
+
+  <g id="bg">
+    <rect width="1200" height="300" rx="24" fill="#10151b"/>
+  </g>
+
+  <g id="header">
+    <text x="64" y="78" font-family='ui-monospace, "Cascadia Mono", SFMono-Regular, Menlo, monospace' font-size="18" fill="#8b96a1">DETECTION PIPELINE — ~1 FPS, ENTIRELY ON THIS MACHINE</text>
+  </g>
+
+  <g id="node-webcam">
+    <rect x="64" y="107" width="236" height="118" rx="14" fill="#1a2129" stroke="#2a333d" stroke-width="1.5"/>
+    <text x="182" y="158" text-anchor="middle" font-family='"Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif' font-size="24" font-weight="700" fill="#f2f5f8">Webcam</text>
+    <text x="182" y="188" text-anchor="middle" font-family='ui-monospace, "Cascadia Mono", SFMono-Regular, Menlo, monospace' font-size="18" fill="#8b96a1">MJPEG frames</text>
+  </g>
+
+  <g id="node-rtmdet">
+    <rect x="342" y="107" width="236" height="118" rx="14" fill="#1a2129" stroke="#2a333d" stroke-width="1.5"/>
+    <text x="460" y="146" text-anchor="middle" font-family='"Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif' font-size="24" font-weight="700" fill="#f2f5f8">RTMDet-nano</text>
+    <text x="460" y="176" text-anchor="middle" font-family='ui-monospace, "Cascadia Mono", SFMono-Regular, Menlo, monospace' font-size="18" fill="#8b96a1">finds the person</text>
+    <text x="460" y="200" text-anchor="middle" font-family='ui-monospace, "Cascadia Mono", SFMono-Regular, Menlo, monospace' font-size="18" fill="#8b96a1">CPU</text>
+  </g>
+
+  <g id="node-nlf">
+    <rect x="621" y="107" width="236" height="118" rx="14" fill="#1a2129" stroke="#2a333d" stroke-width="1.5"/>
+    <text x="739" y="146" text-anchor="middle" font-family='"Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif' font-size="24" font-weight="700" fill="#f2f5f8">NLF-L</text>
+    <text x="739" y="176" text-anchor="middle" font-family='ui-monospace, "Cascadia Mono", SFMono-Regular, Menlo, monospace' font-size="18" fill="#8b96a1">17 keypoints</text>
+    <text x="739" y="200" text-anchor="middle" font-family='ui-monospace, "Cascadia Mono", SFMono-Regular, Menlo, monospace' font-size="18" fill="#8b96a1">3D depth · DirectML</text>
+    <!-- micro-motif: three keypoints on two limb segments -->
+    <g id="keypoint-motif">
+      <path d="M800 140 L817 132 L834 142" fill="none" stroke="#4da3ee" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="800" cy="140" r="3.5" fill="#f5a83c" stroke="#ffffff" stroke-width="1.5"/>
+      <circle cx="817" cy="132" r="3.5" fill="#f5a83c" stroke="#ffffff" stroke-width="1.5"/>
+      <circle cx="834" cy="142" r="3.5" fill="#f5a83c" stroke="#ffffff" stroke-width="1.5"/>
+    </g>
+  </g>
+
+  <!-- accent stroke: this node is the user's own model -->
+  <g id="node-classifier">
+    <rect x="900" y="107" width="236" height="118" rx="14" fill="#1a2129" stroke="#4da3ee" stroke-width="2"/>
+    <text x="1018" y="146" text-anchor="middle" font-family='"Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif' font-size="24" font-weight="700" fill="#f2f5f8">Your classifier</text>
+    <text x="1018" y="176" text-anchor="middle" font-family='ui-monospace, "Cascadia Mono", SFMono-Regular, Menlo, monospace' font-size="18" fill="#8b96a1">trained in-app</text>
+    <text x="1018" y="200" text-anchor="middle" font-family='ui-monospace, "Cascadia Mono", SFMono-Regular, Menlo, monospace' font-size="18" fill="#8b96a1">good · bad · away</text>
+  </g>
+
+  <g id="arrows" stroke="#8b96a1" stroke-width="3">
+    <line x1="308" y1="166" x2="325" y2="166"/>
+    <polygon points="325,160 325,172 334,166" fill="#8b96a1" stroke="none"/>
+    <line x1="586" y1="166" x2="604" y2="166"/>
+    <polygon points="604,160 604,172 613,166" fill="#8b96a1" stroke="none"/>
+    <line x1="865" y1="166" x2="883" y2="166"/>
+    <polygon points="883,160 883,172 892,166" fill="#8b96a1" stroke="none"/>
+  </g>
+
+  <g id="output-cue">
+    <text x="1136" y="244" text-anchor="end" font-family='ui-monospace, "Cascadia Mono", SFMono-Regular, Menlo, monospace' font-size="18" fill="#8b96a1">→ status + alert</text>
+  </g>
+</svg>
