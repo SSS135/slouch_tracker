@@ -439,13 +439,6 @@
         onFramePreviewClear={onFramePreviewClear}
         onFrameDrag={handleFrameDrag}
       />
-      {#if datasetOps.pageTotal > datasetOps.pageSize}
-        <nav class="page-controls" aria-label="Dataset pages">
-          <button type="button" onclick={datasetOps.previousPage} disabled={datasetOps.pageOffset === 0}>Previous page</button>
-          <span>Frames {datasetOps.pageOffset + 1}–{Math.min(datasetOps.pageOffset + displayFrames.length, datasetOps.pageTotal)} of {datasetOps.pageTotal}</span>
-          <button type="button" onclick={datasetOps.nextPage} disabled={datasetOps.pageOffset + datasetOps.pageSize >= datasetOps.pageTotal}>Next page</button>
-        </nav>
-      {/if}
     {/if}
   </Section>
 </div>
@@ -496,7 +489,6 @@
     gap: var(--mantine-spacing-sm, 8px);
   }
   .button-row { flex-wrap: wrap; margin-bottom: var(--mantine-spacing-md, 16px); }
-  .page-controls { display: flex; align-items: center; justify-content: center; gap: 0.75rem; margin-top: 0.75rem; font-size: 0.8rem; }
   .small-label,
   .small-text { font-size: var(--mantine-font-size-sm, 0.875rem); }
   .extra-small-text { margin: 0; font-size: var(--mantine-font-size-xs, 0.75rem); }

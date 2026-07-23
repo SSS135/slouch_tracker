@@ -357,7 +357,7 @@ fn mlp() -> ClassifierMetadata {
         range(
             "Weight Decay",
             "AdamW weight decay strength (0.01 = moderate, 0.0001 = light)",
-            1.0,
+            0.03732501577957208,
             0.01,
             100.0,
             None,
@@ -369,7 +369,7 @@ fn mlp() -> ClassifierMetadata {
         range(
             "Max Iterations",
             "Training iterations for convergence",
-            100.0,
+            350.0,
             10.0,
             1000.0,
             Some(10.0),

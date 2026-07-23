@@ -95,7 +95,9 @@ fn actual_worker_routes_configuration_initialization_and_processing_logs() {
         &worker.handle_message(InferenceWorkerMessage::Process {
             payload: ProcessPayload {
                 image_data: image(4, 4),
-                request_id: 7
+                request_id: 7,
+                raw_image_data: None,
+                crop_motion: None,
             },
         })[..],
         [WorkerResponse::Error {

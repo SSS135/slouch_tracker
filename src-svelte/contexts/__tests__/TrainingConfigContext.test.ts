@@ -35,6 +35,8 @@ const featureRegistry = [
   feature,
   { ...feature, id: 'keypoint_scores', name: 'Keypoint Scores', modelType: null },
   { ...feature, id: 'nlf_backbone_max', name: 'NLF Backbone Max', modelType: 'posture' },
+  { ...feature, id: 'posture_geometry_3d', name: 'Posture Geometry 3D', modelType: 'posture' },
+  { ...feature, id: 'torso_invariant_3d', name: 'Torso Invariant 3D', modelType: 'posture' },
 ];
 
 const mlp = {
@@ -44,8 +46,8 @@ const mlp = {
   params: {
     hiddenLayers: { type: 'integer', default: 0 },
     hiddenSize: { type: 'integer', default: 64 },
-    weightDecay: { type: 'number', default: 1.0 },
-    maxIterations: { type: 'integer', default: 100 },
+    weightDecay: { type: 'number', default: 0.03732501577957208 },
+    maxIterations: { type: 'integer', default: 350 },
     learningRate: { type: 'number', default: 0.01 },
     useClassWeights: { type: 'boolean', default: false },
     labelSmoothing: { type: 'number', default: 0.05 },
@@ -74,18 +76,18 @@ describe('TrainingConfigContext native integration', () => {
       expect(value?.config.classifierConfig.params).toEqual({
         hiddenLayers: 0,
         hiddenSize: 64,
-        weightDecay: 1.0,
-        maxIterations: 100,
+        weightDecay: 0.03732501577957208,
+        maxIterations: 350,
         learningRate: 0.01,
-        useClassWeights: true,
+        useClassWeights: false,
         labelSmoothing: 0.05,
       });
     });
     expect(value?.config).toMatchObject({
       classifierConfig: { classifierId: 'mlp' },
-      dimReductionConfig: { method: 'pca', components: 30 },
-      postureFeatureTypes: ['nlf_backbone_max'],
-      presenceFeatureTypes: ['rtmdet_engineered', 'keypoint_scores'],
+      dimReductionConfig: { method: 'pca', components: 32 },
+      postureFeatureTypes: ['posture_geometry_3d', 'torso_invariant_3d'],
+      presenceFeatureTypes: ['rtmdet_engineered'],
       normalizationMode: 'z_score',
       cvFolds: 5,
     });
@@ -101,16 +103,16 @@ describe('TrainingConfigContext native integration', () => {
         params: {
           hiddenLayers: 0,
           hiddenSize: 64,
-          weightDecay: 1.0,
-          maxIterations: 100,
+          weightDecay: 0.03732501577957208,
+          maxIterations: 350,
           learningRate: 0.01,
-          useClassWeights: true,
+          useClassWeights: false,
           labelSmoothing: 0.05,
         },
       },
-      dimReductionConfig: { method: 'pca', components: 30 },
-      postureFeatureTypes: ['nlf_backbone_max'],
-      presenceFeatureTypes: ['rtmdet_engineered', 'keypoint_scores'],
+      dimReductionConfig: { method: 'pca', components: 32 },
+      postureFeatureTypes: ['posture_geometry_3d', 'torso_invariant_3d'],
+      presenceFeatureTypes: ['rtmdet_engineered'],
       normalizationMode: 'z_score',
       cvFolds: 7,
       featureTypes: null,

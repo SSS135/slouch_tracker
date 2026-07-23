@@ -8,7 +8,7 @@ import { logger } from '../services/logging/logger';
 export const datasetKeys = {
   all: ['native-dataset'] as const,
   stats: () => ['native-dataset', 'stats'] as const,
-  frames: (offset = 0) => ['native-dataset', 'frames', offset] as const,
+  frames: () => ['native-dataset', 'frames'] as const,
   reservoir: () => ['native-dataset', 'reservoir'] as const,
   retraining: () => ['native-dataset', 'retraining'] as const,
   undo: () => ['native-dataset', 'undo'] as const,
@@ -67,9 +67,9 @@ function frameFromMetadata(metadata: DatasetPage['frames'][number]): PostureFram
 
 export function useDatasetOperations() {
   const queryClient = useQueryClient();
-  const pageSize = 24;
-  let pageOffset = $state(0);
-  let pageTotal = $state(0);
+  // get_dataset_page caps `limit` at 100 (Rust MAX_PAGE_SIZE), so page through in
+  // 100-frame chunks until the whole dataset is loaded and shown on one page.
+  const PAGE_LIMIT = 100;
   onMount(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
@@ -105,14 +105,15 @@ export function useDatasetOperations() {
     retryOnMount: false,
   }));
   const frames = createQuery(() => ({
-    queryKey: datasetKeys.frames(pageOffset),
+    queryKey: datasetKeys.frames(),
     queryFn: async () => {
-      const requestedOffset = pageOffset;
-      const page = await nativeClient.getDatasetPage(requestedOffset, pageSize);
-      pageTotal = page.total;
-      const lastOffset = page.total === 0 ? 0 : Math.floor((page.total - 1) / pageSize) * pageSize;
-      if (requestedOffset > lastOffset && pageOffset === requestedOffset) pageOffset = lastOffset;
-      return page.frames.map(frameFromMetadata);
+      const collected: DatasetPage['frames'] = [];
+      for (;;) {
+        const page = await nativeClient.getDatasetPage(collected.length, PAGE_LIMIT);
+        collected.push(...page.frames);
+        if (page.frames.length === 0 || collected.length >= page.total) break;
+      }
+      return collected.map(frameFromMetadata);
     },
   }));
   const reservoir = createQuery(() => ({
@@ -135,25 +136,25 @@ export function useDatasetOperations() {
   const updateLabel = createMutation(() => ({
     mutationFn: ({ id, label }: { id: string; label: FrameLabel }) => nativeClient.updateFrameLabel(id, label as NativeFrameLabel),
     onMutate: async ({ id, label }) => {
-      const queryKey = datasetKeys.frames(pageOffset);
+      const queryKey = datasetKeys.frames();
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<PostureFrame[]>(queryKey);
       queryClient.setQueryData<PostureFrame[]>(queryKey, previous?.map((frame) => frame.id === id ? { ...frame, label } : frame));
       return { previous, queryKey };
     },
-    onError: (_error, _variables, context) => queryClient.setQueryData(context?.queryKey ?? datasetKeys.frames(pageOffset), context?.previous),
+    onError: (_error, _variables, context) => queryClient.setQueryData(context?.queryKey ?? datasetKeys.frames(), context?.previous),
     onSettled: invalidateAll,
   }));
   const deleteFrame = createMutation(() => ({
     mutationFn: (id: string) => nativeClient.deleteFrame(id),
     onMutate: async (id) => {
-      const queryKey = datasetKeys.frames(pageOffset);
+      const queryKey = datasetKeys.frames();
       await queryClient.cancelQueries({ queryKey });
       const previous = queryClient.getQueryData<PostureFrame[]>(queryKey);
       queryClient.setQueryData<PostureFrame[]>(queryKey, previous?.filter((frame) => frame.id !== id));
       return { previous, queryKey };
     },
-    onError: (_error, _variables, context) => queryClient.setQueryData(context?.queryKey ?? datasetKeys.frames(pageOffset), context?.previous),
+    onError: (_error, _variables, context) => queryClient.setQueryData(context?.queryKey ?? datasetKeys.frames(), context?.previous),
     onSettled: invalidateAll,
   }));
   const undo = createMutation(() => ({ mutationFn: () => nativeClient.undoLastDatasetChange(), onSuccess: invalidateAll }));
@@ -163,16 +164,16 @@ export function useDatasetOperations() {
   }));
   const resetDataset = createMutation(() => ({
     mutationFn: () => nativeClient.resetDataset(),
-    onSuccess: async () => { pageOffset = 0; await invalidateAll(); },
+    onSuccess: invalidateAll,
   }));
   const resetAllData = createMutation(() => ({
     mutationFn: () => nativeClient.resetAllData(),
-    onSuccess: async () => { pageOffset = 0; await invalidateAll(); },
+    onSuccess: invalidateAll,
   }));
   const exportDataset = createMutation(() => ({ mutationFn: () => nativeClient.exportDataset() }));
   const importDataset = createMutation(() => ({
     mutationFn: () => nativeClient.importDataset(),
-    onSuccess: async () => { pageOffset = 0; await invalidateAll(); },
+    onSuccess: invalidateAll,
   }));
 
   return {
@@ -181,11 +182,6 @@ export function useDatasetOperations() {
     reservoir,
     needsRetraining,
     canUndo,
-    get pageOffset() { return pageOffset; },
-    get pageTotal() { return pageTotal; },
-    pageSize,
-    previousPage: () => { pageOffset = Math.max(0, pageOffset - pageSize); },
-    nextPage: () => { if (pageOffset + pageSize < pageTotal) pageOffset += pageSize; },
     updateLabel,
     deleteFrame,
     undo,

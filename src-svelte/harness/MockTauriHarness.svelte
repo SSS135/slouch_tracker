@@ -118,13 +118,13 @@
   async function saveAndReloadSettings(): Promise<void> {
     const camera = await nativeClient.getCameraSettings();
     const ui = await nativeClient.getUiSettings();
-    await nativeClient.saveCameraSettings({ ...camera, cameraWidth: 1280 });
+    await nativeClient.saveCameraSettings({ ...camera, cameraWidth: 1280, tileMotionThreshold: 7.5 });
     await nativeClient.saveUiSettings({ ...ui, alertVolume: 0.75 });
     const [savedCamera, savedUi] = await Promise.all([
       nativeClient.getCameraSettings(),
       nativeClient.getUiSettings(),
     ]);
-    settingsStatus = `${savedCamera.cameraWidth}/${savedUi.alertVolume}`;
+    settingsStatus = `${savedCamera.cameraWidth}/${savedUi.alertVolume}/${savedCamera.tileMotionThreshold}`;
   }
 
   async function resetSettings(): Promise<void> {
@@ -132,7 +132,7 @@
       nativeClient.resetCameraSettings(),
       nativeClient.resetUiSettings(),
     ]);
-    settingsStatus = `${camera.cameraWidth}/${ui.alertVolume}`;
+    settingsStatus = `${camera.cameraWidth}/${ui.alertVolume}/${camera.tileMotionThreshold}`;
   }
 </script>
 

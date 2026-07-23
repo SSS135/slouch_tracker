@@ -138,7 +138,7 @@ test('real app relabels a frame by dragging it onto another section (real Chromi
   await expect(page.getByRole('button', { name: 'Good Frames (0)' })).toBeVisible();
 });
 
-test('real app relabels and deletes through paged metadata with authoritative native undo', async ({ page }) => {
+test('real app relabels and deletes a frame with authoritative native undo', async ({ page }) => {
   await page.getByRole('button', { name: 'Open control panel' }).click();
   await page.getByRole('tab', { name: 'Training' }).click();
 

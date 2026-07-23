@@ -120,7 +120,6 @@ beforeEach(() => {
       autoCaptureIntervalSeconds: 2,
       privacyMode: true,
       claheStrength: 3.5,
-      gaussianBlurKernel: 5,
       smoothingFrames: 3,
       showDetectionOverlay: false,
     },
@@ -182,7 +181,7 @@ describe('useDatasetOperations native integration', () => {
     expect(native.getDatasetStats).toHaveBeenCalledTimes(2);
   });
 
-  it('loads paged frame metadata without eagerly downloading thumbnails', async () => {
+  it('loads dataset frame metadata without eagerly downloading thumbnails', async () => {
     await mountHook();
     await waitForFrames();
     expect(result.frames.data).toHaveLength(2);
@@ -191,15 +190,13 @@ describe('useDatasetOperations native integration', () => {
     expect(native.getThumbnail).not.toHaveBeenCalled();
   });
 
-  it('loads only one bounded visible native dataset page', async () => {
-    native.getDatasetPage.mockResolvedValueOnce(page([metadata('frame-1')], 0, 200));
+  it('loads the entire dataset in a single query without paging controls', async () => {
     await mountHook();
     await waitForFrames();
-    expect(result.frames.data?.map((frame) => frame.id)).toEqual(['frame-1']);
-    expect(native.getDatasetPage).toHaveBeenCalledWith(0, 24);
+    expect(result.frames.data?.map((frame) => frame.id)).toEqual(['frame-1', 'frame-2']);
+    expect(native.getDatasetPage).toHaveBeenCalledWith(0, 100);
     expect(native.getDatasetPage).toHaveBeenCalledTimes(1);
     expect(native.getThumbnail).not.toHaveBeenCalled();
-    expect(result.pageTotal).toBe(200);
   });
 
   it('surfaces native page errors', async () => {
@@ -399,14 +396,16 @@ describe('useDatasetOperations native integration', () => {
     expect(result.frames.data).toHaveLength(1);
   });
 
-  it('requests the next metadata page without loading the full dataset', async () => {
-    native.getDatasetPage.mockResolvedValueOnce(page([metadata('frame-1')], 0, 30));
+  it('pages through the whole dataset in 100-frame chunks until every frame is loaded', async () => {
+    const all = Array.from({ length: 150 }, (_, index) => metadata(`frame-${index + 1}`));
+    native.getDatasetPage.mockImplementation(async (offset: number, limit: number) =>
+      page(all.slice(offset, offset + limit), offset, all.length));
     await mountHook();
     await waitForFrames();
-    native.getDatasetPage.mockResolvedValueOnce(page([metadata('frame-25')], 24, 30));
-    result.nextPage();
-    await waitFor(() => expect(native.getDatasetPage).toHaveBeenCalledWith(24, 24));
-    await waitFor(() => expect(result.frames.data?.[0]?.id).toBe('frame-25'));
+    expect(result.frames.data).toHaveLength(150);
+    expect(result.frames.data?.at(-1)?.id).toBe('frame-150');
+    expect(native.getDatasetPage).toHaveBeenNthCalledWith(1, 0, 100);
+    expect(native.getDatasetPage).toHaveBeenNthCalledWith(2, 100, 100);
     expect(native.getDatasetPage).toHaveBeenCalledTimes(2);
   });
 

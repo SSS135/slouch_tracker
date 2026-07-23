@@ -82,11 +82,6 @@ const mocks = vi.hoisted(() => {
     deleteFrame: mutation(),
     updateLabel: mutation(),
     undo: mutation(),
-    pageOffset: 0,
-    pageTotal: 0,
-    pageSize: 24,
-    previousPage: vi.fn(),
-    nextPage: vi.fn(),
     invalidateAll: vi.fn(),
     invalidateStats: vi.fn(),
   };

@@ -50,8 +50,10 @@ const mocks = vi.hoisted(() => {
         cameraHeight: 600,
         privacyMode: false,
         claheStrength: 3.5,
-        gaussianBlurKernel: 0,
         smoothingFrames: 1,
+        tileMotionThreshold: 3,
+        claheTemporalAlpha: 0.15,
+        preprocessingDebugView: false,
         showDetectionOverlay: false,
       },
       ready: true,
@@ -185,7 +187,7 @@ beforeEach(() => {
   mocks.dataset.resetDataset.mutateAsync.mockResolvedValue(undefined);
   mocks.dataset.resetAllData.mutateAsync.mockResolvedValue({
     app: { ready: true, inferenceReady: true, datasetVersion: 2, storage: { used: 0, available: 1, quota: 1 } },
-    cameraSettings: { cameraWidth: 800, cameraHeight: 600, captureIntervalSeconds: 1, autoCaptureEnabled: false, autoCaptureIntervalSeconds: 5, privacyMode: false, claheStrength: 0, gaussianBlurKernel: 0, smoothingFrames: 1, showDetectionOverlay: false },
+    cameraSettings: { cameraWidth: 800, cameraHeight: 600, captureIntervalSeconds: 1, autoCaptureEnabled: false, autoCaptureIntervalSeconds: 5, privacyMode: false, claheStrength: 0, smoothingFrames: 1, tileMotionThreshold: 3, claheTemporalAlpha: 0.15, preprocessingDebugView: false, showDetectionOverlay: false },
     uiSettings: { alertVolume: 0.3, alertDelaySeconds: 5 },
     trainingSettings: null,
     activeModels: { posture: null, presence: null },
@@ -668,5 +670,69 @@ describe('PostureTrackerApp self-healing auto-train', () => {
     await renderReady();
     await Promise.resolve();
     expect(mocks.training.trainAndDeploy).not.toHaveBeenCalled();
+  });
+});
+
+describe('PostureTrackerApp camera-settings error recovery', () => {
+  // A persisted settings row the native side can no longer deserialize surfaces as a
+  // blocking "Camera settings unavailable" overlay. Retry alone re-reads the same
+  // unreadable row, so the overlay must also offer a reset. ready/error are rune-backed
+  // here so a successful reset can flip them and prove the overlay clears.
+  let readyBox: { readonly value: boolean; set: (next: boolean) => void };
+  let errorBox: { readonly value: string | null; set: (next: string | null) => void };
+
+  beforeEach(() => {
+    readyBox = reactiveBox<boolean>(false);
+    errorBox = reactiveBox<string | null>('Native camera settings are unreadable.');
+    Object.defineProperty(mocks.settings, 'ready', {
+      configurable: true,
+      get: () => readyBox.value,
+      set: (value: boolean) => readyBox.set(value),
+    });
+    Object.defineProperty(mocks.settings, 'error', {
+      configurable: true,
+      get: () => errorBox.value,
+      set: (value: string | null) => errorBox.set(value),
+    });
+  });
+
+  afterEach(() => {
+    // Restore plain data properties so the reactive accessors never leak into the
+    // sibling suites that assign ready/error directly in the shared beforeEach.
+    Object.defineProperty(mocks.settings, 'ready', { configurable: true, writable: true, value: true });
+    Object.defineProperty(mocks.settings, 'error', { configurable: true, writable: true, value: null });
+  });
+
+  it('offers both retry and reset actions when camera settings fail to load', async () => {
+    render(PostureTrackerApp);
+    await waitFor(() => expect(screen.getByText('Camera settings unavailable')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Retry camera settings' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset camera settings' })).toBeInTheDocument();
+    expect(screen.getByText('Reset restores default preprocessing settings.')).toBeInTheDocument();
+  });
+
+  it('resets to defaults and clears the overlay when Reset camera settings succeeds', async () => {
+    mocks.settings.resetSettings.mockImplementation(async () => {
+      errorBox.set(null);
+      readyBox.set(true);
+    });
+    render(PostureTrackerApp);
+    await waitFor(() => expect(screen.getByText('Camera settings unavailable')).toBeInTheDocument());
+    await fireEvent.click(screen.getByRole('button', { name: 'Reset camera settings' }));
+    expect(mocks.settings.resetSettings).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByText('Camera settings unavailable')).not.toBeInTheDocument());
+  });
+
+  it('keeps the overlay recoverable and surfaces the new error when a reset fails', async () => {
+    mocks.settings.resetSettings.mockImplementation(async () => {
+      errorBox.set('Reset failed: native storage error.');
+      throw new Error('Reset failed: native storage error.');
+    });
+    render(PostureTrackerApp);
+    await waitFor(() => expect(screen.getByText('Camera settings unavailable')).toBeInTheDocument());
+    await fireEvent.click(screen.getByRole('button', { name: 'Reset camera settings' }));
+    await waitFor(() => expect(screen.getByText('Reset failed: native storage error.')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Reset camera settings' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry camera settings' })).toBeInTheDocument();
   });
 });

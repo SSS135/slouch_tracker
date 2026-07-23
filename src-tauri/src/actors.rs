@@ -20,7 +20,8 @@ use tauri::ipc::Channel;
 
 use crate::errors::ApiError;
 use slouch_domain::ported::messages::schemas::{
-    ImageData, InferenceWorkerMessage, ProcessPayload, TrainPayload, TrainingWorkerMessage,
+    CropMotionMeta, ImageData, InferenceWorkerMessage, ProcessPayload, TrainPayload,
+    TrainingWorkerMessage,
 };
 use slouch_domain::{
     BoundingBox, CameraSettings, ClassificationResult, ExpandedBbox, FrameLabel, InferenceResult,
@@ -1241,6 +1242,26 @@ pub fn raw_inference_message(image: ImageData, request_id: u64) -> InferenceWork
         payload: ProcessPayload {
             image_data: image,
             request_id,
+            raw_image_data: None,
+            crop_motion: None,
+        },
+    }
+}
+
+/// Builds the detection-path Process message, carrying the raw current frame and
+/// per-tile motion grid so the worker can apply the NLF crop-uniformity rule.
+fn detection_inference_message(
+    processed: ImageData,
+    request_id: u64,
+    raw_image_data: Option<ImageData>,
+    crop_motion: Option<CropMotionMeta>,
+) -> InferenceWorkerMessage {
+    InferenceWorkerMessage::Process {
+        payload: ProcessPayload {
+            image_data: processed,
+            request_id,
+            raw_image_data,
+            crop_motion,
         },
     }
 }
@@ -1349,6 +1370,11 @@ mod camera {
         // sequence is the ordering key: a write only lands if it is strictly newer,
         // keeping the served frame monotonic in capture time (no stale flicker).
         processed_frame: Mutex<Option<(u64, Vec<u8>)>>,
+        // JPEG of the per-tile accumulation-depth heatmap tint over the processed
+        // frame, produced only while `preprocessing_debug_view` is on and the
+        // preview is watched. Same strictly-newer capture_seq guard as
+        // `processed_frame` so `slouchcam …/debug-tiles` stays monotonic.
+        debug_frame: Mutex<Option<(u64, Vec<u8>)>>,
         // Instant of the most recent `slouchcam …/processed` pull. The capture loop
         // treats a stamp within PROCESSED_DEMAND_WINDOW as live demand and drives
         // the processed-view preview at capture rate; stale/absent means zero extra
@@ -1364,6 +1390,7 @@ mod camera {
             Self {
                 latest_frame: Mutex::new(None),
                 processed_frame: Mutex::new(None),
+                debug_frame: Mutex::new(None),
                 processed_requested_at: Mutex::new(None),
                 latest_result: Mutex::new(None),
                 status: Mutex::new(CameraStatus::Idle),
@@ -1537,6 +1564,14 @@ mod camera {
         /// agree on frame ordering.
         pub fn processed_frame_snapshot(&self) -> Option<(u64, Vec<u8>)> {
             self.shared.processed_frame.lock().ok()?.clone()
+        }
+
+        /// The freshest debug-tiles heatmap JPEG (tile accumulation-depth tint over
+        /// the processed frame) paired with its capture sequence; `None` until the
+        /// debug view has produced a frame. Same ordering contract as
+        /// `processed_frame_snapshot`.
+        pub fn debug_frame_snapshot(&self) -> Option<(u64, Vec<u8>)> {
+            self.shared.debug_frame.lock().ok()?.clone()
         }
 
         /// Records a `slouchcam …/processed` pull so the capture loop keeps the
@@ -2330,6 +2365,41 @@ mod camera {
         }
     }
 
+    /// Debug-tiles preview store: JPEG-encode the tile accumulation-depth heatmap
+    /// tint and write it into `debug_frame` behind the same strictly-newer
+    /// `capture_seq` guard as `store_processed_frame`. Best-effort: a failed encode
+    /// just skips this update. Returns whether the frame was stored.
+    fn store_debug_frame(frame: &ImageData, capture_seq: u64, shared: &CameraShared) -> bool {
+        let mut rgb = Vec::with_capacity(frame.data.len() / 4 * 3);
+        for pixel in frame.data.chunks_exact(4) {
+            rgb.extend_from_slice(&pixel[..3]);
+        }
+        let mut jpeg = Vec::new();
+        match image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 80).encode(
+            &rgb,
+            frame.width,
+            frame.height,
+            image::ExtendedColorType::Rgb8,
+        ) {
+            Ok(()) => {
+                if let Ok(mut cell) = shared.debug_frame.lock() {
+                    if cell
+                        .as_ref()
+                        .is_none_or(|(stored, _)| capture_seq > *stored)
+                    {
+                        *cell = Some((capture_seq, jpeg));
+                        return true;
+                    }
+                }
+                false
+            }
+            Err(error) => {
+                log::warn!(target: "camera", "debug tiles JPEG encode failed: {error}");
+                false
+            }
+        }
+    }
+
     /// Processed-view preview update: preprocess the current camera frame through
     /// the preview-only preprocessor (temporal state independent of detection) and
     /// store the JPEG in the processed cell. Mirrors `run_detection` minus the
@@ -2349,6 +2419,18 @@ mod camera {
             .process_latest(settings)
             .map_err(ApiError::InvalidRequest)?;
         store_processed_frame(&processed, capture_seq, shared);
+        // Debug tiles are produced only here (foreground preview path) and only when
+        // the setting is on, so they cost nothing — no render, no encode — when off.
+        if settings.preprocessing_debug_view {
+            match preprocessor.render_debug_tiles(&processed) {
+                Ok(tinted) => {
+                    store_debug_frame(&tinted, capture_seq, shared);
+                }
+                Err(error) => {
+                    log::warn!(target: "camera", "debug tiles render failed: {error}");
+                }
+            }
+        }
         Ok(())
     }
 
@@ -2432,8 +2514,24 @@ mod camera {
         store_processed_frame(&processed, job.capture_seq, shared);
         let id = *request_id;
         *request_id = request_id.wrapping_add(1);
+        // Hand the raw current frame + per-tile motion to the worker so it can cut
+        // the NLF crop from raw pixels when the person overlaps enough moving tiles.
+        // Only the NLF crop can change; RTMDet input, the preview, and the
+        // capture-cached frame all keep using `processed`.
+        let raw_image_data = preprocessor.latest_raw_frame();
+        let crop_motion = preprocessor.tile_motion().map(|motion| CropMotionMeta {
+            tile_px: motion.tile_px as u32,
+            tiles_x: motion.tiles_x as u32,
+            tiles_y: motion.tiles_y as u32,
+            moving: motion.moving,
+        });
         let result = inference
-            .send_frame(raw_inference_message(processed, id))?
+            .send_frame(detection_inference_message(
+                processed,
+                id,
+                raw_image_data,
+                crop_motion,
+            ))?
             .into_iter()
             .next()
             .ok_or_else(|| ApiError::Inference("inference actor returned no response".into()))

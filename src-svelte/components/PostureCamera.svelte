@@ -28,6 +28,9 @@
       : 'slouchcam://localhost';
   const FRAME_URL = `${FRAME_BASE}/frame`;
   const PROCESSED_FRAME_URL = `${FRAME_BASE}/processed`;
+  // Tile-accumulation heatmap of the processed feed (green = averaging, red = live);
+  // shares /processed's demand-stamp contract, so it drives the same processed refresh.
+  const DEBUG_TILES_FRAME_URL = `${FRAME_BASE}/debug-tiles`;
   // Detector-input frame served without stamping processed-view demand: stays the
   // inferred frame at detection cadence, for the diagnostic detection overlay.
   const INFERRED_FRAME_URL = `${FRAME_BASE}/inferred`;
@@ -46,6 +49,8 @@
     privacyMode?: boolean;
     /** Show the preprocessed detector-input feed instead of the raw feed. */
     processedView?: boolean;
+    /** In the processed view, show the tile-accumulation heatmap instead of the plain processed feed. */
+    preprocessingDebugView?: boolean;
     /** Draw the diagnostic skeleton + detection box (with confidence) over the live video. */
     showDetectionOverlay?: boolean;
     // Fired when the bare video area (outside every overlay control) is clicked.
@@ -63,6 +68,7 @@
     paused = false,
     privacyMode = false,
     processedView = false,
+    preprocessingDebugView = false,
     showDetectionOverlay = false,
     onBackgroundClick,
     onCameraError,
@@ -258,6 +264,7 @@
   const renderer = useCanvasRenderer({
     frameUrl: FRAME_URL,
     processedFrameUrl: PROCESSED_FRAME_URL,
+    debugTilesFrameUrl: DEBUG_TILES_FRAME_URL,
     get enabled() {
       return !paused;
     },
@@ -269,6 +276,9 @@
     },
     get processedView() {
       return processedView;
+    },
+    get preprocessingDebugView() {
+      return preprocessingDebugView;
     },
     get showDetectionOverlay() {
       return showDetectionOverlay;

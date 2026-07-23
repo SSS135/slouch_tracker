@@ -91,7 +91,7 @@ fn rejected_native_settings_never_replace_the_last_sqlite_value() {
             .save_camera_settings(&saved)
             .expect("save valid settings");
         let invalid = CameraSettings {
-            gaussian_blur_kernel: 4,
+            clahe_strength: 20.0,
             ..saved.clone()
         };
         assert!(matches!(

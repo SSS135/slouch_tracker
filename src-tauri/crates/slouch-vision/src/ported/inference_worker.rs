@@ -18,8 +18,10 @@ use ort::{
 };
 use serde::{Deserialize, Serialize};
 use slouch_domain::ported::messages::schemas::{
-    ImageData, InferenceWorkerMessage, JsonValue, SerializedModel,
+    CropMotionMeta, ImageData, InferenceWorkerMessage, JsonValue, ProcessPayload, SerializedModel,
 };
+
+use crate::preprocessing::{nlf_crop_source_for, NlfCropSource};
 use slouch_domain::{
     BoundingBox, ClassificationResult, ExpandedBbox, FeatureId, FeatureMap, Keypoint,
     COCO_KEYPOINT_COUNT,
@@ -396,9 +398,7 @@ where
             InferenceWorkerMessage::Initialize { payload } => {
                 self.initialize(&payload.rtmdet_path, &payload.nlf_path)
             }
-            InferenceWorkerMessage::Process { payload } => {
-                self.process_frame(payload.image_data, payload.request_id)
-            }
+            InferenceWorkerMessage::Process { payload } => self.process_frame(payload),
             InferenceWorkerMessage::LoadPostureModel { payload } => {
                 match self.load_posture_model(payload.posture_model) {
                     Ok(()) => WorkerResponse::ClassifierLoaded { success: true },
@@ -676,7 +676,13 @@ where
         }))
     }
 
-    fn process_frame(&mut self, image_data: ImageData, request_id: u64) -> WorkerResponse {
+    fn process_frame(&mut self, payload: ProcessPayload) -> WorkerResponse {
+        let ProcessPayload {
+            image_data,
+            request_id,
+            raw_image_data,
+            crop_motion,
+        } = payload;
         let frame_start = self.mark("total-start");
         self.frame_counter = self.frame_counter.saturating_add(1);
 
@@ -704,7 +710,8 @@ where
             }
         }
 
-        let result = self.process_frame_inner(&image_data);
+        let result =
+            self.process_frame_inner(&image_data, raw_image_data.as_ref(), crop_motion.as_ref());
         let frame_end = self.mark("total-end");
         self.measure("frame_total", &frame_start, &frame_end);
         // Cleanup is frame-scoped, not success-scoped: malformed input,
@@ -766,6 +773,8 @@ where
     fn process_frame_inner(
         &mut self,
         image_data: &ImageData,
+        raw_image_data: Option<&ImageData>,
+        crop_motion: Option<&CropMotionMeta>,
     ) -> Result<NativeInferenceResult, WorkerError> {
         let rtmdet_start = self.mark("rtmdet-start");
         let preprocessed = preprocess_rtmdet(image_data)?;
@@ -831,11 +840,37 @@ where
         };
 
         let nlf_start = self.mark("nlf-start");
+        // Crop-uniformity rule: when the person overlaps enough MOVING tiles, cut
+        // the NLF square crop from the raw current frame so it is a single uniform
+        // noise source rather than a denoised/current mix. Missing metadata or a
+        // dim mismatch keeps the accumulated default (also the infer_frame path).
+        let nlf_crop_frame: &ImageData = match (raw_image_data, crop_motion) {
+            (Some(raw), Some(motion))
+                if raw.width == image_data.width && raw.height == image_data.height =>
+            {
+                match nlf_crop_source_for(
+                    motion.tile_px as usize,
+                    motion.tiles_x as usize,
+                    motion.tiles_y as usize,
+                    &motion.moving,
+                    bbox.x1,
+                    bbox.y1,
+                    bbox.x2 - bbox.x1,
+                    bbox.y2 - bbox.y1,
+                ) {
+                    NlfCropSource::Raw => raw,
+                    NlfCropSource::Accumulated => image_data,
+                }
+            }
+            _ => image_data,
+        };
         // ONE NLF-L forward per frame serves BOTH the 17 COCO keypoints (from
         // `coords2d`) and the depth feature (from `coords3d_rel`/`uncertainty`).
         // A forward error fails only this frame — the caller emits an Error
-        // response and the camera dispatcher continues to the next frame.
-        let (coords2d, coords3d, uncertainty, backbone_feats) = self.run_nlf(image_data, &bbox)?;
+        // response and the camera dispatcher continues to the next frame. RTMDet
+        // still runs on `image_data`; only this NLF crop source can swap.
+        let (coords2d, coords3d, uncertainty, backbone_feats) =
+            self.run_nlf(nlf_crop_frame, &bbox)?;
         let keypoints = assemble_nlf_keypoints(
             &coords2d,
             &uncertainty,

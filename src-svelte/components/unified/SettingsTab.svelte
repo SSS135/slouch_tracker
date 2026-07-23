@@ -13,8 +13,10 @@
     alertDelaySeconds: number;
     privacyMode: boolean;
     claheStrength: number;
-    gaussianBlurKernel: number;
     smoothingFrames: number;
+    tileMotionThreshold: number;
+    claheTemporalAlpha: number;
+    preprocessingDebugView: boolean;
     showDetectionOverlay: boolean;
     minimizeToTrayOnClose: boolean;
     startHiddenOnLogin: boolean;
@@ -50,6 +52,15 @@
     modelInfo,
   }: SettingsTabProps = $props();
 
+  // CLAHE temporal smoothing only affects the contrast-curve EMA, which is a no-op
+  // when CLAHE itself is off (Strength 0) and produces no visible change on a
+  // static, evenly-lit scene — it only damps flicker when the lighting shifts.
+  const claheSmoothingHelp = $derived(
+    settings.claheStrength === 0
+      ? 'CLAHE is off (Strength 0), so this has no effect. Raise CLAHE Strength to use it.'
+      : 'Damps frame-to-frame flicker in the contrast curve when the lighting shifts — no visible change on a static, evenly-lit scene. Lower = steadier contrast (less flicker); 1.0 = off (per-frame CLAHE).',
+  );
+
   function handlePrivacyChange(event: Event): void {
     onUpdateSettings({ privacyMode: (event.currentTarget as HTMLInputElement).checked });
   }
@@ -60,6 +71,10 @@
 
   function handleDetectionOverlayChange(event: Event): void {
     onUpdateSettings({ showDetectionOverlay: (event.currentTarget as HTMLInputElement).checked });
+  }
+
+  function handleDebugViewChange(event: Event): void {
+    onUpdateSettings({ preprocessingDebugView: (event.currentTarget as HTMLInputElement).checked });
   }
 
   function handleMinimizeToTrayChange(event: Event): void {
@@ -175,19 +190,6 @@
       />
 
       <Slider
-        label="Gaussian Blur"
-        value={settings.gaussianBlurKernel}
-        minimumValue={0}
-        maximumValue={15}
-        fixedValues={[0, 3, 5, 7, 9, 11, 13, 15]}
-        formatValue={(value) => (value === 0 ? 'Off' : `${value}`)}
-        onValueChange={(value) => onUpdateSettings({ gaussianBlurKernel: value })}
-        helpText="Noise reduction (kernel size). 0 = off, larger = more smoothing. Kernel must be odd."
-        showTooltip
-        showMinMax
-      />
-
-      <Slider
         label="Temporal Smoothing"
         value={settings.smoothingFrames}
         minimumValue={1}
@@ -195,8 +197,35 @@
         step={1}
         formatValue={(value) => (value === 1 ? 'Off' : `${value} frames`)}
         onValueChange={(value) => onUpdateSettings({ smoothingFrames: value })}
-        helpText="Number of frames to average. 1 = off, higher = smoother but more motion blur."
+        helpText="Max frames accumulated while a region stays static. Motion-gated per tile, so higher values add no motion blur or ghosting. 1 = off."
         showTooltip
+      />
+
+      <Slider
+        label="Motion threshold"
+        value={settings.tileMotionThreshold}
+        minimumValue={0.5}
+        maximumValue={20}
+        step={0.5}
+        formatValue={(value) => value.toFixed(1)}
+        onValueChange={(value) => onUpdateSettings({ tileMotionThreshold: value })}
+        helpText="How much a tile must change to reset its accumulation to the live frame. Lower = stricter (any change resets); higher = more averaging under small movements."
+        showTooltip
+        showMinMax
+      />
+
+      <Slider
+        label="CLAHE smoothing"
+        value={settings.claheTemporalAlpha}
+        minimumValue={0.05}
+        maximumValue={1}
+        step={0.05}
+        disabled={settings.claheStrength === 0}
+        formatValue={(value) => (value >= 1 ? 'Off' : value.toFixed(2))}
+        onValueChange={(value) => onUpdateSettings({ claheTemporalAlpha: value })}
+        helpText={claheSmoothingHelp}
+        showTooltip
+        showMinMax
       />
 
       <label class="checkbox-row" class:checkbox-disabled={settings.privacyMode}>
@@ -212,6 +241,20 @@
             {settings.privacyMode
               ? 'Unavailable in privacy mode - the feed stays obscured.'
               : "Shows the detector's preprocessing live (CLAHE, blur, smoothing). Note: temporal smoothing appears time-compressed at preview rate."}
+          </span>
+        </span>
+      </label>
+
+      <label class="checkbox-row">
+        <input
+          type="checkbox"
+          checked={settings.preprocessingDebugView}
+          onchange={handleDebugViewChange}
+        />
+        <span>
+          <span class="checkbox-label">Preprocessing debug view</span>
+          <span class="checkbox-description">
+            Tint tiles by accumulation depth (green = averaging, red = live) in the processed view.
           </span>
         </span>
       </label>
@@ -273,7 +316,7 @@
         fixedValues={[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]}
         formatValue={(value) => `${value}s`}
         onValueChange={(value) => onUpdateSettings({ alertDelaySeconds: Math.round(value) })}
-        helpText="Alert triggers after bad posture is detected for this duration (reduces false positives)."
+        helpText="Seconds of continued bad posture required before each alert (reduces false positives)."
         showTooltip
         showMinMax
       />

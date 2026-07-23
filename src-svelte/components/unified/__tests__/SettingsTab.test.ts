@@ -20,9 +20,11 @@ const baseSettings = {
   autoCaptureIntervalSeconds: 5,
   alertDelaySeconds: 5,
   privacyMode: false,
-  claheStrength: 0,
-  gaussianBlurKernel: 0,
+  claheStrength: 3.5,
   smoothingFrames: 1,
+  tileMotionThreshold: 3,
+  claheTemporalAlpha: 0.15,
+  preprocessingDebugView: false,
   showDetectionOverlay: false,
   minimizeToTrayOnClose: true,
   startHiddenOnLogin: true,
@@ -87,6 +89,83 @@ describe('SettingsTab processed view toggle', () => {
     expect(toggle).toBeDisabled();
     expect(toggle).not.toBeChecked();
     expect(screen.getByText(/unavailable in privacy mode/i)).toBeInTheDocument();
+  });
+});
+
+describe('SettingsTab preprocessing tuning controls', () => {
+  it('renders the motion threshold and CLAHE smoothing sliders with their help text', () => {
+    renderTab();
+    expect(screen.getByRole('slider', { name: /motion threshold/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /clahe smoothing/i })).toBeInTheDocument();
+    expect(screen.getByText(/lower = stricter/i)).toBeInTheDocument();
+    expect(screen.getByText(/steadier contrast/i)).toBeInTheDocument();
+  });
+
+  it('reports motion threshold changes through onUpdateSettings', async () => {
+    const onUpdateSettings = vi.fn();
+    render(SettingsTab, {
+      props: { settings: baseSettings, onUpdateSettings, onResetSettings: vi.fn(), isModelLoaded: false },
+    });
+    await fireEvent.input(screen.getByRole('slider', { name: /motion threshold/i }), {
+      target: { value: '10' },
+    });
+    expect(onUpdateSettings).toHaveBeenCalledWith({ tileMotionThreshold: 10 });
+  });
+
+  it('reports CLAHE smoothing changes through onUpdateSettings', async () => {
+    const onUpdateSettings = vi.fn();
+    render(SettingsTab, {
+      props: { settings: baseSettings, onUpdateSettings, onResetSettings: vi.fn(), isModelLoaded: false },
+    });
+    await fireEvent.input(screen.getByRole('slider', { name: /clahe smoothing/i }), {
+      target: { value: '0.5' },
+    });
+    expect(onUpdateSettings).toHaveBeenCalledWith({ claheTemporalAlpha: 0.5 });
+  });
+
+  it('reflects the tuning slider values from settings', () => {
+    renderTab({ settings: { ...baseSettings, tileMotionThreshold: 7.5, claheTemporalAlpha: 0.3 } });
+    expect(screen.getByText('7.5')).toBeInTheDocument();
+    expect(screen.getByText('0.30')).toBeInTheDocument();
+  });
+});
+
+describe('SettingsTab CLAHE smoothing gating', () => {
+  it('disables the CLAHE smoothing slider and explains why when CLAHE is off', () => {
+    renderTab({ settings: { ...baseSettings, claheStrength: 0 } });
+    expect(screen.getByRole('slider', { name: /clahe smoothing/i })).toBeDisabled();
+    expect(screen.getByText(/clahe is off \(strength 0\), so this has no effect/i)).toBeInTheDocument();
+    // The motion-threshold slider is independent of CLAHE and stays enabled.
+    expect(screen.getByRole('slider', { name: /motion threshold/i })).toBeEnabled();
+  });
+
+  it('enables the CLAHE smoothing slider and explains the flicker-only effect when CLAHE is on', () => {
+    renderTab({ settings: { ...baseSettings, claheStrength: 3.5 } });
+    expect(screen.getByRole('slider', { name: /clahe smoothing/i })).toBeEnabled();
+    expect(screen.getByText(/no visible change on a static, evenly-lit scene/i)).toBeInTheDocument();
+  });
+});
+
+describe('SettingsTab preprocessing debug view toggle', () => {
+  it('renders the debug view toggle off by default with its help text', () => {
+    renderTab();
+    const toggle = screen.getByRole('checkbox', { name: /preprocessing debug view/i });
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByText(/tint tiles by accumulation depth/i)).toBeInTheDocument();
+  });
+
+  it('reports debug view changes through onUpdateSettings', async () => {
+    const onUpdateSettings = vi.fn();
+    render(SettingsTab, {
+      props: { settings: baseSettings, onUpdateSettings, onResetSettings: vi.fn(), isModelLoaded: false },
+    });
+    await fireEvent.click(screen.getByRole('checkbox', { name: /preprocessing debug view/i }));
+    expect(onUpdateSettings).toHaveBeenCalledWith({ preprocessingDebugView: true });
+  });
+
+  it('reflects an enabled debug view', () => {
+    renderTab({ settings: { ...baseSettings, preprocessingDebugView: true } });
+    expect(screen.getByRole('checkbox', { name: /preprocessing debug view/i })).toBeChecked();
   });
 });
 

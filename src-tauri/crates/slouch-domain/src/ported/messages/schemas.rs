@@ -411,6 +411,27 @@ pub struct InitializePayload {
 pub struct ProcessPayload {
     pub image_data: ImageData,
     pub request_id: u64,
+    /// Raw current frame (pre-accumulation) for the NLF crop-uniformity rule.
+    /// Present only on the native detection path; `None` for the `infer_frame`
+    /// harness command, which keeps the accumulated-crop default.
+    #[serde(default)]
+    pub raw_image_data: Option<ImageData>,
+    /// Per-tile motion grid for the NLF crop-uniformity rule.
+    #[serde(default)]
+    pub crop_motion: Option<CropMotionMeta>,
+}
+
+/// Per-tile motion snapshot carried alongside a detection frame so the worker can
+/// choose the NLF crop source. This travels only over the in-process actor→worker
+/// channel (never Tauri IPC), so its `Vec<bool>` bitmap does not violate the
+/// bulk-binary-over-IPC rule.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CropMotionMeta {
+    pub tile_px: u32,
+    pub tiles_x: u32,
+    pub tiles_y: u32,
+    pub moving: Vec<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

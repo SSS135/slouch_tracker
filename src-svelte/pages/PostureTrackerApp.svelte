@@ -412,6 +412,9 @@
     const bad = probability < 0.5;
     return { person_found: true, slouching: bad, forward_neck_tilt: bad, hand_near_face: false, mouth_open: false };
   });
+  // The alert beeps on bad-posture detections only (no wall-clock timer): a beep fires when
+  // a bad detection arrives at least `alertDelaySeconds` after the streak start / last beep,
+  // so it re-alerts every `alertDelaySeconds` of continued bad posture.
   usePostureSound(
     () => postureDataForSound,
     () => settings.alertVolume,
@@ -501,6 +504,7 @@
           latestFrameRef={previewFrameRef}
           privacyMode={settings.privacyMode}
           {processedView}
+          preprocessingDebugView={settings.preprocessingDebugView}
           showDetectionOverlay={settings.showDetectionOverlay}
           paused={!cameraSettings.ready || trackingToggle.paused}
           onCameraError={(error) => { cameraError = error; }}
@@ -546,7 +550,11 @@
         <div class="blocking-error">
           <strong>Camera settings unavailable</strong>
           <span>{cameraSettings.error}</span>
-          <button type="button" onclick={() => { void cameraSettings.reload().catch(() => undefined); }}>Retry camera settings</button>
+          <div class="blocking-error-actions">
+            <button type="button" onclick={() => { void cameraSettings.reload().catch(() => undefined); }}>Retry camera settings</button>
+            <button type="button" class="secondary" onclick={() => { void cameraSettings.resetSettings().catch(() => undefined); }}>Reset camera settings</button>
+          </div>
+          <span class="blocking-error-hint">Reset restores default preprocessing settings.</span>
         </div>
       {:else}
         Loading native camera settings…
@@ -568,6 +576,9 @@
   .model-loading { background: rgb(33 37 41 / 90%); }
   .model-error button { min-height: 2rem; border: 1px solid white; border-radius: 0.25rem; padding: 0.25rem 0.5rem; color: white; background: transparent; cursor: pointer; }
   .blocking-error button { min-height: 2.25rem; border: 1px solid #74c0fc; border-radius: 0.375rem; padding: 0.5rem 0.875rem; color: white; background: #1971c2; cursor: pointer; }
+  .blocking-error-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; }
+  .blocking-error button.secondary { border-color: rgb(255 255 255 / 45%); background: transparent; }
+  .blocking-error-hint { font-size: 0.8125rem; color: rgb(255 255 255 / 70%); }
   .panel-toggle { position: absolute; top: 50%; right: 16px; z-index: 110; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 4px; color: white; background: rgb(10 10 10 / 70%); cursor: pointer; transform: translateY(-50%); }
   .panel-toggle svg { display: block; }
   .panel-toggle.open { right: calc(var(--panel-width, 576px) + 16px); }

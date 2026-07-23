@@ -102,9 +102,11 @@ export function installMockTauri(): () => void {
     autoCaptureEnabled: false,
     autoCaptureIntervalSeconds: 2,
     privacyMode: true,
-    claheStrength: 3.5,
-    gaussianBlurKernel: 5,
-    smoothingFrames: 3,
+    claheStrength: 3.0,
+    smoothingFrames: 5,
+    tileMotionThreshold: 1.5,
+    claheTemporalAlpha: 0.20,
+    preprocessingDebugView: false,
     showDetectionOverlay: false,
   };
   let uiSettings = { alertVolume: 0.3, alertDelaySeconds: 5, minimizeToTrayOnClose: true, startHiddenOnLogin: true };
@@ -287,7 +289,7 @@ export function installMockTauri(): () => void {
         datasetVersion = 0;
         activeModels = { posture: null, presence: null };
         trainingSettings = null;
-        cameraSettings = { ...cameraSettings, cameraWidth: 800, cameraHeight: 600, captureIntervalSeconds: 0.2, autoCaptureEnabled: false, autoCaptureIntervalSeconds: 2, privacyMode: true, claheStrength: 3.5, gaussianBlurKernel: 5, smoothingFrames: 3, showDetectionOverlay: false };
+        cameraSettings = { ...cameraSettings, cameraWidth: 800, cameraHeight: 600, captureIntervalSeconds: 0.2, autoCaptureEnabled: false, autoCaptureIntervalSeconds: 2, privacyMode: true, claheStrength: 3.0, smoothingFrames: 5, tileMotionThreshold: 1.5, claheTemporalAlpha: 0.20, preprocessingDebugView: false, showDetectionOverlay: false };
         uiSettings = { alertVolume: 0.3, alertDelaySeconds: 5, minimizeToTrayOnClose: true, startHiddenOnLogin: true };
         return snapshot();
       case 'get_training_status':
@@ -328,7 +330,7 @@ export function installMockTauri(): () => void {
         cameraSettings = getArg<typeof cameraSettings>(args, 'settings');
         return null;
       case 'reset_camera_settings':
-        cameraSettings = { ...cameraSettings, cameraWidth: 800, cameraHeight: 600, captureIntervalSeconds: 0.2, autoCaptureEnabled: false, autoCaptureIntervalSeconds: 2, privacyMode: true, claheStrength: 3.5, gaussianBlurKernel: 5, smoothingFrames: 3, showDetectionOverlay: false };
+        cameraSettings = { ...cameraSettings, cameraWidth: 800, cameraHeight: 600, captureIntervalSeconds: 0.2, autoCaptureEnabled: false, autoCaptureIntervalSeconds: 2, privacyMode: true, claheStrength: 3.0, smoothingFrames: 5, tileMotionThreshold: 1.5, claheTemporalAlpha: 0.20, preprocessingDebugView: false, showDetectionOverlay: false };
         return cameraSettings;
       case 'get_ui_settings':
         return uiSettings;

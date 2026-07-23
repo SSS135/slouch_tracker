@@ -78,6 +78,8 @@ fn process(
         payload: ProcessPayload {
             image_data: image(4, 4),
             request_id,
+            raw_image_data: None,
+            crop_motion: None,
         },
     });
     let [WorkerResponse::Result { result, .. }] = &response[..] else {
@@ -134,6 +136,8 @@ fn actual_worker_disposes_roles_before_factory_load_and_clears_on_failure() {
         payload: ProcessPayload {
             image_data: image(4, 4),
             request_id: 2,
+            raw_image_data: None,
+            crop_motion: None,
         },
     });
     assert!(matches!(
@@ -207,6 +211,8 @@ fn no_person_reports_away_without_running_presence_and_posture_only_emits_no_cla
             payload: ProcessPayload {
                 image_data: image(4, 4),
                 request_id: 10,
+                raw_image_data: None,
+                crop_motion: None,
             },
         });
         let [WorkerResponse::Result { result, .. }] = &response[..] else {
@@ -283,6 +289,8 @@ fn prediction_error_degrades_to_result_without_classification_and_logs() {
         payload: ProcessPayload {
             image_data: image(4, 4),
             request_id: 3,
+            raw_image_data: None,
+            crop_motion: None,
         },
     });
     assert!(matches!(
@@ -324,6 +332,8 @@ fn prediction_error_degrades_to_result_without_classification_and_logs() {
         payload: ProcessPayload {
             image_data: image(4, 4),
             request_id: 4,
+            raw_image_data: None,
+            crop_motion: None,
         },
     });
     assert!(matches!(
@@ -372,6 +382,8 @@ fn no_person_reports_away_even_when_presence_model_would_error() {
         payload: ProcessPayload {
             image_data: image(4, 4),
             request_id: 7,
+            raw_image_data: None,
+            crop_motion: None,
         },
     });
     let [WorkerResponse::Result {

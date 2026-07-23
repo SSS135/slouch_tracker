@@ -19,6 +19,7 @@ const bad: MultiTaskDetectionResult = {
   mouth_open: false,
 };
 const good: MultiTaskDetectionResult = { ...bad, slouching: false };
+const away: MultiTaskDetectionResult = { ...bad, person_found: false };
 
 let play: ReturnType<typeof vi.fn>;
 let pause: ReturnType<typeof vi.fn>;
@@ -44,16 +45,16 @@ function mount(
   initial: MultiTaskDetectionResult | null = bad,
   volume = 0.3,
   paused = false,
-  delay = 5,
+  alertDelaySeconds = 5,
 ) {
-  const values = $state({ posture: initial, volume, paused, delay });
+  const values = $state({ posture: initial, volume, paused, alertDelaySeconds });
   let result!: ReturnType<typeof usePostureSound>;
   const dispose = $effect.root(() => {
     result = usePostureSound(
       () => values.posture,
       () => values.volume,
       () => values.paused,
-      () => values.delay,
+      () => values.alertDelaySeconds,
     );
   });
   disposers.push(dispose);
@@ -61,12 +62,20 @@ function mount(
   return { result, values, dispose };
 }
 
-function reevaluate(values: ReturnType<typeof mount>['values']): void {
-  values.posture = values.posture ? { ...values.posture } : null;
+/** Feeds a fresh detection (new object reference == a new detection) at wall-clock `atMs`. */
+function detectAt(
+  values: ReturnType<typeof mount>['values'],
+  next: MultiTaskDetectionResult | null,
+  atMs: number,
+): void {
+  vi.setSystemTime(atMs);
+  values.posture = next ? { ...next } : null;
   flushSync();
 }
 
 beforeEach(() => {
+  // Fake timers give a controllable Date.now via setSystemTime. The hook schedules no
+  // timers of its own, so getTimerCount() stays 0 throughout.
   vi.useFakeTimers({ now: 0 });
   play = vi.fn().mockResolvedValue(undefined);
   pause = vi.fn();
@@ -81,140 +90,177 @@ afterEach(() => {
 });
 
 describe('usePostureSound', () => {
-  it('does not autonomously alert without a fresh posture input', () => {
-    const harness = mount();
-    vi.advanceTimersByTime(10_000);
+  it('stays silent while the bad streak is shorter than the delay, across many detections', () => {
+    const harness = mount(null, 0.3, false, 5);
+    detectAt(harness.values, bad, 0);
+    detectAt(harness.values, bad, 1_000);
+    detectAt(harness.values, bad, 2_000);
+    detectAt(harness.values, bad, 4_000);
     expect(play).not.toHaveBeenCalled();
-    reevaluate(harness.values);
-    expect(play).toHaveBeenCalledOnce();
     expect(harness.result.isPlaying).toBe(true);
   });
 
-  it('waits for the configured delay and rate-limits fresh inputs to one second', () => {
-    const harness = mount();
-    vi.advanceTimersByTime(4_999);
-    reevaluate(harness.values);
+  it('beeps once on the detection that crosses the delay', () => {
+    const harness = mount(null, 0.3, false, 5);
+    detectAt(harness.values, bad, 0);
+    detectAt(harness.values, bad, 4_000);
     expect(play).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(1);
-    reevaluate(harness.values);
+    detectAt(harness.values, bad, 5_000);
     expect(play).toHaveBeenCalledOnce();
-    vi.advanceTimersByTime(999);
-    reevaluate(harness.values);
+  });
+
+  it('requires another full delay of continued bad posture between beeps', () => {
+    const harness = mount(null, 0.3, false, 5);
+    detectAt(harness.values, bad, 0);
+    detectAt(harness.values, bad, 5_000);
     expect(play).toHaveBeenCalledOnce();
-    vi.advanceTimersByTime(1);
-    reevaluate(harness.values);
+    detectAt(harness.values, bad, 9_000);
+    expect(play).toHaveBeenCalledOnce();
+    detectAt(harness.values, bad, 10_000);
     expect(play).toHaveBeenCalledTimes(2);
   });
 
-  it('preserves the original bad-posture deadline while paused', () => {
-    const harness = mount();
-    vi.advanceTimersByTime(4_000);
+  it('never emits from elapsed time alone - only a detection arrival can beep, no timers', () => {
+    const harness = mount(null, 0.3, false, 5);
+    detectAt(harness.values, bad, 0);
+    vi.setSystemTime(60_000);
+    flushSync();
+    expect(play).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    detectAt(harness.values, bad, 60_000);
+    expect(play).toHaveBeenCalledOnce();
+  });
+
+  it('resets the streak deadline when posture becomes good', () => {
+    const harness = mount(null, 0.3, false, 5);
+    detectAt(harness.values, bad, 0);
+    detectAt(harness.values, bad, 4_000);
+    detectAt(harness.values, good, 4_500);
+    expect(pause).toHaveBeenCalled();
+    expect(harness.result.isPlaying).toBe(false);
+    // A fresh bad streak starts at 5s, so the old anchor at 0 no longer counts.
+    detectAt(harness.values, bad, 5_000);
+    detectAt(harness.values, bad, 9_000);
+    expect(play).not.toHaveBeenCalled();
+    detectAt(harness.values, bad, 10_000);
+    expect(play).toHaveBeenCalledOnce();
+  });
+
+  it('resets the streak when the person leaves', () => {
+    const harness = mount(null, 0.3, false, 5);
+    detectAt(harness.values, bad, 0);
+    detectAt(harness.values, bad, 4_000);
+    detectAt(harness.values, away, 4_500);
+    expect(harness.result.isPlaying).toBe(false);
+    detectAt(harness.values, bad, 5_000);
+    detectAt(harness.values, bad, 9_000);
+    expect(play).not.toHaveBeenCalled();
+    detectAt(harness.values, bad, 10_000);
+    expect(play).toHaveBeenCalledOnce();
+  });
+
+  it('resets the streak when detections stop (null result)', () => {
+    const harness = mount(null, 0.3, false, 5);
+    detectAt(harness.values, bad, 0);
+    detectAt(harness.values, bad, 4_000);
+    detectAt(harness.values, null, 4_500);
+    expect(harness.result.isPlaying).toBe(false);
+    detectAt(harness.values, bad, 5_000);
+    detectAt(harness.values, bad, 9_000);
+    expect(play).not.toHaveBeenCalled();
+    detectAt(harness.values, bad, 10_000);
+    expect(play).toHaveBeenCalledOnce();
+  });
+
+  it('does not evaluate the alert on settings-only re-evaluations, even past the delay', () => {
+    const harness = mount(null, 0.3, false, 5);
+    detectAt(harness.values, bad, 0);
+    // Time is now well past the delay, but only settings churn - no beep.
+    vi.setSystemTime(20_000);
+    harness.values.volume = 0.5;
+    flushSync();
+    harness.values.alertDelaySeconds = 5;
+    flushSync();
     harness.values.paused = true;
     flushSync();
-    vi.advanceTimersByTime(1_000);
     harness.values.paused = false;
     flushSync();
-    expect(play).toHaveBeenCalledOnce();
-  });
-
-  it('preserves the original bad-posture deadline while muted', () => {
-    const harness = mount();
-    vi.advanceTimersByTime(4_000);
-    harness.values.volume = 0;
-    flushSync();
-    vi.advanceTimersByTime(1_000);
-    harness.values.volume = 0.3;
-    flushSync();
-    expect(play).toHaveBeenCalledOnce();
-  });
-
-  it('resets timing only when posture becomes good', () => {
-    const harness = mount();
-    vi.advanceTimersByTime(4_000);
-    harness.values.posture = good;
-    flushSync();
-    expect(pause).toHaveBeenCalled();
-    harness.values.posture = bad;
-    flushSync();
-    vi.advanceTimersByTime(1_000);
-    reevaluate(harness.values);
     expect(play).not.toHaveBeenCalled();
-  });
-
-  it('blocks an otherwise-eligible alert while paused, then plays when unpaused', () => {
-    const harness = mount(bad, 0.3, true, 0);
-    expect(harness.result.isPlaying).toBe(false);
-    expect(play).not.toHaveBeenCalled();
-    harness.values.paused = false;
-    flushSync();
-    expect(harness.result.isPlaying).toBe(true);
+    detectAt(harness.values, bad, 20_000);
     expect(play).toHaveBeenCalledOnce();
   });
 
   it('monitors forward neck tilt but ignores hand and mouth flags', () => {
-    const forward = mount({ ...good, forward_neck_tilt: true }, 0.3, false, 0);
-    expect(forward.result.isPlaying).toBe(true);
+    const forward = mount(null, 0.3, false, 0);
+    detectAt(forward.values, { ...good, forward_neck_tilt: true }, 0);
     expect(play).toHaveBeenCalledOnce();
 
-    mount({ ...good, hand_near_face: true }, 0.3, false, 0);
-    mount({ ...good, mouth_open: true }, 0.3, false, 0);
+    detectAt(forward.values, { ...good, hand_near_face: true }, 1_000);
+    detectAt(forward.values, { ...good, mouth_open: true }, 2_000);
     expect(play).toHaveBeenCalledOnce();
   });
 
   it('does not alert for null data or when no person is found', () => {
-    expect(mount(null, 0.3, false, 0).result.isPlaying).toBe(false);
-    expect(mount({ ...bad, person_found: false }, 0.3, false, 0).result.isPlaying).toBe(false);
+    const harness = mount(null, 0.3, false, 0);
+    detectAt(harness.values, null, 0);
+    detectAt(harness.values, { ...bad, person_found: false }, 1_000);
     expect(play).not.toHaveBeenCalled();
+    expect(harness.result.isPlaying).toBe(false);
   });
 
-  it('clamps only the assigned audio volume while retaining raw eligibility', () => {
-    mount(bad, Infinity, false, 0);
+  it('suppresses the beep while paused, then beeps on the next bad detection past the delay', () => {
+    const harness = mount(null, 0.3, true, 0);
+    detectAt(harness.values, bad, 0);
+    detectAt(harness.values, bad, 1_000);
+    expect(play).not.toHaveBeenCalled();
+    expect(harness.result.isPlaying).toBe(false);
+    harness.values.paused = false;
+    flushSync();
+    // Unpausing alone is not a detection, so nothing beeps yet.
+    expect(play).not.toHaveBeenCalled();
+    expect(harness.result.isPlaying).toBe(true);
+    detectAt(harness.values, bad, 2_000);
+    expect(play).toHaveBeenCalledOnce();
+  });
+
+  it('honors volume: mute blocks the beep, and the assigned volume is clamped', () => {
+    const harness = mount(null, 0, false, 0);
+    detectAt(harness.values, bad, 0);
+    detectAt(harness.values, bad, 1_000);
+    expect(play).not.toHaveBeenCalled();
+    expect(harness.result.isPlaying).toBe(false);
+
+    harness.values.volume = Infinity;
+    flushSync();
+    detectAt(harness.values, bad, 2_000);
     expect(audio.volume).toBe(1);
     expect(play).toHaveBeenCalledOnce();
-
-    const negative = mount(bad, -0.5, false, 0);
-    expect(audio.volume).toBe(0);
-    expect(negative.result.isPlaying).toBe(false);
-    expect(play).toHaveBeenCalledOnce();
-
-    const nan = mount(bad, Number.NaN, false, 0);
-    expect(audio.volume).toBeNaN();
-    expect(nan.result.isPlaying).toBe(false);
   });
 
-  it('handles non-finite and negative delay values without scheduling timers', () => {
-    expect(mount(bad, 0.3, false, Infinity).result.isPlaying).toBe(false);
-    expect(mount(bad, 0.3, false, -Infinity).result.isPlaying).toBe(true);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it('catches synchronous play failures without recording a false rate-limit time', () => {
+  it('catches synchronous play failures and still beeps on the next crossing', () => {
     play.mockImplementationOnce(() => { throw new Error('sync blocked'); });
-    const harness = mount(bad, 0.3, false, 0);
+    const harness = mount(null, 0.3, false, 0);
+    detectAt(harness.values, bad, 0);
     expect(logger.error).toHaveBeenCalledWith(
       'detection',
       'Failed to play posture alert:',
       expect.any(Error),
     );
-    vi.advanceTimersByTime(100);
-    reevaluate(harness.values);
+    detectAt(harness.values, bad, 1_000);
     expect(play).toHaveBeenCalledTimes(2);
   });
 
-  it('preserves oracle playing state after asynchronous play rejection', async () => {
+  it('preserves playing state after an asynchronous play rejection', async () => {
     play.mockRejectedValueOnce(new Error('blocked'));
-    const harness = mount(bad, 0.3, false, 0);
+    const harness = mount(null, 0.3, false, 0);
+    detectAt(harness.values, bad, 0);
     await Promise.resolve();
     expect(harness.result.isPlaying).toBe(true);
-    expect(logger.warn).not.toHaveBeenCalledWith(
-      'detection',
-      'Posture alert playback was blocked:',
-      expect.anything(),
-    );
   });
 
-  it('does not rewind active playback during ordinary reactive reevaluation', () => {
-    const harness = mount(bad, 0.3, false, 0);
+  it('does not rewind active playback during ordinary settings re-evaluation', () => {
+    const harness = mount(null, 0.3, false, 0);
+    detectAt(harness.values, bad, 0);
     audio.currentTime = 5;
     harness.values.volume = 0.4;
     flushSync();
@@ -224,7 +270,8 @@ describe('usePostureSound', () => {
   });
 
   it('pauses and rewinds only when the hook is disposed', () => {
-    const harness = mount(bad, 0.3, false, 0);
+    const harness = mount(null, 0.3, false, 0);
+    detectAt(harness.values, bad, 0);
     audio.currentTime = 4;
     harness.dispose();
     disposers.pop();

@@ -16,7 +16,7 @@ test('initializes native readiness and sends raw capture bytes', async ({ page }
   await expect(page.getByTestId('dataset')).toContainText('captured-frame:good');
 });
 
-test('mutates paged dataset state and delegates undo to native IPC', async ({ page }) => {
+test('mutates dataset state and delegates undo to native IPC', async ({ page }) => {
   await page.getByRole('button', { name: 'Refresh dataset' }).click();
   await expect(page.getByTestId('dataset')).toContainText('frame-1:good');
 
@@ -31,11 +31,14 @@ test('mutates paged dataset state and delegates undo to native IPC', async ({ pa
 });
 
 test('round-trips and resets Rust-owned camera and UI settings', async ({ page }) => {
+  // The saved tileMotionThreshold (7.5) round-trips alongside cameraWidth, and
+  // resets back to the native default (1.5) — proving a new preprocessing field
+  // persists through the native settings pipeline.
   await page.getByRole('button', { name: 'Save settings' }).click();
-  await expect(page.getByTestId('settings-status')).toHaveText('1280/0.75');
+  await expect(page.getByTestId('settings-status')).toHaveText('1280/0.75/7.5');
 
   await page.getByRole('button', { name: 'Reset settings' }).click();
-  await expect(page.getByTestId('settings-status')).toHaveText('800/0.3');
+  await expect(page.getByTestId('settings-status')).toHaveText('800/0.3/1.5');
 });
 
 test('renders tray startup toggles checked by default and persists an unchecked toggle across a reload', async ({ page }) => {

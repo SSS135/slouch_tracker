@@ -356,8 +356,8 @@
     /* The grid flows inside the control panel's own scroll area and must not be
        its own scrollport. A nested `overflow: auto` here combined with
        `overscroll-behavior: contain` trapped wheel events, so scrolling while
-       the pointer was over the grid never chained to the panel. The dataset is
-       paged, so no independent scroll is needed. */
+       the pointer was over the grid never chained to the panel. Every frame
+       renders on one page and scrolls with the panel. */
   }
 
   .sections {

@@ -82,7 +82,7 @@ fn settings_reject_invalid_values_without_overwriting_saved_state() {
         .expect("save valid camera");
 
     let mut invalid_camera = camera.clone();
-    invalid_camera.gaussian_blur_kernel = 4;
+    invalid_camera.clahe_strength = 20.0;
     assert!(matches!(
         storage.save_camera_settings(&invalid_camera),
         Err(StorageError::Validation(_))

@@ -1775,7 +1775,7 @@ mod tests {
         assert!(UiSettings::default().validate().is_ok());
 
         let camera = CameraSettings {
-            gaussian_blur_kernel: 2,
+            clahe_strength: 20.0,
             ..CameraSettings::default()
         };
         assert!(camera.validate().is_err());
@@ -1823,7 +1823,7 @@ mod tests {
     }
 
     #[test]
-    fn native_preprocessor_consumes_smoothing_blur_and_contrast_settings() {
+    fn native_preprocessor_consumes_smoothing_and_contrast_settings() {
         let frame = |values: [u8; 4]| ImageData {
             data: values
                 .into_iter()
@@ -1834,7 +1834,6 @@ mod tests {
         };
         let mut settings = CameraSettings {
             smoothing_frames: 2,
-            gaussian_blur_kernel: 0,
             clahe_strength: 0.0,
             ..CameraSettings::default()
         };
@@ -1848,13 +1847,6 @@ mod tests {
         assert_eq!(smoothed.data[0], 50);
 
         settings.smoothing_frames = 1;
-        settings.gaussian_blur_kernel = 3;
-        let blurred = preprocessor
-            .process(frame([0, 255, 0, 255]), &settings)
-            .unwrap();
-        assert_ne!(blurred.data, frame([0, 255, 0, 255]).data);
-
-        settings.gaussian_blur_kernel = 0;
         settings.clahe_strength = 3.5;
         let contrasted = preprocessor
             .process(frame([32, 64, 128, 192]), &settings)

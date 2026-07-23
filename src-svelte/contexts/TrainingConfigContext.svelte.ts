@@ -44,17 +44,19 @@ export interface TrainingConfigContextValue {
   reload(): Promise<void>;
 }
 
-// Default posture features: [nlf_backbone_max] — the max-pooled NLF-L backbone embedding
-// (512 dims), pinned as the app default for the backbone-embedding pipeline; the user can
-// change it in the Training tab. Classifier default stays the MLP logistic head
-// (hiddenLayers 0) with class weighting + PCA + z-score from in-app benchmarking.
-// classifierConfig.params holds only the deviations from the registry defaults;
-// applySettings overlays them onto the full registry parameter set.
+// App default training config — used on a fresh install / after reset, when native
+// get_training_settings returns null. The MLP param defaults live entirely in the native
+// classifier registry (get_classifier_registry): the sweep-tuned optimum — hiddenLayers 0
+// (logistic head), hiddenSize 64, maxIterations 350, learningRate 0.01, weightDecay 0.0373,
+// useClassWeights false, labelSmoothing 0.05. classifierConfig.params therefore carries no
+// overrides; defaultClassifierConfig assembles the full param set from the registry defaults.
+// Default posture features are the body-intrinsic 3D geometry pair; presence uses the
+// engineered detection geometry. All of it is user-changeable in the Training tab.
 export const DEFAULT_CONFIG: TrainingConfig = {
-  classifierConfig: { classifierId: 'mlp', params: { hiddenLayers: 0, useClassWeights: true } },
-  dimReductionConfig: { method: 'pca', components: 30 },
-  postureFeatureTypes: ['nlf_backbone_max'],
-  presenceFeatureTypes: ['rtmdet_engineered', 'keypoint_scores'],
+  classifierConfig: { classifierId: 'mlp', params: {} },
+  dimReductionConfig: { method: 'pca', components: 32 },
+  postureFeatureTypes: ['posture_geometry_3d', 'torso_invariant_3d'],
+  presenceFeatureTypes: ['rtmdet_engineered'],
   normalizationMode: 'z_score',
   cvFolds: 5,
 };

@@ -14,6 +14,17 @@ import {
 
 const KEYPOINT_DRAW_THRESHOLD = 0.3;
 
+// Head-circle sizing (see drawFace). The radius is the maximum pairwise spread of
+// confident face keypoints times this fraction; 0.65 reproduces the historical
+// frontal size (which was ear-span * 0.65, and in a frontal view the ear-to-ear
+// pair is the maximum spread).
+const HEAD_RADIUS_FROM_FACE_SPREAD = 0.65;
+// Body-scale floor as a fraction of shoulder width, kept below the frontal face
+// spread so it never enlarges a frontal head, yet catches degenerate spreads.
+const HEAD_RADIUS_FROM_SHOULDER = 0.16;
+// Fallback head radius (px at baseScale 1) when no shoulders are detected.
+const HEAD_RADIUS_DEFAULT = 25;
+
 export interface Keypoint {
   x: number;
   y: number;
@@ -94,7 +105,9 @@ function drawFace(
   color: string,
   noseColor?: string,
   earColor?: string,
-  baseScale: number = 1.0
+  baseScale: number = 1.0,
+  shoulderWidth: number = 0,
+  shouldersValid: boolean = false
 ): void {
   const nose = keypoints[NOSE];
   const leftEye = keypoints[LEFT_EYE];
@@ -115,11 +128,31 @@ function drawFace(
 
   const avgOpacity = validFacePoints.reduce((sum, kp) => sum + kp.opacity, 0) / validFacePoints.length;
 
-  let radius = 25 * baseScale; // Default radius (scaled)
-  if (leftEar && rightEar && leftEar.opacity > 0.01 && rightEar.opacity > 0.01) {
-    const earDistance = Math.abs(leftEar.x - rightEar.x) * canvasWidth;
-    radius = earDistance * 0.65; // Head circle slightly larger than ear span
+  // Head radius from the maximum pairwise 2D spread of the confident face
+  // keypoints, measured in pixel space so it is view-invariant. A profile collapses
+  // the eye/ear horizontal span toward zero — the old |leftEar.x - rightEar.x|
+  // formula shrank the head to almost nothing there — but the nose↔ear diagonal
+  // still spans true head scale, so the maximum pairwise distance stays stable.
+  let maxFaceSpread = 0;
+  for (let i = 0; i < validFacePoints.length; i++) {
+    for (let j = i + 1; j < validFacePoints.length; j++) {
+      const dx = (validFacePoints[i].x - validFacePoints[j].x) * canvasWidth;
+      const dy = (validFacePoints[i].y - validFacePoints[j].y) * canvasHeight;
+      const dist = Math.hypot(dx, dy);
+      if (dist > maxFaceSpread) maxFaceSpread = dist;
+    }
   }
+
+  // Body-scale floor: shoulders are reliably detected in every view, so a fixed
+  // fraction of shoulder width keeps the head sane when the face spread is
+  // degenerate (surviving points near-collinear). It sits below the frontal face
+  // spread so a frontal head keeps its historical size; falls back to a fixed
+  // default only when no shoulders are present.
+  const floorRadius = shouldersValid
+    ? shoulderWidth * HEAD_RADIUS_FROM_SHOULDER
+    : HEAD_RADIUS_DEFAULT * baseScale;
+
+  const radius = Math.max(maxFaceSpread * HEAD_RADIUS_FROM_FACE_SPREAD, floorRadius);
 
   ctx.save();
   ctx.globalAlpha = avgOpacity;
@@ -248,13 +281,13 @@ export function drawHumanLikeSkeleton(
   const leftHip = keypoints[LEFT_HIP];
   const rightHip = keypoints[RIGHT_HIP];
 
-  let shoulderWidth = 50;
-  if (
-    leftShoulder &&
-    rightShoulder &&
+  const shouldersValid =
+    leftShoulder !== undefined &&
+    rightShoulder !== undefined &&
     leftShoulder.opacity > 0.01 &&
-    rightShoulder.opacity > 0.01
-  ) {
+    rightShoulder.opacity > 0.01;
+  let shoulderWidth = 50;
+  if (shouldersValid) {
     shoulderWidth = Math.abs(leftShoulder.x - rightShoulder.x) * canvasWidth;
   }
   const limbWidth = shoulderWidth * 0.25;
@@ -358,7 +391,7 @@ export function drawHumanLikeSkeleton(
     }
   });
 
-  drawFace(ctx, keypoints, canvasWidth, canvasHeight, threshold, color, noseColor, earColor, baseScale);
+  drawFace(ctx, keypoints, canvasWidth, canvasHeight, threshold, color, noseColor, earColor, baseScale, shoulderWidth, shouldersValid);
 }
 
 export interface DetectionBox {

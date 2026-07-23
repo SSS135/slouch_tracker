@@ -12,8 +12,10 @@ const cameraDefaults = {
   autoCaptureIntervalSeconds: 2,
   privacyMode: true,
   claheStrength: 3.5,
-  gaussianBlurKernel: 5,
   smoothingFrames: 3,
+  tileMotionThreshold: 3,
+  claheTemporalAlpha: 0.15,
+  preprocessingDebugView: false,
   showDetectionOverlay: false,
 };
 const uiDefaults = {
@@ -145,7 +147,6 @@ describe('useCameraSettings native persistence', () => {
 
     flushSync(() => result.updateSettings({
       claheStrength: 15.04,
-      gaussianBlurKernel: 8,
       smoothingFrames: 20,
       alertVolume: 0,
     }));
@@ -155,14 +156,12 @@ describe('useCameraSettings native persistence', () => {
       ...cameraDefaults,
       ...uiDefaults,
       claheStrength: 10,
-      gaussianBlurKernel: 7,
       smoothingFrames: 1,
       alertVolume: 0,
     });
     expect(mock.client.saveCameraSettings).toHaveBeenLastCalledWith({
       ...cameraDefaults,
       claheStrength: 10,
-      gaussianBlurKernel: 7,
       smoothingFrames: 1,
     });
     expect(mock.client.saveUiSettings).toHaveBeenLastCalledWith({
@@ -191,30 +190,6 @@ describe('useCameraSettings native persistence', () => {
     expect(result.error).toBeNull();
   });
 
-  it('normalizes gaussianBlurKernel to an odd value in 0-15, keeping the zero disable case', async () => {
-    const mock = client();
-    const result = mount(mock);
-    await loaded(result);
-
-    flushSync(() => result.updateSettings({ gaussianBlurKernel: 4 }));
-    await result.flush();
-    expect(result.settings.gaussianBlurKernel).toBe(3);
-
-    flushSync(() => result.updateSettings({ gaussianBlurKernel: 5 }));
-    await result.flush();
-    expect(result.settings.gaussianBlurKernel).toBe(5);
-
-    flushSync(() => result.updateSettings({ gaussianBlurKernel: 0 }));
-    await result.flush();
-    expect(result.settings.gaussianBlurKernel).toBe(0);
-    expect(result.error).toBeNull();
-
-    flushSync(() => result.updateSettings({ gaussianBlurKernel: 20 }));
-    await result.flush();
-    expect(result.settings.gaussianBlurKernel).toBe(15);
-    expect(result.error).toBeNull();
-  });
-
   it('passes valid smoothingFrames boundaries through unchanged', async () => {
     const mock = client();
     const result = mount(mock);
@@ -232,6 +207,84 @@ describe('useCameraSettings native persistence', () => {
     await result.flush();
     expect(result.settings.smoothingFrames).toBe(10);
     expect(result.error).toBeNull();
+  });
+
+  it('defaults the new preprocessing fields when native omits them', async () => {
+    const mock = client();
+    mock.client.getCameraSettings.mockResolvedValueOnce({
+      cameraWidth: 800,
+      cameraHeight: 600,
+      captureIntervalSeconds: 0.5,
+      autoCaptureEnabled: true,
+      autoCaptureIntervalSeconds: 2,
+      privacyMode: true,
+      claheStrength: 3.5,
+      smoothingFrames: 3,
+      showDetectionOverlay: false,
+    });
+    const result = mount(mock);
+    await loaded(result);
+
+    expect(result.settings.tileMotionThreshold).toBe(1.5);
+    expect(result.settings.claheTemporalAlpha).toBe(0.20);
+    expect(result.settings.preprocessingDebugView).toBe(false);
+  });
+
+  it('clamps tileMotionThreshold and claheTemporalAlpha into range and passes valid values through', async () => {
+    const mock = client();
+    const result = mount(mock);
+    await loaded(result);
+
+    flushSync(() => result.updateSettings({ tileMotionThreshold: 50, claheTemporalAlpha: 5 }));
+    await result.flush();
+    expect(result.settings.tileMotionThreshold).toBe(20);
+    expect(result.settings.claheTemporalAlpha).toBe(1);
+    expect(result.error).toBeNull();
+
+    flushSync(() => result.updateSettings({ tileMotionThreshold: 0.1, claheTemporalAlpha: 0.01 }));
+    await result.flush();
+    expect(result.settings.tileMotionThreshold).toBe(0.5);
+    expect(result.settings.claheTemporalAlpha).toBe(0.05);
+
+    flushSync(() => result.updateSettings({ tileMotionThreshold: 7.5, claheTemporalAlpha: 0.3 }));
+    await result.flush();
+    expect(result.settings.tileMotionThreshold).toBe(7.5);
+    expect(result.settings.claheTemporalAlpha).toBe(0.3);
+    expect(result.error).toBeNull();
+  });
+
+  it('fails closed when native returns an out-of-range motion threshold', async () => {
+    const mock = client();
+    mock.client.getCameraSettings.mockResolvedValueOnce({ ...cameraDefaults, tileMotionThreshold: 40 });
+    const result = mount(mock);
+
+    await vi.waitFor(() => expect(result.error).toBe('Motion threshold must be between 0.5 and 20.'));
+    expect(result.ready).toBe(false);
+  });
+
+  it('fails closed when native returns an out-of-range CLAHE smoothing alpha', async () => {
+    const mock = client();
+    mock.client.getCameraSettings.mockResolvedValueOnce({ ...cameraDefaults, claheTemporalAlpha: 2 });
+    const result = mount(mock);
+
+    await vi.waitFor(() => expect(result.error).toBe('CLAHE smoothing must be between 0.05 and 1.'));
+    expect(result.ready).toBe(false);
+  });
+
+  it('persists a flipped preprocessingDebugView through saveCameraSettings', async () => {
+    const mock = client();
+    const result = mount(mock);
+    await loaded(result);
+
+    flushSync(() => result.updateSettings({ preprocessingDebugView: true }));
+    await result.flush();
+
+    expect(mock.client.saveCameraSettings).toHaveBeenLastCalledWith({
+      ...cameraDefaults,
+      preprocessingDebugView: true,
+    });
+    expect(mock.readCameraSettings().preprocessingDebugView).toBe(true);
+    expect(result.settings.preprocessingDebugView).toBe(true);
   });
 
   it('rejects malformed non-preprocessing updates before optimistic publication', async () => {

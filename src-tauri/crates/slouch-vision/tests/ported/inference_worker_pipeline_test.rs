@@ -52,6 +52,8 @@ fn actual_pipeline_returns_owned_detector_and_depth_features_bbox_and_keypoints(
         payload: ProcessPayload {
             image_data: image(640, 480),
             request_id: 42,
+            raw_image_data: None,
+            crop_motion: None,
         },
     });
     let [WorkerResponse::Result { request_id, result }] = &response[..] else {
@@ -105,6 +107,8 @@ fn no_person_and_threshold_adjacent_f32_skip_pose_but_preserve_detector_features
             payload: ProcessPayload {
                 image_data: image(4, 4),
                 request_id: 9,
+                raw_image_data: None,
+                crop_motion: None,
             },
         });
         assert!(
@@ -146,6 +150,8 @@ fn malformed_images_fail_before_any_session_run_and_preserve_request_id() {
             payload: ProcessPayload {
                 image_data: input,
                 request_id,
+                raw_image_data: None,
+                crop_motion: None,
             },
         });
         assert!(
@@ -168,6 +174,8 @@ fn session_failures_and_missing_or_wrong_outputs_emit_only_typed_errors() {
             payload: ProcessPayload {
                 image_data: image(4, 4),
                 request_id: 55,
+                raw_image_data: None,
+                crop_motion: None,
             },
         });
         assert!(matches!(
@@ -193,6 +201,8 @@ fn nlf_session_failure_emits_error_without_result() {
         payload: ProcessPayload {
             image_data: image(640, 480),
             request_id: 77,
+            raw_image_data: None,
+            crop_motion: None,
         },
     });
     assert!(
@@ -214,6 +224,8 @@ fn malformed_nlf_tensor_non_finite_output_does_not_publish_a_result() {
         payload: ProcessPayload {
             image_data: image(640, 480),
             request_id: 88,
+            raw_image_data: None,
+            crop_motion: None,
         },
     });
     assert!(
@@ -245,6 +257,8 @@ fn nlf_backbone_pooling_yields_known_mean_max_and_population_std() {
         payload: ProcessPayload {
             image_data: image(640, 480),
             request_id: 1,
+            raw_image_data: None,
+            crop_motion: None,
         },
     });
     let [WorkerResponse::Result { result, .. }] = &response[..] else {
@@ -304,6 +318,8 @@ fn wrong_length_backbone_feats_fails_the_frame() {
         payload: ProcessPayload {
             image_data: image(640, 480),
             request_id: 99,
+            raw_image_data: None,
+            crop_motion: None,
         },
     });
     assert!(

@@ -10,7 +10,6 @@ pub struct CameraSettings {
     pub auto_capture_interval_seconds: f64,
     pub privacy_mode: bool,
     pub clahe_strength: f64,
-    pub gaussian_blur_kernel: u8,
     pub smoothing_frames: u8,
     // Display-only diagnostic overlay (skeleton + detection box) drawn over the
     // live video by the frontend. Never read by Rust; validated + persisted only.
@@ -19,6 +18,21 @@ pub struct CameraSettings {
     // the struct's `deny_unknown_fields`.
     #[serde(default)]
     pub show_detection_overlay: bool,
+    // Per-tile motion gate for the motion-gated temporal accumulator: mean absolute
+    // luminance difference PER PIXEL on a 0-255 scale, measured after per-tile DC
+    // (mean) removal. A tile above the threshold is "moving" and shows current-frame
+    // pixels; below it the tile keeps temporally averaging.
+    // Serde default lets pre-field rows load (same reason as show_detection_overlay).
+    #[serde(default = "default_tile_motion_threshold")]
+    pub tile_motion_threshold: f64,
+    // EMA weight for temporal de-flicker of the CLAHE per-tile tone curves (LUTs).
+    // 1.0 reproduces today's per-frame behavior; lower is smoother/slower.
+    #[serde(default = "default_clahe_temporal_alpha")]
+    pub clahe_temporal_alpha: f64,
+    // When true, the preview stream may serve a per-tile accumulation-depth heatmap
+    // for tuning the accumulator.
+    #[serde(default)]
+    pub preprocessing_debug_view: bool,
 }
 
 impl Default for CameraSettings {
@@ -32,10 +46,12 @@ impl Default for CameraSettings {
             auto_capture_enabled: true,
             auto_capture_interval_seconds: 2.0,
             privacy_mode: true,
-            clahe_strength: 3.5,
-            gaussian_blur_kernel: 5,
-            smoothing_frames: 3,
+            clahe_strength: 3.0,
+            smoothing_frames: 5,
             show_detection_overlay: false,
+            tile_motion_threshold: 1.5,
+            clahe_temporal_alpha: 0.20,
+            preprocessing_debug_view: false,
         }
     }
 }
@@ -61,16 +77,11 @@ impl CameraSettings {
             "autoCaptureIntervalSeconds",
         )?;
         validate_finite_range(self.clahe_strength, 0.0, 10.0, "claheStrength")?;
-        if self.gaussian_blur_kernel > 15
-            || (self.gaussian_blur_kernel != 0 && self.gaussian_blur_kernel.is_multiple_of(2))
-        {
-            return Err(
-                "gaussianBlurKernel must be zero or an odd integer between 1 and 15".into(),
-            );
-        }
         if !(1..=10).contains(&self.smoothing_frames) {
             return Err("smoothingFrames must be between 1 and 10".into());
         }
+        validate_finite_range(self.tile_motion_threshold, 0.5, 20.0, "tileMotionThreshold")?;
+        validate_finite_range(self.clahe_temporal_alpha, 0.05, 1.0, "claheTemporalAlpha")?;
         Ok(())
     }
 }
@@ -93,6 +104,14 @@ pub struct UiSettings {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_tile_motion_threshold() -> f64 {
+    1.5
+}
+
+fn default_clahe_temporal_alpha() -> f64 {
+    0.20
 }
 
 impl Default for UiSettings {
@@ -148,7 +167,7 @@ mod tests {
     fn deserializes_legacy_settings_without_overlay_field() {
         // A settings row persisted before the overlay field existed must still
         // load (overlay off), not error under deny_unknown_fields.
-        let legacy = r#"{"cameraWidth":800,"cameraHeight":600,"captureIntervalSeconds":1.0,"autoCaptureEnabled":true,"autoCaptureIntervalSeconds":2.0,"privacyMode":false,"claheStrength":2.5,"gaussianBlurKernel":0,"smoothingFrames":3}"#;
+        let legacy = r#"{"cameraWidth":800,"cameraHeight":600,"captureIntervalSeconds":1.0,"autoCaptureEnabled":true,"autoCaptureIntervalSeconds":2.0,"privacyMode":false,"claheStrength":2.5,"smoothingFrames":3}"#;
         let camera: CameraSettings = serde_json::from_str(legacy).expect("legacy settings load");
         assert!(!camera.show_detection_overlay);
         camera.validate().expect("legacy settings valid");
@@ -179,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_finite_and_noncanonical_values() {
+    fn rejects_non_finite_and_out_of_range_values() {
         let camera = CameraSettings {
             capture_interval_seconds: f64::NAN,
             ..CameraSettings::default()
@@ -187,7 +206,7 @@ mod tests {
         assert!(camera.validate().is_err());
 
         let camera = CameraSettings {
-            gaussian_blur_kernel: 4,
+            clahe_strength: 20.0,
             ..CameraSettings::default()
         };
         assert!(camera.validate().is_err());
@@ -197,5 +216,48 @@ mod tests {
             ..UiSettings::default()
         };
         assert!(ui.validate().is_err());
+    }
+
+    #[test]
+    fn preprocessing_fields_default_and_toggle_freely() {
+        let defaults = CameraSettings::default();
+        assert_eq!(defaults.tile_motion_threshold, 1.5);
+        assert_eq!(defaults.clahe_temporal_alpha, 0.20);
+        assert!(!defaults.preprocessing_debug_view);
+        let camera = CameraSettings {
+            preprocessing_debug_view: true,
+            ..CameraSettings::default()
+        };
+        camera.validate().expect("debug view toggle stays valid");
+    }
+
+    #[test]
+    fn deserializes_legacy_settings_without_preprocessing_fields() {
+        // A settings row persisted before the motion-accumulator fields existed must
+        // load with those fields at their defaults, not error under deny_unknown_fields.
+        let legacy = r#"{"cameraWidth":800,"cameraHeight":600,"captureIntervalSeconds":1.0,"autoCaptureEnabled":true,"autoCaptureIntervalSeconds":2.0,"privacyMode":false,"claheStrength":2.5,"smoothingFrames":3,"showDetectionOverlay":true}"#;
+        let camera: CameraSettings = serde_json::from_str(legacy).expect("legacy settings load");
+        assert_eq!(camera.tile_motion_threshold, 1.5);
+        assert_eq!(camera.clahe_temporal_alpha, 0.20);
+        assert!(!camera.preprocessing_debug_view);
+        camera.validate().expect("legacy settings valid");
+    }
+
+    #[test]
+    fn rejects_out_of_range_preprocessing_values() {
+        for value in [0.0, 25.0] {
+            let camera = CameraSettings {
+                tile_motion_threshold: value,
+                ..CameraSettings::default()
+            };
+            assert!(camera.validate().is_err());
+        }
+        for value in [0.0, 1.5] {
+            let camera = CameraSettings {
+                clahe_temporal_alpha: value,
+                ..CameraSettings::default()
+            };
+            assert!(camera.validate().is_err());
+        }
     }
 }

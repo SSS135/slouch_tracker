@@ -115,7 +115,17 @@ pub fn run() {
             // Processed/inferred frames carry a monotonic capture sequence; the raw
             // feed has none. `frame_seq` is echoed as `x-slouch-frame-seq` so the
             // webview can order commits against the Rust-authoritative ordering.
-            let (bytes, frame_seq) = if path.contains("inferred") {
+            let (bytes, frame_seq) = if path.contains("debug-tiles") {
+                // Preprocessing debug heatmap. Stamps demand exactly like /processed
+                // because the debug frame is produced inside `run_preview_processing`,
+                // which only runs while processed-view demand is active — pulling only
+                // /debug-tiles must keep that foreground pipeline alive.
+                state.camera.note_processed_request();
+                match state.camera.debug_frame_snapshot() {
+                    Some((seq, bytes)) => (Some(bytes), Some(seq)),
+                    None => (None, None),
+                }
+            } else if path.contains("inferred") {
                 // Detection-overlay diagnostic: the exact preprocessed frame the
                 // detector last ran on. Deliberately does NOT stamp demand, so
                 // `processed_frame` stays the dispatcher-written inferred frame

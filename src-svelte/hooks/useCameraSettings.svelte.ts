@@ -15,8 +15,10 @@ export interface CameraSettings {
   alertDelaySeconds: number;
   privacyMode: boolean;
   claheStrength: number;
-  gaussianBlurKernel: number;
   smoothingFrames: number;
+  tileMotionThreshold: number;
+  claheTemporalAlpha: number;
+  preprocessingDebugView: boolean;
   showDetectionOverlay: boolean;
   minimizeToTrayOnClose: boolean;
   startHiddenOnLogin: boolean;
@@ -43,8 +45,10 @@ const LOADING_SETTINGS: CameraSettings = {
   alertDelaySeconds: 0,
   privacyMode: false,
   claheStrength: 0,
-  gaussianBlurKernel: 0,
   smoothingFrames: 0,
+  tileMotionThreshold: 0,
+  claheTemporalAlpha: 0,
+  preprocessingDebugView: false,
   showDetectionOverlay: false,
   minimizeToTrayOnClose: false,
   startHiddenOnLogin: false,
@@ -74,6 +78,7 @@ function validateSettings(settings: CameraSettings): CameraSettings {
   }
   if (typeof settings.autoCaptureEnabled !== 'boolean' || typeof settings.privacyMode !== 'boolean'
     || typeof settings.showDetectionOverlay !== 'boolean'
+    || typeof settings.preprocessingDebugView !== 'boolean'
     || typeof settings.minimizeToTrayOnClose !== 'boolean'
     || typeof settings.startHiddenOnLogin !== 'boolean') {
     throw new Error('Camera toggle settings are invalid.');
@@ -83,16 +88,20 @@ function validateSettings(settings: CameraSettings): CameraSettings {
     || settings.claheStrength > 10) {
     throw new Error('CLAHE strength must be between 0 and 10.');
   }
-  if (!Number.isInteger(settings.gaussianBlurKernel)
-    || settings.gaussianBlurKernel < 0
-    || settings.gaussianBlurKernel > 15
-    || (settings.gaussianBlurKernel > 0 && settings.gaussianBlurKernel % 2 === 0)) {
-    throw new Error('Gaussian blur kernel must be zero or an odd integer up to 15.');
-  }
   if (!Number.isInteger(settings.smoothingFrames)
     || settings.smoothingFrames < 1
     || settings.smoothingFrames > 10) {
     throw new Error('Smoothing frames must be an integer between 1 and 10.');
+  }
+  if (!Number.isFinite(settings.tileMotionThreshold)
+    || settings.tileMotionThreshold < 0.5
+    || settings.tileMotionThreshold > 20) {
+    throw new Error('Motion threshold must be between 0.5 and 20.');
+  }
+  if (!Number.isFinite(settings.claheTemporalAlpha)
+    || settings.claheTemporalAlpha < 0.05
+    || settings.claheTemporalAlpha > 1) {
+    throw new Error('CLAHE smoothing must be between 0.05 and 1.');
   }
   return settings;
 }
@@ -101,13 +110,15 @@ function normalizeSettings(settings: CameraSettings): CameraSettings {
   const normalized = { ...settings };
   normalized.claheStrength = Math.max(0, Math.min(10, Number(normalized.claheStrength) || 0));
   normalized.claheStrength = Math.round(normalized.claheStrength * 10) / 10;
-  let kernel = Math.max(0, Math.min(15, Math.round(Number(normalized.gaussianBlurKernel) || 0)));
-  if (kernel > 0 && kernel % 2 === 0) kernel -= 1;
-  normalized.gaussianBlurKernel = kernel;
   const frames = Number(normalized.smoothingFrames) || 1;
   normalized.smoothingFrames = Number.isInteger(frames) && frames >= 1 && frames <= 10
     ? frames
     : 1;
+  const motion = Number(normalized.tileMotionThreshold);
+  normalized.tileMotionThreshold = Number.isFinite(motion) ? Math.max(0.5, Math.min(20, motion)) : 1.5;
+  const alpha = Number(normalized.claheTemporalAlpha);
+  normalized.claheTemporalAlpha = Number.isFinite(alpha) ? Math.max(0.05, Math.min(1, alpha)) : 0.20;
+  normalized.preprocessingDebugView = Boolean(normalized.preprocessingDebugView);
   return validateSettings(normalized);
 }
 
@@ -122,8 +133,13 @@ function combine(camera: NativeCameraSettings, ui: NativeUiSettings): CameraSett
     alertDelaySeconds: requiredNumber(ui.alertDelaySeconds, 'alert delay'),
     privacyMode: camera.privacyMode,
     claheStrength: requiredNumber(camera.claheStrength, 'CLAHE strength'),
-    gaussianBlurKernel: camera.gaussianBlurKernel,
     smoothingFrames: camera.smoothingFrames,
+    // Optional in the generated bindings (serde default on the Rust field); a
+    // settings row from a prior app version omits them, so coalesce to the native
+    // defaults (per-tile motion gate 1.5, CLAHE LUT-EMA 0.20, debug view off).
+    tileMotionThreshold: camera.tileMotionThreshold ?? 1.5,
+    claheTemporalAlpha: camera.claheTemporalAlpha ?? 0.20,
+    preprocessingDebugView: camera.preprocessingDebugView ?? false,
     // Optional in the generated bindings (serde default on the Rust field); a
     // settings row from a prior app version omits it, so coalesce to off.
     showDetectionOverlay: camera.showDetectionOverlay ?? false,
@@ -144,8 +160,10 @@ function split(settings: CameraSettings): { camera: NativeCameraSettings; ui: Na
       autoCaptureIntervalSeconds: settings.autoCaptureIntervalSeconds,
       privacyMode: settings.privacyMode,
       claheStrength: settings.claheStrength,
-      gaussianBlurKernel: settings.gaussianBlurKernel,
       smoothingFrames: settings.smoothingFrames,
+      tileMotionThreshold: settings.tileMotionThreshold,
+      claheTemporalAlpha: settings.claheTemporalAlpha,
+      preprocessingDebugView: settings.preprocessingDebugView,
       showDetectionOverlay: settings.showDetectionOverlay,
     },
     ui: {

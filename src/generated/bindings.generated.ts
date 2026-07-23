@@ -126,9 +126,11 @@ export type CameraSettings = {
 	autoCaptureIntervalSeconds: number | null,
 	privacyMode: boolean,
 	claheStrength: number | null,
-	gaussianBlurKernel: number,
 	smoothingFrames: number,
 	showDetectionOverlay?: boolean,
+	tileMotionThreshold?: number | null,
+	claheTemporalAlpha?: number | null,
+	preprocessingDebugView?: boolean,
 };
 
 export type ClassificationResult = {

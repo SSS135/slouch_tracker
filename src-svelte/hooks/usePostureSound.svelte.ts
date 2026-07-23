@@ -10,6 +10,10 @@ type ReactiveValue<T> = T | (() => T);
 const read = <T>(value: ReactiveValue<T>): T =>
   typeof value === 'function' ? (value as () => T)() : value;
 
+// Sentinel distinct from every possible posture value (including null) so the very
+// first evaluation registers as a fresh detection.
+const UNSEEN = Symbol('unseen-posture');
+
 function createAudio(): AudioHandle | null {
   if (typeof window === 'undefined' || typeof window.Audio === 'undefined') {
     logger.warn('detection', 'HTMLAudioElement not available. Posture sound disabled.');
@@ -27,7 +31,16 @@ function createAudio(): AudioHandle | null {
   return audio;
 }
 
-/** Evaluates posture audio only when reactive inputs change, as the oracle does. */
+/**
+ * Emits the bad-posture alert purely as a consequence of detection results — there is no
+ * wall-clock timer, so a beep can only fire when a fresh detection arrives (~1-2 fps).
+ * The threshold stays time-based: a beep fires when a bad detection lands at least
+ * `alertDelaySeconds` after the anchor, where the anchor is the start of the current bad
+ * streak and is reset to "now" on every beep. Repeats therefore also require
+ * `alertDelaySeconds` of continued bad posture, evaluated only at detection arrivals. Any
+ * good/away/no-person result clears the anchor, so the sound stops the instant posture
+ * recovers or detections stop being bad.
+ */
 export function usePostureSound(
   postureData: ReactiveValue<MultiTaskDetectionResult | null>,
   volume: ReactiveValue<number> = 0.3,
@@ -36,8 +49,20 @@ export function usePostureSound(
 ): { readonly isPlaying: boolean } {
   const audio = createAudio();
   let isPlaying = $state(false);
-  let badSince: number | null = null;
-  let lastPlayedAt: number | null = null;
+  // Start of the current bad streak / timestamp of the last beep; null when not bad.
+  let anchorMs: number | null = null;
+  let lastSeen: MultiTaskDetectionResult | null | typeof UNSEEN = UNSEEN;
+
+  const playAlert = (): void => {
+    if (!audio) return;
+    try {
+      audio.pause();
+      audio.currentTime = 0;
+      void audio.play();
+    } catch (error) {
+      logger.error('detection', 'Failed to play posture alert:', error);
+    }
+  };
 
   $effect(() => {
     if (!audio) return;
@@ -47,37 +72,27 @@ export function usePostureSound(
     const delaySeconds = read(alertDelaySeconds);
     audio.volume = Math.max(0, Math.min(1, rawVolume));
 
+    // A genuinely new detection carries a fresh object reference; settings-driven re-runs
+    // (volume/paused/delay) keep the same reference. Only detections move the streak anchor
+    // and may emit — settings changes must never evaluate the alert.
+    const isNewDetection = data !== lastSeen;
+    lastSeen = data;
+
     const bad = Boolean(data?.person_found && (data.slouching || data.forward_neck_tilt));
-    const now = Date.now();
-    if (bad) {
-      badSince ??= now;
-    } else {
-      badSince = null;
-      lastPlayedAt = null;
+    if (isNewDetection) {
+      anchorMs = bad ? (anchorMs ?? Date.now()) : null;
     }
 
-    const elapsedSeconds = badSince === null ? 0 : (now - badSince) / 1000;
-    const shouldPlay = bad
-      && elapsedSeconds >= delaySeconds
-      && rawVolume > 0
-      && !isPaused;
-    isPlaying = shouldPlay;
-
-    if (!shouldPlay) {
+    const eligible = bad && rawVolume > 0 && !isPaused;
+    isPlaying = eligible;
+    if (!eligible) {
       audio.pause();
       return;
     }
 
-    const timeSinceLastPlay = lastPlayedAt === null ? Infinity : now - lastPlayedAt;
-    if (timeSinceLastPlay < 1000) return;
-
-    try {
-      audio.pause();
-      audio.currentTime = 0;
-      void audio.play();
-      lastPlayedAt = now;
-    } catch (error) {
-      logger.error('detection', 'Failed to play posture alert:', error);
+    if (isNewDetection && anchorMs !== null && (Date.now() - anchorMs) / 1000 >= delaySeconds) {
+      anchorMs = Date.now();
+      playAlert();
     }
   });
 

@@ -53,7 +53,7 @@ export const TINY_PNG_BASE64 =
 
 /**
  * Camera settings that turn the native preprocessor into an exact
- * pass-through (no CLAHE, no blur, single-frame temporal window), so raw
+ * pass-through (no CLAHE, single-frame temporal window), so raw
  * fixture frames reach the models byte-identical to the frozen
  * vision-inference-v1 baseline.
  */
@@ -65,7 +65,6 @@ export const NEUTRAL_CAMERA_SETTINGS = {
   autoCaptureIntervalSeconds: 2.0,
   privacyMode: true,
   claheStrength: 0,
-  gaussianBlurKernel: 0,
   smoothingFrames: 1,
   showDetectionOverlay: false,
 };

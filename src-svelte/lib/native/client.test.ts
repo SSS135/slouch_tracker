@@ -77,7 +77,6 @@ describe('Svelte native client', () => {
       autoCaptureIntervalSeconds: 2,
       privacyMode: true,
       claheStrength: 3.5,
-      gaussianBlurKernel: 5,
       smoothingFrames: 3,
       showDetectionOverlay: false,
     };

@@ -138,6 +138,8 @@ fn nlf_create_failure_returns_actionable_directml_error_and_reinitializes_on_nex
         payload: ProcessPayload {
             image_data: image(640, 480),
             request_id: 77,
+            raw_image_data: None,
+            crop_motion: None,
         },
     });
     let [WorkerResponse::Result {
@@ -174,6 +176,8 @@ fn skips_reinitialization_when_paths_are_not_stored() {
         payload: ProcessPayload {
             image_data: image(4, 4),
             request_id: 77,
+            raw_image_data: None,
+            crop_motion: None,
         },
     });
 
@@ -260,6 +264,8 @@ fn nlf_present_path_yields_seventeen_keypoints_and_depth_feature() {
         payload: ProcessPayload {
             image_data: image(640, 480),
             request_id: 2,
+            raw_image_data: None,
+            crop_motion: None,
         },
     });
     let [WorkerResponse::Result { result, .. }] = &response[..] else {

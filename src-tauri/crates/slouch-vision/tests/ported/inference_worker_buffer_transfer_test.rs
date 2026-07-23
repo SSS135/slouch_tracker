@@ -40,6 +40,8 @@ fn production_result_owns_all_native_feature_buffers_after_worker_drop() {
         payload: ProcessPayload {
             image_data: image(640, 480),
             request_id: 1,
+            raw_image_data: None,
+            crop_motion: None,
         },
     });
     drop(worker);

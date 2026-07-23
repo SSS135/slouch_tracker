@@ -140,6 +140,26 @@ describe('PostureCamera native camera view', () => {
     expect(options.showDetectionOverlay).toBe(false);
   });
 
+  it('passes the debug-tiles URL and preprocessing debug flag to the renderer', () => {
+    render(PostureCamera, {
+      props: {
+        onInferenceResult: mockOnInferenceResult,
+        onFps: mockOnFps,
+        processedView: true,
+        preprocessingDebugView: true,
+      },
+    });
+    const options = vi.mocked(useCanvasRendererModule.useCanvasRenderer).mock.calls[0][0];
+    expect(options.debugTilesFrameUrl).toMatch(/\/debug-tiles$/);
+    expect(options.preprocessingDebugView).toBe(true);
+  });
+
+  it('defaults the preprocessing debug view off', () => {
+    renderCamera();
+    const options = vi.mocked(useCanvasRendererModule.useCanvasRenderer).mock.calls[0][0];
+    expect(options.preprocessingDebugView).toBe(false);
+  });
+
   it('passes the inferred-frame URL and a detection sequence to the renderer', () => {
     render(PostureCamera, {
       props: { onInferenceResult: mockOnInferenceResult, onFps: mockOnFps, showDetectionOverlay: true },

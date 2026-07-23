@@ -55,6 +55,12 @@ export interface UseCanvasRendererOptions {
   frameUrl: string;
   /** The `slouchcam` processed-frame URL (detector input, updated at detection rate). */
   processedFrameUrl?: string;
+  /**
+   * The `slouchcam` tile-heatmap debug URL. Replaces the processed feed in the
+   * video layer while `preprocessingDebugView` is on and the processed view is
+   * active; same contract/demand path as `processedFrameUrl`.
+   */
+  debugTilesFrameUrl?: string;
   enabled?: boolean;
   onDraw?: DrawCallback;
   privacyMode?: boolean;
@@ -63,6 +69,12 @@ export interface UseCanvasRendererOptions {
    * the raw one. Ignored in privacy mode — the grid must keep obscuring the feed.
    */
   processedView?: boolean;
+  /**
+   * Pull the tile-accumulation heatmap (`debugTilesFrameUrl`) instead of the plain
+   * processed feed. Only takes effect while the processed view is active (privacy
+   * off, processed URL present); ignored otherwise, so the raw path is untouched.
+   */
+  preprocessingDebugView?: boolean;
   /**
    * Detection-overlay diagnostic mode (privacy OFF). When on, the video layer
    * shows ONLY the inferred (detector-input) frame, swapped once per detection
@@ -115,6 +127,41 @@ const NO_FRAME_BACKOFF_MS = 150;
 const GRID_SMOOTHING_ALPHA = 0.1;
 const GRID_SIZE = 4;
 
+/** Inputs the privacy-off video layer needs to pick its `slouchcam` endpoint. */
+export interface PreviewUrlSelection {
+  frameUrl: string;
+  processedFrameUrl?: string;
+  debugTilesFrameUrl?: string;
+  privacyMode: boolean;
+  processedView: boolean;
+  preprocessingDebugView: boolean;
+}
+
+/** True when the processed (detector-input) feed should drive the video layer. */
+export function isProcessedViewActive(selection: PreviewUrlSelection): boolean {
+  // Privacy wins: the processed view must never leak the real image.
+  return selection.processedView && !selection.privacyMode && Boolean(selection.processedFrameUrl);
+}
+
+/** True when the tile-accumulation heatmap replaces the processed feed. */
+export function isDebugTilesViewActive(selection: PreviewUrlSelection): boolean {
+  return isProcessedViewActive(selection)
+    && selection.preprocessingDebugView
+    && Boolean(selection.debugTilesFrameUrl);
+}
+
+/**
+ * Chooses which `slouchcam` endpoint the privacy-off video layer pumps from:
+ * debug tiles (debug view on, processed active) → processed (processed view active)
+ * → raw. The debug/processed URLs share the demand-stamp contract, so switching
+ * between them keeps the Rust processed-frame demand alive.
+ */
+export function chooseVideoUrl(selection: PreviewUrlSelection): string {
+  if (isDebugTilesViewActive(selection)) return selection.debugTilesFrameUrl!;
+  if (isProcessedViewActive(selection)) return selection.processedFrameUrl!;
+  return selection.frameUrl;
+}
+
 // Whether the preview should render at all: visible (not minimized/hidden). Losing
 // focus no longer stops the preview — it only slows it (see computeFocused).
 function computeVisible(): boolean {
@@ -145,12 +192,18 @@ export function useCanvasRenderer(
     const overlay = canvasRef.current;
     const img = options.imgRef?.current ?? null;
     const privacyMode = options.privacyMode ?? false;
-    // Reading the toggle here makes a mid-run flip rerun the whole effect, so the
-    // loops restart cleanly on the new URL/rate (same pattern as privacyMode).
-    // Privacy wins: the processed view must never leak the real image.
-    const processedView =
-      (options.processedView ?? false) && !privacyMode && Boolean(options.processedFrameUrl);
-    const videoUrl = processedView ? options.processedFrameUrl! : frameUrl;
+    // Reading the toggles here makes a mid-run flip (processed view or debug view)
+    // rerun the whole effect, so the loops restart cleanly on the new URL/rate
+    // (same pattern as privacyMode). chooseVideoUrl keeps privacy winning and only
+    // swaps in the debug-tiles endpoint while the processed view is active.
+    const videoUrl = chooseVideoUrl({
+      frameUrl,
+      processedFrameUrl: options.processedFrameUrl,
+      debugTilesFrameUrl: options.debugTilesFrameUrl,
+      privacyMode,
+      processedView: options.processedView ?? false,
+      preprocessingDebugView: options.preprocessingDebugView ?? false,
+    });
     // Reading the flag here reruns the effect on a flip, so the overlay loop
     // starts/stops cleanly (same pattern as privacyMode/processedView).
     const showDetectionOverlay = options.showDetectionOverlay ?? false;
