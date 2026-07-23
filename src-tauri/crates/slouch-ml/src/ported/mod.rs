@@ -3,6 +3,7 @@ pub mod async_utils;
 pub mod backend;
 pub mod base_classifier;
 pub mod binning;
+pub mod body_frame;
 pub mod classifier_factory;
 pub mod classifier_registry;
 pub mod config;
@@ -16,6 +17,7 @@ pub mod gaussian_nb_classifier {
 pub mod feature_extraction;
 pub mod feature_extractor;
 mod js_number;
+pub mod keypoints_3d_features;
 pub mod kmeans;
 pub mod kmeans_logistic_classifier;
 pub mod kmeans_prototype_classifier;

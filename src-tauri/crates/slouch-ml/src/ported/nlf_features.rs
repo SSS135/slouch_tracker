@@ -45,13 +45,11 @@ use super::constants::{
     NLF_JOINT_LSHO, NLF_JOINT_NOSE, NLF_JOINT_RANK, NLF_JOINT_REAR, NLF_JOINT_REYE, NLF_JOINT_RHIP,
     NLF_JOINT_RKNE, NLF_JOINT_RSHO, NLF_NUM_CANONICAL,
 };
+// Vec3, midpoint/mean, the body frame, and its degeneracy floors are shared with
+// `keypoints_3d_features` through `body_frame`; MIN_TORSO_LEN lives there (used only by
+// `build_body_frame`), while MIN_AXIS_LEN is still referenced directly below.
+use super::body_frame::{build_body_frame, mean, midpoint, BodyFrame, Vec3, MIN_AXIS_LEN};
 
-/// Body-frame degeneracy floor in the model's metric units (meters). Real seated torso
-/// lengths are ~0.4-0.7 m; anything at or below this is a collapsed/absent torso.
-const MIN_TORSO_LEN: f64 = 1e-3;
-/// Minimum length of a body axis after normalization/orthogonalization. Below this the
-/// shoulder line is parallel to the trunk (or the shoulders coincide) and no frame exists.
-const MIN_AXIS_LEN: f64 = 1e-6;
 /// Uncertainty (meters; LOWER = more confident) mapped to full validity confidence.
 const UNCERT_CONFIDENT: f64 = 0.05;
 /// Uncertainty at or above which a joint contributes zero validity confidence.
@@ -98,67 +96,6 @@ impl fmt::Display for NlfFeatureError {
 }
 
 impl std::error::Error for NlfFeatureError {}
-
-#[derive(Clone, Copy)]
-struct Vec3 {
-    x: f64,
-    y: f64,
-    z: f64,
-}
-
-impl Vec3 {
-    fn dot(self, other: Self) -> f64 {
-        self.x * other.x + self.y * other.y + self.z * other.z
-    }
-
-    fn cross(self, other: Self) -> Self {
-        Self {
-            x: self.y * other.z - self.z * other.y,
-            y: self.z * other.x - self.x * other.z,
-            z: self.x * other.y - self.y * other.x,
-        }
-    }
-
-    fn sub(self, other: Self) -> Self {
-        Self {
-            x: self.x - other.x,
-            y: self.y - other.y,
-            z: self.z - other.z,
-        }
-    }
-
-    fn add(self, other: Self) -> Self {
-        Self {
-            x: self.x + other.x,
-            y: self.y + other.y,
-            z: self.z + other.z,
-        }
-    }
-
-    fn scale(self, scalar: f64) -> Self {
-        Self {
-            x: self.x * scalar,
-            y: self.y * scalar,
-            z: self.z * scalar,
-        }
-    }
-
-    fn norm(self) -> f64 {
-        self.dot(self).sqrt()
-    }
-}
-
-fn midpoint(first: Vec3, second: Vec3) -> Vec3 {
-    first.add(second).scale(0.5)
-}
-
-fn mean(values: &[f64]) -> f64 {
-    if values.is_empty() {
-        0.0
-    } else {
-        values.iter().sum::<f64>() / values.len() as f64
-    }
-}
 
 /// Extracts the 14-dim NLF depth posture feature from raw NLF-L crop outputs.
 ///
@@ -318,48 +255,6 @@ pub fn extract_nlf_depth_features(
     debug_assert_eq!(features.len(), NLF_DEPTH_DIMS);
 
     Ok(Some(features))
-}
-
-struct BodyFrame {
-    trunk_hat: Vec3,
-    shoulder_hat: Vec3,
-    forward_hat: Vec3,
-}
-
-/// Constructs the orthonormal body frame or returns `None` when the geometry is
-/// degenerate (collapsed torso, shoulder line parallel to the trunk, or zero shoulder
-/// width). `Ŝ` is Gram-Schmidt-orthogonalized against `T̂` before `F̂ = T̂ × Ŝ`, so the
-/// returned basis is exactly orthonormal.
-fn build_body_frame(
-    trunk: Vec3,
-    torso_len: f64,
-    shoulder_axis: Vec3,
-    shoulder_width: f64,
-) -> Option<BodyFrame> {
-    if torso_len < MIN_TORSO_LEN || shoulder_width < MIN_AXIS_LEN {
-        return None;
-    }
-    let trunk_hat = trunk.scale(1.0 / torso_len);
-
-    let shoulder_perp = shoulder_axis.sub(trunk_hat.scale(shoulder_axis.dot(trunk_hat)));
-    let shoulder_perp_len = shoulder_perp.norm();
-    if shoulder_perp_len < MIN_AXIS_LEN {
-        return None;
-    }
-    let shoulder_hat = shoulder_perp.scale(1.0 / shoulder_perp_len);
-
-    let forward = trunk_hat.cross(shoulder_hat);
-    let forward_len = forward.norm();
-    if forward_len < MIN_AXIS_LEN {
-        return None;
-    }
-    let forward_hat = forward.scale(1.0 / forward_len);
-
-    Some(BodyFrame {
-        trunk_hat,
-        shoulder_hat,
-        forward_hat,
-    })
 }
 
 #[cfg(test)]

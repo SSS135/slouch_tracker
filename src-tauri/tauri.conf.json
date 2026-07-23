@@ -24,7 +24,9 @@
         "alwaysOnTop": false,
         "skipTaskbar": false,
         "center": true,
-        "devtools": false
+        "devtools": false,
+        "visible": false,
+        "dragDropEnabled": false
       }
     ],
     "security": {
@@ -58,7 +60,14 @@
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
-      "timestampUrl": ""
+      "timestampUrl": "",
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
     }
   }
 }

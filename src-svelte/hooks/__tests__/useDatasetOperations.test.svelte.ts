@@ -122,6 +122,7 @@ beforeEach(() => {
       claheStrength: 3.5,
       gaussianBlurKernel: 5,
       smoothingFrames: 3,
+      showDetectionOverlay: false,
     },
     uiSettings: { alertVolume: 0.3, alertDelaySeconds: 5 },
     datasetPage: page(),
@@ -423,5 +424,17 @@ describe('useDatasetOperations native integration', () => {
     cleanup();
     expect(unlisten).toHaveBeenCalledTimes(1);
     expect(undoUnlisten).toHaveBeenCalledTimes(1);
+  });
+
+  // BUG 1: a capture (or any dataset mutation) emits `dataset-changed`; the listener
+  // must invalidate the frame-page query so the grid reflects the change without a
+  // reload. staleTime is Infinity here, so only invalidation can force the refetch.
+  it('refetches the visible frame page when a native dataset-changed event fires', async () => {
+    await mountHook();
+    await waitForFrames();
+    await waitFor(() => expect(datasetChanged).toBeTypeOf('function'));
+    const before = native.getDatasetPage.mock.calls.length;
+    datasetChanged?.();
+    await waitFor(() => expect(native.getDatasetPage.mock.calls.length).toBeGreaterThan(before));
   });
 });

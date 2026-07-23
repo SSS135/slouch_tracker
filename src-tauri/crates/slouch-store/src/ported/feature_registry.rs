@@ -10,15 +10,20 @@ use slouch_domain::{BboxAccessor, ModelCategory};
 use slouch_ml::ported::constants::{
     ENGINEERED_1D_DIMS, JOINT_2D_DIMS, JOINT_3D_DIMS, JOINT_4D_DIMS, KEYPOINT_SCORES_DIMS,
     NLF_BACKBONE_POOLED_DIMS, NLF_BACKBONE_POOLED_STORAGE_COST, NLF_DEPTH_DIMS,
-    NLF_DEPTH_STORAGE_COST, POSTURE_GEOMETRY_DIMS, POSTURE_RAW_DIMS, RAW_KEYPOINTS_DIMS,
+    NLF_DEPTH_STORAGE_COST, POSTURE_GEOMETRY_3D_DIMS, POSTURE_GEOMETRY_DIMS, POSTURE_RAW_3D_DIMS,
+    POSTURE_RAW_DIMS, RAW_KEYPOINTS_3D_DIMS, RAW_KEYPOINTS_3D_STORAGE_COST, RAW_KEYPOINTS_DIMS,
     RTMDET_ENGINEERED_DIMS, RTMDET_EXTRACTED_DIMS, RTMDET_EXTRACTED_STORAGE_COST,
     RTMPOSE_BACKBONE_POOLED_DIMS, RTMPOSE_BACKBONE_POOLED_STORAGE_COST, RTMPOSE_GAU_POOLED_DIMS,
-    RTMPOSE_GAU_POOLED_STORAGE_COST, TORSO_INVARIANT_DIMS,
+    RTMPOSE_GAU_POOLED_STORAGE_COST, TORSO_INVARIANT_3D_DIMS, TORSO_INVARIANT_DIMS,
 };
 use slouch_ml::ported::engineered_features::{
     extract_engineered_features, extract_joint_2d_features, extract_joint_3d_features,
     extract_joint_4d_features, extract_posture_geometry_features, extract_posture_raw_features,
     extract_raw_keypoints, extract_torso_invariant_features, EngineeredFeaturesError,
+};
+use slouch_ml::ported::keypoints_3d_features::{
+    extract_posture_geometry_3d, extract_posture_raw_3d, extract_torso_invariant_3d,
+    Keypoints3dError,
 };
 use slouch_ml::ported::rtmdet_engineered_features::{
     extract_keypoint_scores_feature, extract_rtm_det_engineered_features,
@@ -54,10 +59,14 @@ pub const FEATURE_NLF_DEPTH: FeatureType = FeatureType::NlfDepth;
 pub const FEATURE_NLF_BACKBONE: FeatureType = FeatureType::NlfBackbone;
 pub const FEATURE_NLF_BACKBONE_MAX: FeatureType = FeatureType::NlfBackboneMax;
 pub const FEATURE_NLF_BACKBONE_STD: FeatureType = FeatureType::NlfBackboneStd;
+pub const FEATURE_RAW_KEYPOINTS_3D: FeatureType = FeatureType::RawKeypoints3d;
+pub const FEATURE_POSTURE_RAW_3D: FeatureType = FeatureType::PostureRaw3d;
+pub const FEATURE_POSTURE_GEOMETRY_3D: FeatureType = FeatureType::PostureGeometry3d;
+pub const FEATURE_TORSO_INVARIANT_3D: FeatureType = FeatureType::TorsoInvariant3d;
 
 /// Valid feature type identifiers, in the same insertion order as the source
 /// object registry.
-pub const FEATURE_TYPES: [FeatureType; 21] = FeatureType::ALL;
+pub const FEATURE_TYPES: [FeatureType; 25] = FeatureType::ALL;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExtractorKind {
@@ -72,6 +81,9 @@ enum ExtractorKind {
     RawKeypoints,
     PostureGeometry,
     TorsoInvariant,
+    PostureRaw3d,
+    PostureGeometry3d,
+    TorsoInvariant3d,
 }
 
 /// Metadata and extraction behavior for one feature type.
@@ -116,6 +128,32 @@ impl FeatureDefinition {
     /// existing datasets, but it is hidden from user selection because RTMPose no
     /// longer produces it (NLF is the sole pose model).
     const fn stored_unavailable(
+        id: FeatureType,
+        name: &'static str,
+        description: &'static str,
+        dimensions: usize,
+        storage_cost: usize,
+        model_type: ModelCategory,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            description,
+            dimensions,
+            storage_cost,
+            computed: false,
+            model_type: Some(model_type),
+            user_selectable: false,
+            requires_fitting: None,
+            extractor: ExtractorKind::Stored,
+        }
+    }
+
+    /// A present-by-design stored substrate, hidden from direct selection and
+    /// consumed as a dependency by the computed 3D features. Unlike
+    /// `stored_unavailable` (retired/not-produced), this variant is produced at
+    /// capture time; it is merely hidden from the selector.
+    const fn stored_hidden(
         id: FeatureType,
         name: &'static str,
         description: &'static str,
@@ -340,6 +378,41 @@ impl FeatureDefinition {
                 NLF_BACKBONE_POOLED_STORAGE_COST,
                 ModelCategory::Posture,
             ),
+            FeatureType::RawKeypoints3d => Self::stored_hidden(
+                id,
+                "Raw Keypoints 3D",
+                "17 torso-normalized, root-centered 3D COCO keypoints (51 dims) - hidden substrate for the 3D posture features",
+                RAW_KEYPOINTS_3D_DIMS,
+                RAW_KEYPOINTS_3D_STORAGE_COST,
+                ModelCategory::Posture,
+            ),
+            FeatureType::PostureRaw3d => Self::computed(
+                id,
+                "Posture Raw Features (3D)",
+                "6 root-centered 3D raw posture features rebuilt from the 3D keypoint substrate",
+                POSTURE_RAW_3D_DIMS,
+                Some(ModelCategory::Posture),
+                Some(false),
+                ExtractorKind::PostureRaw3d,
+            ),
+            FeatureType::PostureGeometry3d => Self::computed(
+                id,
+                "Posture Geometry (3D)",
+                "10 body-frame 3D geometric posture features rebuilt from the 3D keypoint substrate",
+                POSTURE_GEOMETRY_3D_DIMS,
+                Some(ModelCategory::Posture),
+                Some(false),
+                ExtractorKind::PostureGeometry3d,
+            ),
+            FeatureType::TorsoInvariant3d => Self::computed(
+                id,
+                "Torso-Invariant Geometry (3D)",
+                "9 torso-anchored 3D posture features (camera and body-frame) rebuilt from the 3D keypoint substrate",
+                TORSO_INVARIANT_3D_DIMS,
+                Some(ModelCategory::Posture),
+                Some(false),
+                ExtractorKind::TorsoInvariant3d,
+            ),
         }
     }
 
@@ -374,12 +447,33 @@ impl FeatureDefinition {
             ExtractorKind::TorsoInvariant => {
                 Ok(extract_torso_invariant_features(container.keypoints())?)
             }
+            ExtractorKind::PostureRaw3d => Ok(extract_posture_raw_3d(
+                container
+                    .features()
+                    .get(&FeatureType::RawKeypoints3d)
+                    .map(Vec::as_slice),
+                container.keypoints(),
+            )?),
+            ExtractorKind::PostureGeometry3d => Ok(extract_posture_geometry_3d(
+                container
+                    .features()
+                    .get(&FeatureType::RawKeypoints3d)
+                    .map(Vec::as_slice),
+                container.keypoints(),
+            )?),
+            ExtractorKind::TorsoInvariant3d => Ok(extract_torso_invariant_3d(
+                container
+                    .features()
+                    .get(&FeatureType::RawKeypoints3d)
+                    .map(Vec::as_slice),
+                container.keypoints(),
+            )?),
         }
     }
 }
 
 /// Registry of all available feature types.
-pub const FEATURE_REGISTRY: [FeatureDefinition; 21] = [
+pub const FEATURE_REGISTRY: [FeatureDefinition; 25] = [
     FeatureDefinition::from_feature_type(FEATURE_BACKBONE_AVG),
     FeatureDefinition::from_feature_type(FEATURE_BACKBONE_MAX),
     FeatureDefinition::from_feature_type(FEATURE_BACKBONE_STD),
@@ -401,6 +495,10 @@ pub const FEATURE_REGISTRY: [FeatureDefinition; 21] = [
     FeatureDefinition::from_feature_type(FEATURE_NLF_BACKBONE),
     FeatureDefinition::from_feature_type(FEATURE_NLF_BACKBONE_MAX),
     FeatureDefinition::from_feature_type(FEATURE_NLF_BACKBONE_STD),
+    FeatureDefinition::from_feature_type(FEATURE_RAW_KEYPOINTS_3D),
+    FeatureDefinition::from_feature_type(FEATURE_POSTURE_RAW_3D),
+    FeatureDefinition::from_feature_type(FEATURE_POSTURE_GEOMETRY_3D),
+    FeatureDefinition::from_feature_type(FEATURE_TORSO_INVARIANT_3D),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -429,6 +527,7 @@ impl std::error::Error for UnknownFeatureType {}
 pub enum FeatureExtractionError {
     Engineered(EngineeredFeaturesError),
     RtmDet(RtmDetEngineeredFeaturesError),
+    Keypoints3d(Keypoints3dError),
 }
 
 impl fmt::Display for FeatureExtractionError {
@@ -436,6 +535,7 @@ impl fmt::Display for FeatureExtractionError {
         match self {
             Self::Engineered(error) => error.fmt(formatter),
             Self::RtmDet(error) => error.fmt(formatter),
+            Self::Keypoints3d(error) => error.fmt(formatter),
         }
     }
 }
@@ -451,6 +551,12 @@ impl From<EngineeredFeaturesError> for FeatureExtractionError {
 impl From<RtmDetEngineeredFeaturesError> for FeatureExtractionError {
     fn from(error: RtmDetEngineeredFeaturesError) -> Self {
         Self::RtmDet(error)
+    }
+}
+
+impl From<Keypoints3dError> for FeatureExtractionError {
+    fn from(error: Keypoints3dError) -> Self {
+        Self::Keypoints3d(error)
     }
 }
 
@@ -472,7 +578,7 @@ pub fn get_feature_dimensions(feature_type: &str) -> Result<usize, UnknownFeatur
 }
 
 /// Return all feature identifiers in registry order.
-pub fn get_all_feature_types() -> [FeatureType; 21] {
+pub fn get_all_feature_types() -> [FeatureType; 25] {
     FEATURE_TYPES
 }
 

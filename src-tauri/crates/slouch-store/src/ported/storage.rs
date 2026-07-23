@@ -48,6 +48,10 @@ const TRAINING_SETTINGS_KEY: &str = "training:settings";
 const CAMERA_SETTINGS_KEY: &str = "camera:settings";
 const UI_SETTINGS_KEY: &str = "ui:settings";
 const PCA_CONFIG_KEY: &str = "pca-config";
+// Rust-only one-shot flag: whether the "still running in the tray" toast has been
+// shown once. Kept out of UiSettings so a settings reset never re-arms it; wiped
+// only by Reset All Data. Never crosses IPC/bindings.
+const TRAY_NOTICE_KEY: &str = "app:tray-notice-shown";
 
 #[derive(Debug)]
 pub enum StorageError {
@@ -277,7 +281,7 @@ impl DatasetStorage {
             "SELECT f.id, f.captured_at_ms, f.label,
                     f.bbox_x1, f.bbox_y1, f.bbox_x2, f.bbox_y2, f.bbox_score, t.mime_type
              FROM frames f JOIN thumbnails t ON t.frame_id = f.id
-             ORDER BY f.captured_at_ms ASC, f.id ASC LIMIT ? OFFSET ?",
+             ORDER BY f.captured_at_ms DESC, f.id DESC LIMIT ? OFFSET ?",
         )?;
         let rows = statement.query_map(params![sql_limit, sql_offset], |row| {
             let x1 = row.get::<_, f64>(3)?;
@@ -931,6 +935,16 @@ impl DatasetStorage {
     pub fn reset_ui_settings(&self) -> Result<UiSettings, StorageError> {
         self.delete_setting(UI_SETTINGS_KEY)?;
         Ok(UiSettings::default())
+    }
+
+    /// Whether the one-time "still running in the tray" toast has been shown.
+    /// Defaults to `false` when the key is absent.
+    pub fn get_tray_notice_shown(&self) -> Result<bool, StorageError> {
+        Ok(self.load_json_setting(TRAY_NOTICE_KEY)?.unwrap_or(false))
+    }
+
+    pub fn set_tray_notice_shown(&self, shown: bool) -> Result<(), StorageError> {
+        self.save_json_setting(TRAY_NOTICE_KEY, &shown)
     }
 
     /// Native storage has no browser quota API. File size is the useful bounded
@@ -1784,13 +1798,16 @@ mod tests {
                 "UPDATE frame_features SET values_le_f32 = ? WHERE frame_id = 'second'",
                 [nan_blob],
             )
-            .expect("corrupt out-of-page feature payload");
+            .expect("corrupt feature payload the metadata page must not decode");
 
+        // Pages are ordered newest-first, so the single-row page is "second"
+        // (the frame whose feature blob was corrupted); the metadata page must
+        // still succeed because it never decodes feature payloads.
         let page = storage
             .get_frame_metadata_page(0, 1)
             .expect("bounded metadata page");
         assert_eq!(page.frames.len(), 1);
-        assert_eq!(page.frames[0].id, "first");
+        assert_eq!(page.frames[0].id, "second");
         assert_eq!(page.total, 2);
         assert_eq!(
             storage

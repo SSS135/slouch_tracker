@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { nativeClient } from '@/lib/native/client';
   import Slider from '../ui/Slider.svelte';
   import LoggerSettings from './LoggerSettings.svelte';
 
@@ -14,6 +15,9 @@
     claheStrength: number;
     gaussianBlurKernel: number;
     smoothingFrames: number;
+    showDetectionOverlay: boolean;
+    minimizeToTrayOnClose: boolean;
+    startHiddenOnLogin: boolean;
   };
 
   export interface SettingsTabProps {
@@ -53,6 +57,75 @@
   function handleProcessedViewChange(event: Event): void {
     onProcessedViewChange?.((event.currentTarget as HTMLInputElement).checked);
   }
+
+  function handleDetectionOverlayChange(event: Event): void {
+    onUpdateSettings({ showDetectionOverlay: (event.currentTarget as HTMLInputElement).checked });
+  }
+
+  function handleMinimizeToTrayChange(event: Event): void {
+    onUpdateSettings({ minimizeToTrayOnClose: (event.currentTarget as HTMLInputElement).checked });
+  }
+
+  function handleStartHiddenChange(event: Event): void {
+    onUpdateSettings({ startHiddenOnLogin: (event.currentTarget as HTMLInputElement).checked });
+  }
+
+  // Autostart lives in the Windows registry (HKCU Run + Explorer\StartupApproved),
+  // NOT in SQLite settings: Task Manager can flip it behind our back, so a mirrored
+  // copy would desync. We always read the live state. This component is remounted
+  // whenever the Runtime Settings tab is (re)activated, so this on-mount $effect
+  // doubles as the on-activation refresh.
+  // bind:checked drives the DOM box; because a failed toggle leaves the value
+  // unchanged (false→false), a one-way `checked={}` binding would never snap the
+  // box back — binding a $state boolean makes the reset a real change.
+  let autostartOn = $state(false);
+  let autostartBusy = $state(false);
+  let autostartError = $state<string | null>(null);
+  let autostartGeneration = 0;
+
+  function toMessage(cause: unknown): string {
+    return cause instanceof Error ? cause.message : String(cause);
+  }
+
+  async function refreshAutostart(): Promise<void> {
+    const token = ++autostartGeneration;
+    try {
+      const enabled = await nativeClient.getAutostartEnabled();
+      if (token === autostartGeneration) {
+        autostartOn = enabled;
+        autostartError = null;
+      }
+    } catch (cause) {
+      if (token === autostartGeneration) {
+        autostartOn = false;
+        autostartError = toMessage(cause);
+      }
+    }
+  }
+
+  async function handleAutostartChange(event: Event): Promise<void> {
+    const next = (event.currentTarget as HTMLInputElement).checked;
+    autostartBusy = true;
+    autostartError = null;
+    let setError: string | null = null;
+    try {
+      await nativeClient.setAutostartEnabled(next);
+    } catch (cause) {
+      setError = toMessage(cause);
+    }
+    // Re-read the registry (source of truth) so the box reflects reality even if
+    // enable/disable partially failed or Task Manager disagrees. A set failure
+    // message takes precedence over the re-read's cleared-error state.
+    await refreshAutostart();
+    if (setError) {
+      autostartError = setError;
+    }
+    autostartBusy = false;
+  }
+
+  $effect(() => {
+    void refreshAutostart();
+  });
 </script>
 
 <div class="settings-stack">
@@ -142,6 +215,20 @@
           </span>
         </span>
       </label>
+
+      <label class="checkbox-row">
+        <input
+          type="checkbox"
+          checked={settings.showDetectionOverlay}
+          onchange={handleDetectionOverlayChange}
+        />
+        <span>
+          <span class="checkbox-label">Detection Overlay</span>
+          <span class="checkbox-description">
+            Draw skeleton and detection box with confidence over the video (diagnostic)
+          </span>
+        </span>
+      </label>
     </div>
   </section>
 
@@ -190,6 +277,57 @@
         showTooltip
         showMinMax
       />
+    </div>
+  </section>
+
+  <section class="settings-paper">
+    <div class="section-stack medium-gap">
+      <h2>Startup</h2>
+      <label class="checkbox-row" class:checkbox-disabled={autostartBusy}>
+        <input
+          type="checkbox"
+          bind:checked={autostartOn}
+          disabled={autostartBusy}
+          onchange={handleAutostartChange}
+        />
+        <span>
+          <span class="checkbox-label">Start on login</span>
+          <span class="checkbox-description">
+            Launch Slouch Tracker automatically when you log into Windows. Also manageable in Task Manager → Startup apps.
+          </span>
+        </span>
+      </label>
+      {#if autostartError}
+        <div class="help-text small-text">Couldn't read the startup setting: {autostartError}</div>
+      {/if}
+
+      <label class="checkbox-row">
+        <input
+          type="checkbox"
+          checked={settings.minimizeToTrayOnClose}
+          onchange={handleMinimizeToTrayChange}
+        />
+        <span>
+          <span class="checkbox-label">Minimize to tray on close</span>
+          <span class="checkbox-description">
+            Closing the window keeps tracking running in the system tray.
+          </span>
+        </span>
+      </label>
+
+      <label class="checkbox-row">
+        <input
+          type="checkbox"
+          checked={settings.startHiddenOnLogin}
+          onchange={handleStartHiddenChange}
+        />
+        <span>
+          <span class="checkbox-label">Start hidden at login</span>
+          <span class="checkbox-description">
+            When started at login, open in the tray instead of showing the window.
+          </span>
+        </span>
+      </label>
     </div>
   </section>
 

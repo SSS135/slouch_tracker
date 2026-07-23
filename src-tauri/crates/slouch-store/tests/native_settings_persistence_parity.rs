@@ -37,6 +37,8 @@ fn file_backed_sqlite_settings_survive_restart_and_reset_independently() {
     let ui = UiSettings {
         alert_volume: 0.75,
         alert_delay_seconds: 12.0,
+        minimize_to_tray_on_close: false,
+        start_hidden_on_login: false,
     };
 
     {
@@ -114,6 +116,7 @@ fn future_setting_schema_versions_are_rejected_without_changing_payloads() {
     let ui = UiSettings {
         alert_volume: 0.8,
         alert_delay_seconds: 9.0,
+        ..UiSettings::default()
     };
     {
         let storage = DatasetStorage::open(&path).expect("native SQLite database");

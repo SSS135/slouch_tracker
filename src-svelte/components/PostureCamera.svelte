@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { InferenceUiResult } from '@generated/bindings';
+  import type { BoundingBox, InferenceUiResult } from '@generated/bindings';
   import { useNativeCamera } from '@/hooks/useNativeCamera.svelte';
   import {
     useCanvasRenderer,
@@ -10,6 +10,8 @@
   import type { PreviewFrameSource } from '@/services/dataset/thumbnailGenerator';
   import {
     drawHumanLikeSkeleton,
+    drawKeypointOverlay,
+    drawDetectionBox,
     type SmoothedKeypoint,
     type Keypoint,
   } from '@/utils/canvasDrawing';
@@ -26,6 +28,9 @@
       : 'slouchcam://localhost';
   const FRAME_URL = `${FRAME_BASE}/frame`;
   const PROCESSED_FRAME_URL = `${FRAME_BASE}/processed`;
+  // Detector-input frame served without stamping processed-view demand: stays the
+  // inferred frame at detection cadence, for the diagnostic detection overlay.
+  const INFERRED_FRAME_URL = `${FRAME_BASE}/inferred`;
 
   interface InferenceResultForDrawing {
     keypoints: Keypoint[];
@@ -41,8 +46,12 @@
     privacyMode?: boolean;
     /** Show the preprocessed detector-input feed instead of the raw feed. */
     processedView?: boolean;
+    /** Draw the diagnostic skeleton + detection box (with confidence) over the live video. */
+    showDetectionOverlay?: boolean;
     // Fired when the bare video area (outside every overlay control) is clicked.
     onBackgroundClick?: () => void;
+    /** Reports the native camera start error (null when clear) so a parent can gate a resume control. */
+    onCameraError?: (error: string | null) => void;
   }
 
   let {
@@ -54,7 +63,9 @@
     paused = false,
     privacyMode = false,
     processedView = false,
+    showDetectionOverlay = false,
     onBackgroundClick,
+    onCameraError,
   }: PostureCameraProps = $props();
 
   let canvasElement = $state<HTMLCanvasElement | null>(null);
@@ -82,6 +93,11 @@
   };
 
   const lastResult = $state<{ current: InferenceResultForDrawing | null }>({ current: null });
+  const detectionBbox = $state<{ current: BoundingBox | null }>({ current: null });
+  // Monotonic per-result counter. The renderer refreshes the inferred-frame
+  // display + overlay only when this changes, stepping the video at detection
+  // cadence in overlay mode. Plain counter (polled by the renderer, not rendered).
+  let detectionSeq = 0;
   const smoothedKeypoints = $state<{ current: SmoothedKeypoint[] }>({ current: [] });
   const targetKeypoints = $state<{ current: Keypoint[] }>({ current: [] });
   const lastRenderTime = $state({ current: Date.now() });
@@ -139,6 +155,8 @@
     if (result.personFound) {
       lastResult.current = { keypoints };
     }
+    detectionBbox.current = result.personFound ? (result.bbox?.original ?? null) : null;
+    detectionSeq += 1;
     onInferenceResult(result);
   }
 
@@ -162,6 +180,10 @@
   });
 
   $effect(() => {
+    onCameraError?.(camera.error);
+  });
+
+  $effect(() => {
     return () => {
       lastResult.current = null;
     };
@@ -179,44 +201,58 @@
   });
 
   function handleDraw(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement): void {
-    if (!lastResult.current || !privacyMode) return;
+    if (!lastResult.current || (!privacyMode && !showDetectionOverlay)) return;
 
-    const now = Date.now();
-    const deltaTime = now - lastRenderTime.current;
-    lastRenderTime.current = now;
+    if (privacyMode) {
+      // End-user human-like avatar with temporal smoothing (unchanged).
+      const now = Date.now();
+      const deltaTime = now - lastRenderTime.current;
+      lastRenderTime.current = now;
 
-    if (
-      smoothedKeypoints.current.length === 0 &&
-      targetKeypoints.current.length === 0 &&
-      lastResult.current.keypoints.length > 0
-    ) {
-      targetKeypoints.current = lastResult.current.keypoints.map((keypoint) => ({ ...keypoint }));
-      smoothedKeypoints.current = lastResult.current.keypoints.map((keypoint) => ({
-        ...keypoint,
-        opacity: keypoint.score > KEYPOINT_DRAW_THRESHOLD ? 1 : 0,
-      }));
+      if (
+        smoothedKeypoints.current.length === 0 &&
+        targetKeypoints.current.length === 0 &&
+        lastResult.current.keypoints.length > 0
+      ) {
+        targetKeypoints.current = lastResult.current.keypoints.map((keypoint) => ({ ...keypoint }));
+        smoothedKeypoints.current = lastResult.current.keypoints.map((keypoint) => ({
+          ...keypoint,
+          opacity: keypoint.score > KEYPOINT_DRAW_THRESHOLD ? 1 : 0,
+        }));
+      }
+
+      smoothedKeypoints.current = interpolateKeypoints(
+        smoothedKeypoints.current,
+        targetKeypoints.current,
+        calculateSmoothingAlpha(deltaTime, detectionInterval.current),
+      );
+
+      drawHumanLikeSkeleton(
+        ctx,
+        smoothedKeypoints.current,
+        canvas.width,
+        canvas.height,
+        frameWidth || canvas.width,
+        frameHeight || canvas.height,
+        {
+          color: '#4dabf7',
+          fillOpacity: 0.8,
+          noseColor: '#ffa94d',
+          earColor: '#ffa94d',
+        },
+      );
+    } else {
+      // Diagnostic detection overlay: raw keypoint dots + COCO skeleton lines,
+      // exactly as the latest detection produced them (no smoothing). targetKeypoints
+      // holds the latest raw keypoints, or [] when no person is currently detected.
+      drawKeypointOverlay(ctx, targetKeypoints.current, canvas.width, canvas.height, {
+        color: '#00e676',
+      });
     }
 
-    smoothedKeypoints.current = interpolateKeypoints(
-      smoothedKeypoints.current,
-      targetKeypoints.current,
-      calculateSmoothingAlpha(deltaTime, detectionInterval.current),
-    );
-
-    drawHumanLikeSkeleton(
-      ctx,
-      smoothedKeypoints.current,
-      canvas.width,
-      canvas.height,
-      frameWidth || canvas.width,
-      frameHeight || canvas.height,
-      {
-        color: '#4dabf7',
-        fillOpacity: 0.8,
-        noseColor: '#ffa94d',
-        earColor: '#ffa94d',
-      },
-    );
+    if (showDetectionOverlay && detectionBbox.current) {
+      drawDetectionBox(ctx, detectionBbox.current, canvas.width, canvas.height, { color: '#4dabf7' });
+    }
   }
 
   const renderer = useCanvasRenderer({
@@ -234,6 +270,11 @@
     get processedView() {
       return processedView;
     },
+    get showDetectionOverlay() {
+      return showDetectionOverlay;
+    },
+    inferredFrameUrl: INFERRED_FRAME_URL,
+    detectionSequence: () => detectionSeq,
     canvasRef: internalCanvasRef,
     imgRef: internalImgRef,
     get latestFrameRef() {

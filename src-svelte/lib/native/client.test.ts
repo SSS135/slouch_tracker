@@ -11,6 +11,8 @@ const bridge = vi.hoisted(() => ({
   startCamera: vi.fn(),
   stopCamera: vi.fn(),
   listCameras: vi.fn(),
+  getAutostartEnabled: vi.fn(),
+  setAutostartEnabled: vi.fn(),
   getThumbnail: vi.fn(),
   saveCapture: vi.fn(),
 }));
@@ -27,6 +29,8 @@ vi.mock('@generated/bindings', () => ({
     startCamera: bridge.startCamera,
     stopCamera: bridge.stopCamera,
     listCameras: bridge.listCameras,
+    getAutostartEnabled: bridge.getAutostartEnabled,
+    setAutostartEnabled: bridge.setAutostartEnabled,
   },
   getThumbnail: bridge.getThumbnail,
   saveCapture: bridge.saveCapture,
@@ -75,6 +79,7 @@ describe('Svelte native client', () => {
       claheStrength: 3.5,
       gaussianBlurKernel: 5,
       smoothingFrames: 3,
+      showDetectionOverlay: false,
     };
     const ui = { alertVolume: 0.3, alertDelaySeconds: 5 };
     bridge.getCameraSettings.mockResolvedValueOnce({ status: 'ok', data: camera });
@@ -114,6 +119,26 @@ describe('Svelte native client', () => {
       name: 'NativeCommandError',
       kind: 'inference',
       message: 'no device',
+    });
+  });
+
+  it('reads and writes autostart through generated commands', async () => {
+    bridge.getAutostartEnabled.mockResolvedValueOnce({ status: 'ok', data: true });
+    bridge.setAutostartEnabled.mockResolvedValueOnce({ status: 'ok', data: null });
+
+    await expect(nativeClient.getAutostartEnabled()).resolves.toBe(true);
+    await nativeClient.setAutostartEnabled(false);
+    expect(bridge.setAutostartEnabled).toHaveBeenCalledWith(false);
+  });
+
+  it('surfaces typed errors when toggling autostart fails', async () => {
+    bridge.setAutostartEnabled.mockResolvedValueOnce({
+      status: 'error',
+      error: { kind: 'internal', message: 'autostart registry operation failed: denied' },
+    });
+    await expect(nativeClient.setAutostartEnabled(true)).rejects.toMatchObject({
+      name: 'NativeCommandError',
+      kind: 'internal',
     });
   });
 

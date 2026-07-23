@@ -30,6 +30,9 @@ export interface TrainingConfigContextValue {
   readonly ready: boolean;
   readonly loading: boolean;
   readonly error: string | null;
+  // Increments each time settings are persisted, so consumers can refresh derived native
+  // state (e.g. needs-retraining) that a settings change invalidates.
+  readonly persistedRevision: number;
   updateClassifierConfig(config: ClassifierConfig): void;
   updateDimReductionConfig(config: DimensionalityReductionConfig): void;
   updatePostureFeatureTypes(featureTypes: FeatureId[]): void;
@@ -135,6 +138,7 @@ export function createTrainingConfigContext(): TrainingConfigContextValue {
   let error = $state<string | null>(null);
   let debounce: ReturnType<typeof setTimeout> | null = null;
   let userRevision = $state(0);
+  let persistedRevision = $state(0);
   let classifierRegistryLoaded = false;
   let featureRegistryLoaded = false;
   let loadGeneration = 0;
@@ -209,9 +213,11 @@ export function createTrainingConfigContext(): TrainingConfigContextValue {
     if (debounce) clearTimeout(debounce);
     debounce = setTimeout(() => {
       debounce = null;
-      void nativeClient.saveTrainingSettings(serialize(config, registryOrder())).catch((cause: unknown) => {
-        logger.error('training', 'Failed to persist native training settings:', cause);
-      });
+      void nativeClient.saveTrainingSettings(serialize(config, registryOrder()))
+        .then(() => { persistedRevision += 1; })
+        .catch((cause: unknown) => {
+          logger.error('training', 'Failed to persist native training settings:', cause);
+        });
     }, 300);
     return () => { if (debounce) clearTimeout(debounce); };
   });
@@ -236,6 +242,7 @@ export function createTrainingConfigContext(): TrainingConfigContextValue {
     get ready() { return ready; },
     get loading() { return loading; },
     get error() { return error; },
+    get persistedRevision() { return persistedRevision; },
     updateClassifierConfig: (classifierConfig) => { if (ready) { config = { ...config, classifierConfig }; userRevision += 1; } },
     updateDimReductionConfig: (dimReductionConfig) => { if (ready) { config = { ...config, dimReductionConfig }; userRevision += 1; } },
     updatePostureFeatureTypes: (postureFeatureTypes) => { if (ready) { config = { ...config, postureFeatureTypes: canonicalizeFeatureIds(postureFeatureTypes, registryOrder()) }; userRevision += 1; } },
@@ -247,6 +254,7 @@ export function createTrainingConfigContext(): TrainingConfigContextValue {
       if (debounce) clearTimeout(debounce);
       debounce = null;
       await nativeClient.saveTrainingSettings(serialize(config, registryOrder()));
+      persistedRevision += 1;
     },
     reconcile(settings) {
       loadGeneration += 1;

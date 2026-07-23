@@ -32,6 +32,29 @@ function readyClient() {
   };
 }
 
+function mountToggle(client: Partial<NativeClient>, initialEnabled = true) {
+  const state = $state({ enabled: initialEnabled });
+  let hook!: ReturnType<typeof useNativeCamera>;
+  const dispose = $effect.root(() => {
+    hook = useNativeCamera({
+      client: client as NativeClient,
+      onResult: vi.fn(),
+      get enabled() {
+        return state.enabled;
+      },
+    });
+  });
+  disposers.push(dispose);
+  flushSync();
+  return {
+    hook,
+    setEnabled: (value: boolean) => {
+      state.enabled = value;
+      flushSync();
+    },
+  };
+}
+
 afterEach(() => {
   while (disposers.length) disposers.pop()?.();
   vi.clearAllMocks();
@@ -72,6 +95,34 @@ describe('useNativeCamera lifecycle', () => {
     };
     const { hook } = mount(client);
     await vi.waitFor(() => expect(hook.error).toBe('no capture device'));
+    expect(hook.ready).toBe(false);
+  });
+});
+
+describe('useNativeCamera enabled toggle (pause/resume wiring)', () => {
+  it('stops the camera when disabled and restarts it when re-enabled', async () => {
+    const client = readyClient();
+    const { hook, setEnabled } = mountToggle(client, true);
+    await vi.waitFor(() => expect(hook.ready).toBe(true));
+    expect(client.startCamera).toHaveBeenCalledTimes(1);
+
+    setEnabled(false);
+    expect(client.stopCamera).toHaveBeenCalledTimes(1);
+    expect(hook.ready).toBe(false);
+
+    setEnabled(true);
+    await vi.waitFor(() => expect(client.startCamera).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(hook.ready).toBe(true));
+    // Never issues a second stop for a single pause.
+    expect(client.stopCamera).toHaveBeenCalledTimes(1);
+  });
+
+  it('never starts the camera while disabled from the outset', async () => {
+    const client = readyClient();
+    const { hook } = mountToggle(client, false);
+    await Promise.resolve();
+    flushSync();
+    expect(client.startCamera).not.toHaveBeenCalled();
     expect(hook.ready).toBe(false);
   });
 });

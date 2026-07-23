@@ -47,7 +47,7 @@ fn production_result_owns_all_native_feature_buffers_after_worker_drop() {
     let [WorkerResponse::Result { result, .. }] = &response[..] else {
         panic!("expected result")
     };
-    assert_eq!(result.features.len(), 5);
+    assert_eq!(result.features.len(), 6);
     let dimensions = result
         .features
         .iter()
@@ -55,6 +55,7 @@ fn production_result_owns_all_native_feature_buffers_after_worker_drop() {
         .collect::<std::collections::HashMap<_, _>>();
     assert_eq!(dimensions[&FeatureId::RtmDetExtracted], 384);
     assert_eq!(dimensions[&FeatureId::NlfDepth], 14);
+    assert_eq!(dimensions[&FeatureId::RawKeypoints3d], 51);
     assert_eq!(dimensions[&FeatureId::NlfBackbone], 512);
     assert_eq!(dimensions[&FeatureId::NlfBackboneMax], 512);
     assert_eq!(dimensions[&FeatureId::NlfBackboneStd], 512);

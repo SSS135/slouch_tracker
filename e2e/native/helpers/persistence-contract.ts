@@ -16,4 +16,5 @@ export const PERSISTED_CAMERA_SETTINGS = {
   claheStrength: 1.25,
   gaussianBlurKernel: 7,
   smoothingFrames: 6,
+  showDetectionOverlay: true,
 };

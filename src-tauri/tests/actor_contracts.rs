@@ -595,14 +595,17 @@ fn event_stream_validator_rejects_duplicate_and_out_of_order_sequences() {
     assert!(validate_training_event_stream(&[started, progress(1, 5)]).is_err());
 }
 
-// The five stored features a person frame produces today; the reservoir must
+// The six stored features a person frame produces today; the reservoir must
 // capture exactly these (computed features are rederived at training time).
-const STORED_INFERENCE_FEATURES: [FeatureId; 5] = [
+// `raw_keypoints_3d` is the present-by-design hidden substrate the computed 3D
+// posture features consume, so it flows into the reservoir like any stored feature.
+const STORED_INFERENCE_FEATURES: [FeatureId; 6] = [
     FeatureId::RtmDetExtracted,
     FeatureId::NlfDepth,
     FeatureId::NlfBackbone,
     FeatureId::NlfBackboneMax,
     FeatureId::NlfBackboneStd,
+    FeatureId::RawKeypoints3d,
 ];
 
 fn person_result_with_stored_features() -> NativeInferenceResult {

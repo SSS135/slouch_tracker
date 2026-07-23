@@ -6,6 +6,7 @@
     nativeClient,
   } from '../lib/native/client';
   import { getHarnessMetrics } from './mockTauri';
+  import { useCameraSettings } from '../hooks/useCameraSettings';
 
   let readiness = $state('not initialized');
   let captureStatus = $state('idle');
@@ -15,8 +16,24 @@
   let settingsStatus = $state('not loaded');
   let error = $state('');
 
+  // Exercises the real settings pipeline (combine/split, native round-trip) so the
+  // tray startup toggles can be asserted end-to-end against the mocked backend.
+  const startupSettings = useCameraSettings();
+
   function message(cause: unknown): string {
     return cause instanceof Error ? cause.message : String(cause);
+  }
+
+  function setMinimizeToTray(event: Event): void {
+    startupSettings.updateSettings({ minimizeToTrayOnClose: (event.currentTarget as HTMLInputElement).checked });
+  }
+
+  function setStartHidden(event: Event): void {
+    startupSettings.updateSettings({ startHiddenOnLogin: (event.currentTarget as HTMLInputElement).checked });
+  }
+
+  async function reloadStartupSettings(): Promise<void> {
+    await startupSettings.reload();
   }
 
   async function initialize(): Promise<void> {
@@ -154,6 +171,30 @@
       <button type="button" onclick={resetSettings}>Reset settings</button>
     </div>
     <output data-testid="settings-status">{settingsStatus}</output>
+  </section>
+
+  <section aria-labelledby="startup-heading">
+    <h2 id="startup-heading">Startup</h2>
+    <label>
+      <input
+        type="checkbox"
+        checked={startupSettings.settings.minimizeToTrayOnClose}
+        onchange={setMinimizeToTray}
+      />
+      Minimize to tray on close
+    </label>
+    <label>
+      <input
+        type="checkbox"
+        checked={startupSettings.settings.startHiddenOnLogin}
+        onchange={setStartHidden}
+      />
+      Start hidden at login
+    </label>
+    <button type="button" onclick={reloadStartupSettings}>Reload startup settings</button>
+    <output data-testid="startup-status">
+      {`${startupSettings.settings.minimizeToTrayOnClose}/${startupSettings.settings.startHiddenOnLogin}`}
+    </output>
   </section>
 
   <section aria-labelledby="training-heading">

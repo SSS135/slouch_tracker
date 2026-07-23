@@ -1,6 +1,14 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const nativeMock = vi.hoisted(() => ({
+  getAutostartEnabled: vi.fn(),
+  setAutostartEnabled: vi.fn(),
+}));
+
+vi.mock('@/lib/native/client', () => ({ nativeClient: nativeMock }));
+
 import SettingsTab from '../SettingsTab.svelte';
 
 const baseSettings = {
@@ -15,6 +23,9 @@ const baseSettings = {
   claheStrength: 0,
   gaussianBlurKernel: 0,
   smoothingFrames: 1,
+  showDetectionOverlay: false,
+  minimizeToTrayOnClose: true,
+  startHiddenOnLogin: true,
 };
 
 function renderTab(
@@ -35,6 +46,11 @@ function renderTab(
     },
   });
 }
+
+beforeEach(() => {
+  nativeMock.getAutostartEnabled.mockResolvedValue(false);
+  nativeMock.setAutostartEnabled.mockResolvedValue(undefined);
+});
 
 afterEach(() => {
   cleanup();
@@ -71,5 +87,118 @@ describe('SettingsTab processed view toggle', () => {
     expect(toggle).toBeDisabled();
     expect(toggle).not.toBeChecked();
     expect(screen.getByText(/unavailable in privacy mode/i)).toBeInTheDocument();
+  });
+});
+
+describe('SettingsTab detection overlay toggle', () => {
+  it('renders the detection overlay toggle off by default with its diagnostic hint', () => {
+    renderTab();
+    const toggle = screen.getByRole('checkbox', { name: /detection overlay/i });
+    expect(toggle).not.toBeChecked();
+    expect(
+      screen.getByText(/draw skeleton and detection box with confidence/i),
+    ).toBeInTheDocument();
+  });
+
+  it('reports toggle changes through onUpdateSettings', async () => {
+    const onUpdateSettings = vi.fn();
+    render(SettingsTab, {
+      props: {
+        settings: baseSettings,
+        onUpdateSettings,
+        onResetSettings: vi.fn(),
+        isModelLoaded: false,
+      },
+    });
+    await fireEvent.click(screen.getByRole('checkbox', { name: /detection overlay/i }));
+    expect(onUpdateSettings).toHaveBeenCalledWith({ showDetectionOverlay: true });
+  });
+
+  it('reflects an enabled detection overlay', () => {
+    renderTab({ settings: { ...baseSettings, showDetectionOverlay: true } });
+    expect(screen.getByRole('checkbox', { name: /detection overlay/i })).toBeChecked();
+  });
+});
+
+describe('SettingsTab start-on-login toggle', () => {
+  it('reads the live autostart state on mount and reflects it', async () => {
+    nativeMock.getAutostartEnabled.mockResolvedValue(true);
+    renderTab();
+    const toggle = await screen.findByRole('checkbox', { name: /start on login/i });
+    await waitFor(() => expect(toggle).toBeChecked());
+    expect(nativeMock.getAutostartEnabled).toHaveBeenCalled();
+    expect(
+      screen.getByText(/launch slouch tracker automatically when you log into windows/i),
+    ).toBeInTheDocument();
+  });
+
+  it('enabling calls the setter then re-reads the registry as the source of truth', async () => {
+    let enabled = false;
+    nativeMock.getAutostartEnabled.mockImplementation(async () => enabled);
+    nativeMock.setAutostartEnabled.mockImplementation(async (value: boolean) => {
+      enabled = value;
+    });
+    renderTab();
+    const toggle = await screen.findByRole('checkbox', { name: /start on login/i });
+    await waitFor(() => expect(toggle).not.toBeChecked());
+
+    await fireEvent.click(toggle);
+
+    expect(nativeMock.setAutostartEnabled).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(toggle).toBeChecked());
+    // Once on mount, once after the toggle: the displayed state is the re-read
+    // registry value, not the optimistic click.
+    expect(nativeMock.getAutostartEnabled.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('surfaces a set failure and leaves the checkbox at the true registry state', async () => {
+    nativeMock.getAutostartEnabled.mockResolvedValue(false);
+    nativeMock.setAutostartEnabled.mockRejectedValue(new Error('Access is denied. (os error 5)'));
+    renderTab();
+    const toggle = await screen.findByRole('checkbox', { name: /start on login/i });
+    await waitFor(() => expect(toggle).not.toBeChecked());
+
+    await fireEvent.click(toggle);
+
+    await waitFor(() => expect(screen.getByText(/access is denied/i)).toBeInTheDocument());
+    expect(toggle).not.toBeChecked();
+  });
+});
+
+describe('SettingsTab tray startup toggles', () => {
+  it('renders both tray toggles checked by default with their descriptions', () => {
+    renderTab();
+    expect(screen.getByRole('checkbox', { name: /minimize to tray on close/i })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /start hidden at login/i })).toBeChecked();
+    expect(
+      screen.getByText(/closing the window keeps tracking running in the system tray/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/open in the tray instead of showing the window/i),
+    ).toBeInTheDocument();
+  });
+
+  it('reports a minimize-to-tray toggle through onUpdateSettings', async () => {
+    const onUpdateSettings = vi.fn();
+    render(SettingsTab, {
+      props: { settings: baseSettings, onUpdateSettings, onResetSettings: vi.fn(), isModelLoaded: false },
+    });
+    await fireEvent.click(screen.getByRole('checkbox', { name: /minimize to tray on close/i }));
+    expect(onUpdateSettings).toHaveBeenCalledWith({ minimizeToTrayOnClose: false });
+  });
+
+  it('reports a start-hidden toggle through onUpdateSettings', async () => {
+    const onUpdateSettings = vi.fn();
+    render(SettingsTab, {
+      props: { settings: baseSettings, onUpdateSettings, onResetSettings: vi.fn(), isModelLoaded: false },
+    });
+    await fireEvent.click(screen.getByRole('checkbox', { name: /start hidden at login/i }));
+    expect(onUpdateSettings).toHaveBeenCalledWith({ startHiddenOnLogin: false });
+  });
+
+  it('reflects disabled tray toggles when the settings are false', () => {
+    renderTab({ settings: { ...baseSettings, minimizeToTrayOnClose: false, startHiddenOnLogin: false } });
+    expect(screen.getByRole('checkbox', { name: /minimize to tray on close/i })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /start hidden at login/i })).not.toBeChecked();
   });
 });

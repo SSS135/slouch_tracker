@@ -18,12 +18,14 @@ fn camera_and_ui_settings_use_rust_defaults_and_persist_independently() {
     let camera = CameraSettings {
         camera_width: 1280,
         privacy_mode: false,
+        show_detection_overlay: true,
         ..CameraSettings::default()
     };
     storage.save_camera_settings(&camera).expect("save camera");
 
     let ui = UiSettings {
         alert_volume: 0.75,
+        minimize_to_tray_on_close: false,
         ..UiSettings::default()
     };
     storage.save_ui_settings(&ui).expect("save UI");
@@ -51,6 +53,7 @@ fn camera_and_ui_settings_round_trip_through_the_native_archive() {
     };
     let ui = UiSettings {
         alert_delay_seconds: 12.0,
+        start_hidden_on_login: false,
         ..UiSettings::default()
     };
     source.save_camera_settings(&camera).expect("camera");
@@ -97,4 +100,25 @@ fn settings_reject_invalid_values_without_overwriting_saved_state() {
         storage.save_ui_settings(&invalid_ui),
         Err(StorageError::Validation(_))
     ));
+}
+
+#[test]
+fn tray_notice_flag_defaults_false_and_round_trips_independently() {
+    let storage = DatasetStorage::open_in_memory().expect("storage");
+    assert!(!storage.get_tray_notice_shown().expect("default flag"));
+
+    storage.set_tray_notice_shown(true).expect("set flag");
+    assert!(storage.get_tray_notice_shown().expect("flag persists"));
+
+    // A UI-settings reset must not re-arm the notice.
+    storage.reset_ui_settings().expect("reset UI");
+    assert!(storage
+        .get_tray_notice_shown()
+        .expect("flag survives UI reset"));
+
+    // Reset All Data clears every settings key, including this flag.
+    storage.reset_all().expect("reset all");
+    assert!(!storage
+        .get_tray_notice_shown()
+        .expect("flag cleared by reset all"));
 }

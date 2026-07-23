@@ -48,10 +48,18 @@ pub enum FeatureId {
     NlfBackboneMax,
     #[serde(rename = "nlf_backbone_std")]
     NlfBackboneStd,
+    #[serde(rename = "raw_keypoints_3d")]
+    RawKeypoints3d,
+    #[serde(rename = "posture_raw_3d")]
+    PostureRaw3d,
+    #[serde(rename = "posture_geometry_3d")]
+    PostureGeometry3d,
+    #[serde(rename = "torso_invariant_3d")]
+    TorsoInvariant3d,
 }
 
 impl FeatureId {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 25] = [
         Self::BackboneFeatures,
         Self::BackboneFeaturesMax,
         Self::BackboneFeaturesStd,
@@ -73,6 +81,10 @@ impl FeatureId {
         Self::NlfBackbone,
         Self::NlfBackboneMax,
         Self::NlfBackboneStd,
+        Self::RawKeypoints3d,
+        Self::PostureRaw3d,
+        Self::PostureGeometry3d,
+        Self::TorsoInvariant3d,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -98,6 +110,10 @@ impl FeatureId {
             Self::NlfBackbone => "nlf_backbone",
             Self::NlfBackboneMax => "nlf_backbone_max",
             Self::NlfBackboneStd => "nlf_backbone_std",
+            Self::RawKeypoints3d => "raw_keypoints_3d",
+            Self::PostureRaw3d => "posture_raw_3d",
+            Self::PostureGeometry3d => "posture_geometry_3d",
+            Self::TorsoInvariant3d => "torso_invariant_3d",
         }
     }
 
@@ -128,6 +144,16 @@ impl FeatureId {
       Self::NlfBackbone => FeatureMetadata::stored(self, "NLF Backbone Features (Avg Pool)", "Average-pooled NLF-L backbone embedding (512 dims)", 512, ModelCategory::Posture),
       Self::NlfBackboneMax => FeatureMetadata::stored(self, "NLF Backbone Features (Max Pool)", "Max-pooled NLF-L backbone embedding - captures peak spatial activations (512 dims)", 512, ModelCategory::Posture),
       Self::NlfBackboneStd => FeatureMetadata::stored(self, "NLF Backbone Features (Std Pool)", "Std-pooled NLF-L backbone embedding - captures spatial variation (512 dims)", 512, ModelCategory::Posture),
+      // Dimension literal `51` (storage cost 204) must stay in lock-step with
+      // `slouch_ml::constants::RAW_KEYPOINTS_3D_DIMS` / `RAW_KEYPOINTS_3D_STORAGE_COST`;
+      // slouch-domain cannot depend on slouch-ml, so it is duplicated here (frozen at 51).
+      Self::RawKeypoints3d => FeatureMetadata::stored_hidden(self, "Raw Keypoints 3D", "17 torso-normalized, root-centered 3D COCO keypoints (51 dims) — hidden substrate for the 3D posture features", 51, ModelCategory::Posture),
+      // Dimension literal `6` must stay in lock-step with `slouch_ml::constants::POSTURE_RAW_3D_DIMS`.
+      Self::PostureRaw3d => FeatureMetadata::computed(self, "Posture Raw 3D", "Body-intrinsic 3D raw posture features (ear-eye vertical, head yaw, neck length, inter-ear distance, head-up trunk projection) + validity (6 dims)", 6, Some(ModelCategory::Posture), Some(false)),
+      // Dimension literal `10` must stay in lock-step with `slouch_ml::constants::POSTURE_GEOMETRY_3D_DIMS`.
+      Self::PostureGeometry3d => FeatureMetadata::computed(self, "Posture Geometry 3D", "10 body-intrinsic 3D geometric posture features from head and shoulder keypoints, derived from the 3D keypoint substrate", 10, Some(ModelCategory::Posture), Some(false)),
+      // Dimension literal `9` must stay in lock-step with `slouch_ml::constants::TORSO_INVARIANT_3D_DIMS`.
+      Self::TorsoInvariant3d => FeatureMetadata::computed(self, "Torso-Invariant 3D", "9 torso-anchored 3D posture features separating head flexion from trunk lean, including camera-frame coronal/sagittal lean and axial twist (9 dims)", 9, Some(ModelCategory::Posture), Some(false)),
     }
     }
 }
@@ -229,6 +255,29 @@ impl FeatureMetadata {
         }
     }
 
+    // Present-by-design stored substrate, hidden from direct selection, consumed as a
+    // dependency by the computed 3D posture features. Unlike `stored_unavailable` (retired /
+    // no longer produced), this feature is still extracted every frame.
+    const fn stored_hidden(
+        id: FeatureId,
+        name: &'static str,
+        description: &'static str,
+        dimensions: usize,
+        model_type: ModelCategory,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            description,
+            dimensions,
+            storage_cost: dimensions * size_of::<f32>(),
+            computed: false,
+            model_type: Some(model_type),
+            user_selectable: false,
+            requires_fitting: None,
+        }
+    }
+
     const fn computed(
         id: FeatureId,
         name: &'static str,
@@ -251,6 +300,6 @@ impl FeatureMetadata {
     }
 }
 
-pub fn feature_registry() -> [FeatureMetadata; 21] {
+pub fn feature_registry() -> [FeatureMetadata; 25] {
     FeatureId::ALL.map(FeatureId::metadata)
 }

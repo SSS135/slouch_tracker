@@ -1,7 +1,10 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FrameLabel } from '@/services/dataset/types';
+import { NativeCommandError } from '@/lib/native/client';
+import { reactiveBox } from '@/__tests__/utils/reactiveBox.svelte';
 
 const mocks = vi.hoisted(() => {
   const capturedFrame = {
@@ -49,6 +52,7 @@ const mocks = vi.hoisted(() => {
         claheStrength: 3.5,
         gaussianBlurKernel: 0,
         smoothingFrames: 1,
+        showDetectionOverlay: false,
       },
       ready: true,
       error: null,
@@ -69,6 +73,7 @@ const mocks = vi.hoisted(() => {
     dataset: {
       stats: { data: null as null | { hasMinimumFrames: boolean }, refetch: vi.fn() },
       frames: { data: [] },
+      needsRetraining: { data: false as boolean, refetch: vi.fn() } as { data: boolean; refetch: ReturnType<typeof vi.fn> },
       canUndo: { data: { available: false, depth: 0, nextAction: null, revision: 0 } },
       invalidateAll: vi.fn(),
       invalidateStats: vi.fn(),
@@ -76,6 +81,7 @@ const mocks = vi.hoisted(() => {
       resetDataset: { mutateAsync: vi.fn() },
       resetAllData: { mutateAsync: vi.fn() },
     },
+    trainingConfig: { ready: true, persistedRevision: 0, reload: vi.fn().mockResolvedValue(undefined), flushToStorage: vi.fn().mockResolvedValue(undefined), reconcile: vi.fn() } as { ready: boolean; persistedRevision: number; reload: () => Promise<void>; flushToStorage: () => Promise<void>; reconcile: () => void },
     training: {
       train: vi.fn(),
       trainAndDeploy: vi.fn(),
@@ -98,6 +104,15 @@ const mocks = vi.hoisted(() => {
       getActiveModelMetadata: vi.fn(),
       resetTrainingSettings: vi.fn(),
       onNativeStateChanged: vi.fn().mockResolvedValue(vi.fn()),
+      onTrackingStateChanged: vi.fn().mockResolvedValue(vi.fn()),
+      getAutostartEnabled: vi.fn().mockResolvedValue(false),
+      setAutostartEnabled: vi.fn().mockResolvedValue(undefined),
+    },
+    nativeApp: {
+      status: { inferenceReady: true } as { inferenceReady: boolean } | null,
+      error: null as Error | null,
+      initialize: vi.fn().mockResolvedValue(undefined),
+      reconcile: vi.fn(),
     },
   };
 });
@@ -110,7 +125,7 @@ vi.mock('@tanstack/svelte-query', async () => {
   return { ...actual, useQueryClient: () => mocks.queryClient };
 });
 vi.mock('@/contexts/TrainingConfigContext', () => ({
-  useTrainingConfig: () => ({ ready: true, reload: vi.fn().mockResolvedValue(undefined), flushToStorage: vi.fn().mockResolvedValue(undefined), reconcile: vi.fn() }),
+  useTrainingConfig: () => mocks.trainingConfig,
 }));
 vi.mock('@/contexts/TrainingContext', () => ({ useTraining: () => mocks.training }));
 vi.mock('@/hooks/useCameraSettings', () => ({ useCameraSettings: () => mocks.settings }));
@@ -123,9 +138,12 @@ vi.mock('@/hooks/usePostureSound', () => ({ usePostureSound: vi.fn() }));
 vi.mock('@/hooks/useBackgroundProcessing', () => ({ useBackgroundProcessing: () => mocks.background }));
 vi.mock('@/hooks/useGlobalShortcuts', () => ({ useGlobalShortcuts: vi.fn() }));
 vi.mock('@/lib/state/nativeApp.svelte', () => ({
-  useNativeAppState: () => ({ status: { inferenceReady: true }, initialize: vi.fn().mockResolvedValue(undefined), reconcile: vi.fn() }),
+  useNativeAppState: () => mocks.nativeApp,
 }));
-vi.mock('@/lib/native/client', () => ({ nativeClient: mocks.native }));
+vi.mock('@/lib/native/client', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/native/client')>('@/lib/native/client');
+  return { nativeClient: mocks.native, NativeCommandError: actual.NativeCommandError };
+});
 
 import PostureTrackerApp from '../PostureTrackerApp.svelte';
 
@@ -150,9 +168,15 @@ beforeEach(() => {
   mocks.settings.ready = true;
   mocks.settings.error = null;
   mocks.settings.settings.autoCaptureEnabled = false;
+  mocks.settings.settings.showDetectionOverlay = false;
+  mocks.nativeApp.status = { inferenceReady: true };
+  mocks.nativeApp.error = null;
   mocks.settings.resetSettings.mockResolvedValue(undefined);
   mocks.dataset.stats.data = null;
   mocks.dataset.stats.refetch.mockResolvedValue({ data: null });
+  mocks.dataset.needsRetraining = { data: false, refetch: vi.fn().mockResolvedValue({ data: false }) };
+  mocks.trainingConfig = { ready: true, persistedRevision: 0, reload: vi.fn().mockResolvedValue(undefined), flushToStorage: vi.fn().mockResolvedValue(undefined), reconcile: vi.fn() };
+  mocks.training.state.isTraining = false;
   mocks.dataset.invalidateAll.mockResolvedValue(undefined);
   mocks.dataset.undo.mutateAsync.mockResolvedValue(true);
   mocks.training.trainAndDeploy.mockResolvedValue(true);
@@ -161,7 +185,7 @@ beforeEach(() => {
   mocks.dataset.resetDataset.mutateAsync.mockResolvedValue(undefined);
   mocks.dataset.resetAllData.mutateAsync.mockResolvedValue({
     app: { ready: true, inferenceReady: true, datasetVersion: 2, storage: { used: 0, available: 1, quota: 1 } },
-    cameraSettings: { cameraWidth: 800, cameraHeight: 600, captureIntervalSeconds: 1, autoCaptureEnabled: false, autoCaptureIntervalSeconds: 5, privacyMode: false, claheStrength: 0, gaussianBlurKernel: 0, smoothingFrames: 1 },
+    cameraSettings: { cameraWidth: 800, cameraHeight: 600, captureIntervalSeconds: 1, autoCaptureEnabled: false, autoCaptureIntervalSeconds: 5, privacyMode: false, claheStrength: 0, gaussianBlurKernel: 0, smoothingFrames: 1, showDetectionOverlay: false },
     uiSettings: { alertVolume: 0.3, alertDelaySeconds: 5 },
     trainingSettings: null,
     activeModels: { posture: null, presence: null },
@@ -205,6 +229,23 @@ describe('PostureTrackerApp native view integration', () => {
     // until the next result. They now gate on isLive (pipeline liveness), so a
     // consumed token no longer disables them.
     mocks.frameSampler.canCapture = false;
+    mocks.frameSampler.isLive = true;
+    await renderReady();
+    await loadInference();
+    expect(screen.getByRole('button', { name: 'Good' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Bad' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Away' })).toBeEnabled();
+  });
+
+  it('enables capture while inference streams even when the inferenceReady snapshot is stale and overlay mode is on', async () => {
+    // Regression: `nativeApp.status.inferenceReady` is a one-shot snapshot read
+    // once during startup init and never refreshed, so a slow model load latched
+    // it false while native inference was fully up and streaming results — which
+    // permanently disabled every capture button. Capture readiness must follow the
+    // live pipeline (frameSampler.isLive, itself proof inference is running), not
+    // the stale flag, and must hold regardless of the detection-overlay preview mode.
+    mocks.nativeApp.status = { inferenceReady: false };
+    mocks.settings.settings.showDetectionOverlay = true;
     mocks.frameSampler.isLive = true;
     await renderReady();
     await loadInference();
@@ -307,7 +348,11 @@ describe('PostureTrackerApp native view integration', () => {
     });
 
     await renderReady();
-    await loadInference();
+    // Pre-deploy there is no posture model, so the runtime emits no goodProbability.
+    // A presence-only result keeps the badge untrained via the snapshot and lets this
+    // test prove the metadata-reload path rather than the live-signal self-heal.
+    await fireEvent.click(screen.getByRole('button', { name: 'Load presence-only inference' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Good' })).toBeEnabled());
     expect(screen.getByText('No Model Trained')).toBeInTheDocument();
     const callsBefore = mocks.native.getActiveModelMetadata.mock.calls.length;
 
@@ -447,5 +492,181 @@ describe('PostureTrackerApp native view integration', () => {
     expect(mocks.settings.resetSettings).not.toHaveBeenCalled();
     expect(mocks.settings.reconcile).toHaveBeenCalledTimes(1);
     expect(mocks.queryClient.clear).not.toHaveBeenCalled();
+  });
+});
+
+describe('PostureTrackerApp status badge model state', () => {
+  it('shows the trained badge when a live classification proves a deployed model despite a stale null snapshot', async () => {
+    // Regression (the reported bug): get_active_model_metadata reported no posture
+    // model (a stale, unrefreshed snapshot) while the runtime already classified and
+    // the alert sound fired. A live non-null goodProbability is authoritative proof of
+    // a deployed posture classifier, so the badge must not claim "No Model Trained".
+    mocks.native.getActiveModelMetadata.mockResolvedValue({ posture: null, presence: null });
+    await renderReady();
+    expect(screen.getByText('No Model Trained')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Load inference A' }));
+    await waitFor(() => expect(screen.queryByText('No Model Trained')).not.toBeInTheDocument());
+    expect(screen.getByText('Good Posture')).toBeInTheDocument();
+  });
+
+  it('keeps the untrained badge when no model and no live posture score are present', async () => {
+    // A present-but-unscored frame (goodProbability null: no posture model, or the
+    // person is away) must not be mistaken for a deployed model.
+    mocks.native.getActiveModelMetadata.mockResolvedValue({ posture: null, presence: null });
+    await renderReady();
+    await fireEvent.click(screen.getByRole('button', { name: 'Load presence-only inference' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Good' })).toBeEnabled());
+    expect(screen.getByText('No Model Trained')).toBeInTheDocument();
+  });
+
+  it('shows the trained badge from the metadata snapshot alone at startup with a pre-trained model', async () => {
+    // Fresh start with a pre-trained model: get_active_model_metadata returns it on
+    // mount, so the badge is correct before any live classification arrives.
+    mocks.native.getActiveModelMetadata.mockResolvedValue({
+      posture: { classifierId: 'mlp', featureTypes: ['engineered_features'], trainedAt: 100 },
+      presence: null,
+    });
+    await renderReady();
+    await waitFor(() => expect(screen.queryByText('No Model Trained')).not.toBeInTheDocument());
+  });
+
+  it('returns the badge to untrained after Reset All Data clears the runtime model', async () => {
+    // Reset unloads the runtime classifier (goodProbability -> null) and reconciles
+    // metadata to null; the self-heal must not keep the badge trained from the
+    // pre-reset live result.
+    mocks.native.getActiveModelMetadata.mockResolvedValue({ posture: null, presence: null });
+    await renderReady();
+    await fireEvent.click(screen.getByRole('button', { name: 'Load inference A' }));
+    await waitFor(() => expect(screen.queryByText('No Model Trained')).not.toBeInTheDocument());
+    await fireEvent.click(screen.getByRole('button', { name: 'Open control panel' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Reset All Data' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    await waitFor(() => expect(mocks.dataset.resetAllData.mutateAsync).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByText('No Model Trained')).toBeInTheDocument());
+  });
+
+  it('keeps the trained badge in the away state when the person leaves after a live classification proved a model', async () => {
+    // Regression fix: goodProbability is presence-gated, so it goes null when the
+    // person leaves. With a still-stale null snapshot (getActiveModelMetadata keeps
+    // returning null), the session latch must hold hasModel true so the badge shows
+    // the away state, never "No Model Trained".
+    mocks.native.getActiveModelMetadata.mockResolvedValue({ posture: null, presence: null });
+    await renderReady();
+    await fireEvent.click(screen.getByRole('button', { name: 'Load inference A' }));
+    await waitFor(() => expect(screen.queryByText('No Model Trained')).not.toBeInTheDocument());
+    await fireEvent.click(screen.getByRole('button', { name: 'Load away inference' }));
+    await waitFor(() => expect(screen.getByText('Person Away')).toBeInTheDocument());
+    expect(screen.queryByText('No Model Trained')).not.toBeInTheDocument();
+  });
+
+  it('returns the badge to untrained after Reset All Data even while the person is absent', async () => {
+    // Clearing the latch on reconcile: a reset performed while the person is away
+    // (no live classification) must still fall back to "No Model Trained".
+    mocks.native.getActiveModelMetadata.mockResolvedValue({ posture: null, presence: null });
+    await renderReady();
+    await fireEvent.click(screen.getByRole('button', { name: 'Load inference A' }));
+    await waitFor(() => expect(screen.queryByText('No Model Trained')).not.toBeInTheDocument());
+    await fireEvent.click(screen.getByRole('button', { name: 'Load away inference' }));
+    await waitFor(() => expect(screen.getByText('Person Away')).toBeInTheDocument());
+    await fireEvent.click(screen.getByRole('button', { name: 'Open control panel' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Reset All Data' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    await waitFor(() => expect(mocks.dataset.resetAllData.mutateAsync).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByText('No Model Trained')).toBeInTheDocument());
+  });
+
+  it('heals a stale null snapshot with exactly one metadata refetch when a live classification contradicts it', async () => {
+    // One-shot heal: a live goodProbability against a null snapshot triggers a single
+    // refetch (no polling). Once the snapshot reads the model, further live results do
+    // not refetch again.
+    mocks.native.getActiveModelMetadata
+      .mockResolvedValueOnce({ posture: null, presence: null })
+      .mockResolvedValue({
+        posture: { classifierId: 'mlp', featureTypes: ['engineered_features'], trainedAt: 100 },
+        presence: null,
+      });
+    await renderReady();
+    await waitFor(() => expect(mocks.native.getActiveModelMetadata).toHaveBeenCalledTimes(1));
+    await fireEvent.click(screen.getByRole('button', { name: 'Load inference A' }));
+    await waitFor(() => expect(mocks.native.getActiveModelMetadata).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText('No Model Trained')).not.toBeInTheDocument());
+    await fireEvent.click(screen.getByRole('button', { name: 'Load inference B' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Load bad inference' }));
+    await waitFor(() => expect(screen.getByText('Bad Posture')).toBeInTheDocument());
+    expect(mocks.native.getActiveModelMetadata).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('PostureTrackerApp self-healing auto-train', () => {
+  it('auto-trains exactly once when a sufficient dataset needs a model at startup', async () => {
+    // The reported gap: frames were collected but no model existed and nothing retrained,
+    // because the save-only trigger had already passed. A trainable-but-stale dataset must
+    // train itself on load.
+    mocks.dataset.stats.data = { hasMinimumFrames: true };
+    mocks.dataset.needsRetraining = { data: true, refetch: vi.fn().mockResolvedValue({ data: false }) };
+    await renderReady();
+    await waitFor(() => expect(mocks.training.trainAndDeploy).toHaveBeenCalled());
+    expect(mocks.training.trainAndDeploy).toHaveBeenCalledTimes(1);
+    expect(mocks.training.trainAndDeploy).toHaveBeenCalledWith(expect.objectContaining({ doCV: false }));
+  });
+
+  it('auto-trains once when needsRetraining flips true after a training-settings save', async () => {
+    // A settings edit refreshes needsRetraining (via TrainingConfigContext.persistedRevision);
+    // when it reports the model is now stale, the reactive trigger fires exactly once.
+    mocks.dataset.stats.data = { hasMinimumFrames: true };
+    const needs = reactiveBox(false);
+    mocks.dataset.needsRetraining = { get data() { return needs.value; }, refetch: vi.fn().mockResolvedValue({ data: false }) };
+    await renderReady();
+    await Promise.resolve();
+    expect(mocks.training.trainAndDeploy).not.toHaveBeenCalled();
+    needs.set(true);
+    flushSync();
+    await waitFor(() => expect(mocks.training.trainAndDeploy).toHaveBeenCalledTimes(1));
+  });
+
+  it('refreshes needsRetraining when training settings are persisted', async () => {
+    // Requirement wiring: a persisted settings change refreshes the retraining flag so the
+    // trigger sees it, with no polling. Held below the minimum here to isolate the refetch.
+    mocks.dataset.stats.data = { hasMinimumFrames: false };
+    const refetch = vi.fn().mockResolvedValue({ data: false });
+    mocks.dataset.needsRetraining = { data: false, refetch };
+    const revision = reactiveBox(0);
+    mocks.trainingConfig = { ready: true, get persistedRevision() { return revision.value; }, reload: vi.fn().mockResolvedValue(undefined), flushToStorage: vi.fn().mockResolvedValue(undefined), reconcile: vi.fn() };
+    await renderReady();
+    expect(refetch).not.toHaveBeenCalled();
+    revision.set(1);
+    flushSync();
+    await waitFor(() => expect(refetch).toHaveBeenCalled());
+  });
+
+  it('does not start a second training when one is already running', async () => {
+    mocks.dataset.stats.data = { hasMinimumFrames: true };
+    mocks.dataset.needsRetraining = { data: true, refetch: vi.fn().mockResolvedValue({ data: false }) };
+    mocks.training.state.isTraining = true;
+    await renderReady();
+    await Promise.resolve();
+    expect(mocks.training.trainAndDeploy).not.toHaveBeenCalled();
+  });
+
+  it('retries the auto-train exactly once when the deploy is superseded, then stops', async () => {
+    // SnapshotChanged -> ApiError::DatasetChanged surfaces as NativeCommandError kind
+    // 'datasetChanged'; a single retry recovers a deploy raced by a concurrent change.
+    mocks.dataset.stats.data = { hasMinimumFrames: true };
+    mocks.dataset.needsRetraining = { data: true, refetch: vi.fn().mockResolvedValue({ data: false }) };
+    mocks.training.trainAndDeploy
+      .mockRejectedValueOnce(new NativeCommandError({ kind: 'datasetChanged', message: 'training snapshot changed' }))
+      .mockResolvedValue(true);
+    await renderReady();
+    await waitFor(() => expect(mocks.training.trainAndDeploy).toHaveBeenCalledTimes(2));
+    await Promise.resolve();
+    expect(mocks.training.trainAndDeploy).toHaveBeenCalledTimes(2);
+  });
+
+  it('never auto-trains when the dataset is below the minimum', async () => {
+    mocks.dataset.stats.data = { hasMinimumFrames: false };
+    mocks.dataset.needsRetraining = { data: true, refetch: vi.fn().mockResolvedValue({ data: true }) };
+    await renderReady();
+    await Promise.resolve();
+    expect(mocks.training.trainAndDeploy).not.toHaveBeenCalled();
   });
 });

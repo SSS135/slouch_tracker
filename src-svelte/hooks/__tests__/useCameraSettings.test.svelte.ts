@@ -14,8 +14,14 @@ const cameraDefaults = {
   claheStrength: 3.5,
   gaussianBlurKernel: 5,
   smoothingFrames: 3,
+  showDetectionOverlay: false,
 };
-const uiDefaults = { alertVolume: 0.3, alertDelaySeconds: 5 };
+const uiDefaults = {
+  alertVolume: 0.3,
+  alertDelaySeconds: 5,
+  minimizeToTrayOnClose: true,
+  startHiddenOnLogin: true,
+};
 
 function client() {
   return createMockNativePersistence({
@@ -101,8 +107,8 @@ describe('useCameraSettings native persistence', () => {
       cameraWidth: 1280,
     });
     expect(mock.client.saveUiSettings).toHaveBeenCalledWith({
+      ...uiDefaults,
       alertVolume: 0.75,
-      alertDelaySeconds: 5,
     });
     expect(mock.readCameraSettings().cameraWidth).toBe(1280);
     expect(mock.readUiSettings().alertVolume).toBe(0.75);
@@ -298,5 +304,66 @@ describe('useCameraSettings native persistence', () => {
 
     expect(mock.client.resetCameraSettings).toHaveBeenCalledOnce();
     expect(result.settings).toEqual({ ...cameraDefaults, ...uiDefaults });
+  });
+
+  it('surfaces the tray toggles as true when native omits the optional UI fields', async () => {
+    const mock = client();
+    mock.client.getUiSettings.mockResolvedValueOnce({ alertVolume: 0.3, alertDelaySeconds: 5 });
+    const result = mount(mock);
+    await loaded(result);
+
+    expect(result.settings.minimizeToTrayOnClose).toBe(true);
+    expect(result.settings.startHiddenOnLogin).toBe(true);
+  });
+
+  it('persists a flipped minimizeToTrayOnClose through saveUiSettings and re-reads it', async () => {
+    const mock = client();
+    const result = mount(mock);
+    await loaded(result);
+
+    flushSync(() => result.updateSettings({ minimizeToTrayOnClose: false }));
+    await result.flush();
+
+    expect(mock.client.saveUiSettings).toHaveBeenLastCalledWith({
+      ...uiDefaults,
+      minimizeToTrayOnClose: false,
+    });
+    expect(mock.readUiSettings().minimizeToTrayOnClose).toBe(false);
+    expect(result.settings.minimizeToTrayOnClose).toBe(false);
+
+    await result.reload();
+    expect(result.settings.minimizeToTrayOnClose).toBe(false);
+    expect(result.settings.startHiddenOnLogin).toBe(true);
+  });
+
+  it('persists a flipped startHiddenOnLogin through saveUiSettings', async () => {
+    const mock = client();
+    const result = mount(mock);
+    await loaded(result);
+
+    flushSync(() => result.updateSettings({ startHiddenOnLogin: false }));
+    await result.flush();
+
+    expect(mock.client.saveUiSettings).toHaveBeenLastCalledWith({
+      ...uiDefaults,
+      startHiddenOnLogin: false,
+    });
+    expect(mock.readUiSettings().startHiddenOnLogin).toBe(false);
+    expect(result.settings.startHiddenOnLogin).toBe(false);
+  });
+
+  it('restores the tray toggles to true on reset', async () => {
+    const mock = client();
+    const result = mount(mock);
+    await loaded(result);
+
+    flushSync(() => result.updateSettings({ minimizeToTrayOnClose: false, startHiddenOnLogin: false }));
+    await result.flush();
+    expect(result.settings.minimizeToTrayOnClose).toBe(false);
+    expect(result.settings.startHiddenOnLogin).toBe(false);
+
+    await result.resetSettings();
+    expect(result.settings.minimizeToTrayOnClose).toBe(true);
+    expect(result.settings.startHiddenOnLogin).toBe(true);
   });
 });

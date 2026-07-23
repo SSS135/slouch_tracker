@@ -28,6 +28,7 @@ use slouch_ml::ported::constants::{
     NLF_BACKBONE_SHAPE, NLF_COCO17_CANONICAL, NLF_NUM_CANONICAL, PERSON_DETECTION_CONFIDENCE,
     RTMDET_INPUT_SIZE, RTMDET_OUTPUT_NAMES,
 };
+use slouch_ml::ported::keypoints_3d_features::extract_raw_keypoints_3d;
 use slouch_ml::ported::nlf_features::{extract_nlf_depth_features, uncertainty_to_keypoint_score};
 use slouch_ml::ported::pooling::{pool_features_max, pool_features_mean, pool_features_std};
 use slouch_ml::ported::rtmdet_features::extract_rtm_det_features as extract_ported_rtmdet_features;
@@ -852,6 +853,14 @@ where
             .map_err(|error| WorkerError::Feature(error.to_string()))?
         {
             features.insert(FeatureId::NlfDepth, values);
+        }
+        // Torso-normalized, root-centered 3D COCO substrate for the computed 3D
+        // posture features. Mirrors NlfDepth: a degenerate torso returns `None`
+        // (skip the insert), while a length mismatch fails the frame.
+        if let Some(values) = extract_raw_keypoints_3d(&coords3d)
+            .map_err(|error| WorkerError::Feature(error.to_string()))?
+        {
+            features.insert(FeatureId::RawKeypoints3d, values);
         }
         // Pool the `[1,512,12,12]` backbone embedding over its spatial axes into the
         // three 512-dim stored features. Deliberately unlike NlfDepth's

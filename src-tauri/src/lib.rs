@@ -5,6 +5,7 @@ mod errors;
 #[cfg(test)]
 mod native_runtime_resources_parity;
 mod power;
+mod tray;
 
 pub fn export_bindings(path: impl AsRef<std::path::Path>) -> Result<(), String> {
     bindings::export(path)
@@ -13,8 +14,10 @@ pub fn export_bindings(path: impl AsRef<std::path::Path>) -> Result<(), String> 
 use std::path::PathBuf;
 
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::{Builder as GlobalShortcutBuilder, ShortcutState};
 use tauri_plugin_log::{Target, TargetKind};
+use tauri_plugin_notification::NotificationExt;
 
 use crate::actors::CameraMode;
 
@@ -61,9 +64,28 @@ pub fn run() {
         })
         .build();
 
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // Single-instance MUST be the first registered plugin (its hard requirement).
+    // With a tray-resident app, a second launch focuses/shows the existing window
+    // via the shared restore helper instead of spawning a duplicate.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        tray::restore_window(app);
+    }));
+
+    let builder = builder
         .plugin(shortcut_plugin)
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        // Per-user Run-key autostart. The commands drive it via the plugin's Rust
+        // ManagerExt (no guest JS plugin / capabilities). LaunchAgent is the macOS
+        // launcher, irrelevant on Windows. Launch arg `--autostart` marks a login
+        // launch so setup can start the window hidden in the tray.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--autostart"]),
+        ));
 
     // Embedded WebDriver server for packaged-native E2E (devbuild only). Must be
     // registered on the builder (not in setup) so its on_webview_ready hook runs
@@ -77,28 +99,62 @@ pub fn run() {
         // background). A path containing "processed" serves the detector-input
         // frame instead (post-preprocessing JPEG). Each /processed pull also stamps
         // live demand so the capture loop refreshes that frame at capture rate while
-        // it is watched, falling back to the ~1fps detection refresh when idle; any
-        // other path serves the raw preview frame.
+        // it is watched, falling back to the ~1fps detection refresh when idle. A
+        // path containing "inferred" serves the same detector-input JPEG WITHOUT
+        // stamping demand, so it stays the dispatcher-written inferred frame at
+        // detection cadence (used by the diagnostic detection overlay so the shown
+        // frame matches the result's keypoints/bbox); any other path serves the raw
+        // preview frame.
         // The webview origin (dev: http://127.0.0.1:5174; prod: tauri://localhost)
         // differs from this custom-scheme host, so the frame must be CORS-allowed;
         // without it privacy-mode grid sampling and thumbnail reads fail as opaque
         // cross-origin fetches. The stream is a local, in-process preview only.
         .register_asynchronous_uri_scheme_protocol("slouchcam", |ctx, request, responder| {
             let state = ctx.app_handle().state::<api::AppState>();
-            let bytes = if request.uri().path().contains("processed") {
+            let path = request.uri().path();
+            // Processed/inferred frames carry a monotonic capture sequence; the raw
+            // feed has none. `frame_seq` is echoed as `x-slouch-frame-seq` so the
+            // webview can order commits against the Rust-authoritative ordering.
+            let (bytes, frame_seq) = if path.contains("inferred") {
+                // Detection-overlay diagnostic: the exact preprocessed frame the
+                // detector last ran on. Deliberately does NOT stamp demand, so
+                // `processed_frame` stays the dispatcher-written inferred frame
+                // (detection cadence) matching the keypoints/bbox in the same
+                // InferenceUiResult — no 30fps capture-rate override.
+                match state.camera.processed_frame_snapshot() {
+                    Some((seq, bytes)) => (Some(bytes), Some(seq)),
+                    None => (None, None),
+                }
+            } else if path.contains("processed") {
                 // Stamp live demand so the capture loop keeps the processed frame
                 // fresh at capture rate while the view is being pulled.
                 state.camera.note_processed_request();
-                state.camera.processed_frame_bytes()
+                match state.camera.processed_frame_snapshot() {
+                    Some((seq, bytes)) => (Some(bytes), Some(seq)),
+                    None => (None, None),
+                }
             } else {
-                state.camera.latest_frame_bytes()
+                (state.camera.latest_frame_bytes(), None)
             };
             let response = match bytes {
-                Some(bytes) => tauri::http::Response::builder()
-                    .status(200)
-                    .header(tauri::http::header::CONTENT_TYPE, "image/jpeg")
-                    .header(tauri::http::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-                    .body(bytes),
+                Some(bytes) => {
+                    let mut builder = tauri::http::Response::builder()
+                        .status(200)
+                        .header(tauri::http::header::CONTENT_TYPE, "image/jpeg")
+                        .header(tauri::http::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*");
+                    if let Some(seq) = frame_seq {
+                        // Expose the sequence to cross-origin `fetch()` readers too, so
+                        // any frontend commit guard can read it (the <img> fast path
+                        // stays header-free and monotonic-by-construction).
+                        builder = builder
+                            .header("x-slouch-frame-seq", seq.to_string())
+                            .header(
+                                tauri::http::header::ACCESS_CONTROL_EXPOSE_HEADERS,
+                                "x-slouch-frame-seq",
+                            );
+                    }
+                    builder.body(bytes)
+                }
                 None => tauri::http::Response::builder()
                     .status(204)
                     .header(tauri::http::header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
@@ -115,8 +171,8 @@ pub fn run() {
         // throttled, but the preview cell still updates at the ~1fps detection rate, so
         // a visible-but-unfocused window keeps a live feed). Detection runs either way;
         // the frontend stops fetching only when the window is minimized/hidden.
-        .on_window_event(|window, event| {
-            if let WindowEvent::Focused(focused) = event {
+        .on_window_event(|window, event| match event {
+            WindowEvent::Focused(focused) => {
                 let mode = if *focused {
                     CameraMode::Foreground
                 } else {
@@ -130,6 +186,32 @@ pub fn run() {
                 // correct whether the app launches focused or unfocused.
                 power::set_efficiency_mode(!*focused);
             }
+            // Closing hides the window to the tray (detection keeps running) when
+            // the setting is on, showing a one-time toast the first time. With the
+            // setting off the close proceeds to a full exit, exactly as before.
+            WindowEvent::CloseRequested { api, .. } => {
+                let state = window.state::<api::AppState>();
+                let minimize = state
+                    .storage
+                    .get_ui_settings()
+                    .map(|settings| settings.minimize_to_tray_on_close)
+                    .unwrap_or(true);
+                if minimize {
+                    let _ = window.hide();
+                    api.prevent_close();
+                    if !state.storage.get_tray_notice_shown().unwrap_or(false) {
+                        let _ = window
+                            .app_handle()
+                            .notification()
+                            .builder()
+                            .title("Slouch Tracker is still running")
+                            .body("It minimized to the tray and keeps tracking your posture. Double-click the tray icon to open it, or right-click to pause or exit.")
+                            .show();
+                        let _ = state.storage.set_tray_notice_shown(true);
+                    }
+                }
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             api::app_status,
@@ -166,6 +248,8 @@ pub fn run() {
             api::export_dataset,
             api::import_dataset,
             api::get_shortcut_status,
+            api::get_autostart_enabled,
+            api::set_autostart_enabled,
             api::start_camera,
             api::stop_camera,
             api::list_cameras,
@@ -209,6 +293,37 @@ pub fn run() {
 
             api::initialize_inference(app.state::<api::AppState>())
                 .map_err(std::io::Error::other)?;
+
+            tray::build_tray(app.handle())?;
+
+            // Refresh the per-user Run-key entry so it carries the current exe path
+            // plus the `--autostart` arg (older entries predate the arg). Idempotent.
+            // Windows StartupApproved\Run (the Task Manager toggle) stays
+            // authoritative: is_enabled() already folds it in, so a user who
+            // disabled startup there reports false here and we skip — enable() never
+            // overrides that kill switch.
+            let autolaunch = app.autolaunch();
+            if autolaunch.is_enabled().unwrap_or(false) {
+                let _ = autolaunch.enable();
+            }
+
+            // The window is configured `visible: false` (this also removes the white
+            // startup flash). Show it now UNLESS this is an autostart login launch
+            // the user chose to keep hidden. A hidden launch still fully initializes:
+            // the webview loads and the frontend starts the camera on mount
+            // regardless of visibility, and detection runs off the window state.
+            let start_hidden = std::env::args().any(|arg| arg == "--autostart")
+                && app
+                    .state::<api::AppState>()
+                    .storage
+                    .get_ui_settings()
+                    .map(|settings| settings.start_hidden_on_login)
+                    .unwrap_or(true);
+            if !start_hidden {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                }
+            }
 
             #[cfg(feature = "devbuild")]
             if let Some(window) = app.get_webview_window("main") {

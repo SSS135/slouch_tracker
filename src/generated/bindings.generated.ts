@@ -52,6 +52,8 @@ export const commands = {
 	state: NativeStateSnapshot_Serialize,
 } | null, ApiError>(__TAURI_INVOKE("import_dataset")),
 	getShortcutStatus: () => typedError<ShortcutStatus, ApiError>(__TAURI_INVOKE("get_shortcut_status")),
+	getAutostartEnabled: () => typedError<boolean, ApiError>(__TAURI_INVOKE("get_autostart_enabled")),
+	setAutostartEnabled: (enabled: boolean) => typedError<null, ApiError>(__TAURI_INVOKE("set_autostart_enabled", { enabled })),
 	startCamera: (onResult: Channel<InferenceUiResult>) => typedError<null, ApiError>(__TAURI_INVOKE("start_camera", { onResult })),
 	stopCamera: () => typedError<null, ApiError>(__TAURI_INVOKE("stop_camera")),
 	listCameras: () => typedError<CameraDeviceInfo[], ApiError>(__TAURI_INVOKE("list_cameras")),
@@ -60,6 +62,7 @@ export const commands = {
 /** Events */
 export const events = {
 	nativeStateChanged: makeEvent<NativeStateChangedEvent_Deserialize>("native-state-changed"),
+	trackingStateChanged: makeEvent<TrackingStateChangedEvent>("tracking-state-changed"),
 	undoStatusChanged: makeEvent<UndoStatusChangedEvent>("undo-status-changed"),
 };
 
@@ -125,6 +128,7 @@ export type CameraSettings = {
 	claheStrength: number | null,
 	gaussianBlurKernel: number,
 	smoothingFrames: number,
+	showDetectionOverlay?: boolean,
 };
 
 export type ClassificationResult = {
@@ -189,7 +193,7 @@ export type ExpandedBbox = {
 	expanded: BoundingBox,
 };
 
-export type FeatureId = "backbone_features" | "backbone_features_max" | "backbone_features_std" | "gau_features" | "gau_features_max" | "gau_features_std" | "rtmdet_extracted" | "rtmdet_engineered" | "engineered_features" | "joint_2d" | "joint_3d" | "joint_4d" | "posture_raw" | "keypoint_scores" | "raw_keypoints" | "posture_geometry" | "torso_invariant" | "nlf_depth" | "nlf_backbone" | "nlf_backbone_max" | "nlf_backbone_std";
+export type FeatureId = "backbone_features" | "backbone_features_max" | "backbone_features_std" | "gau_features" | "gau_features_max" | "gau_features_std" | "rtmdet_extracted" | "rtmdet_engineered" | "engineered_features" | "joint_2d" | "joint_3d" | "joint_4d" | "posture_raw" | "keypoint_scores" | "raw_keypoints" | "posture_geometry" | "torso_invariant" | "nlf_depth" | "nlf_backbone" | "nlf_backbone_max" | "nlf_backbone_std" | "raw_keypoints_3d" | "posture_raw_3d" | "posture_geometry_3d" | "torso_invariant_3d";
 
 export type FeatureMetadata = FeatureMetadata_Serialize | FeatureMetadata_Deserialize;
 
@@ -347,6 +351,10 @@ export type StorageInfoDto = {
 	quota: number,
 };
 
+export type TrackingStateChangedEvent = {
+	paused: boolean,
+};
+
 export type TrainingEvent = TrainingEvent_Serialize | TrainingEvent_Deserialize;
 
 export type TrainingEvent_Deserialize = ({ type: "started"; jobId: number; sequence: number }) & { error?: never; progress?: never; result?: never; stage?: never } | ({ type: "progress"; jobId: number; sequence: number; stage: TrainingStage; progress: number }) & { error?: never; result?: never } | ({ type: "completed"; jobId: number; sequence: number; result: TrainingResultResponse_Deserialize }) & { error?: never; progress?: never; stage?: never } | ({ type: "failed"; jobId: number; sequence: number; error: string }) & { progress?: never; result?: never; stage?: never } | ({ type: "cancelled"; jobId: number; sequence: number }) & { error?: never; progress?: never; result?: never; stage?: never };
@@ -452,6 +460,8 @@ export type TrainingStatus = {
 export type UiSettings = {
 	alertVolume: number | null,
 	alertDelaySeconds: number | null,
+	minimizeToTrayOnClose?: boolean,
+	startHiddenOnLogin?: boolean,
 };
 
 export type UndoActionKind = "removeCapture" | "restoreFrame";

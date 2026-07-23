@@ -276,7 +276,7 @@
         <RadioGroup
           options={[
             { value: 'random_projection', label: 'Random Projection', description: 'Unsupervised, fast, preserves distances' },
-            { value: 'pca', label: `PCA (${reservoir.count}/100 samples)`, description: 'Unsupervised native dimensionality reduction', disabled: !pcaReady },
+            { value: 'pca', label: pcaReady ? `PCA (${reservoir.count} samples available)` : `PCA (needs 100 samples, have ${reservoir.count})`, description: 'Unsupervised native dimensionality reduction', disabled: !pcaReady },
             { value: 'none', label: 'None', description: 'Use all features' },
           ]}
           value={config.dimReductionConfig.method}

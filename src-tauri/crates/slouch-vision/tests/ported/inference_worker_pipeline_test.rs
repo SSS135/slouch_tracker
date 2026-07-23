@@ -61,12 +61,17 @@ fn actual_pipeline_returns_owned_detector_and_depth_features_bbox_and_keypoints(
     assert!(result.person_found);
     // NLF supplies the 17 COCO keypoints from a single forward.
     assert_eq!(result.keypoints.as_ref().expect("keypoints").len(), 17);
-    // The RTMDet presence feature, the NLF depth feature, and the three pooled NLF
-    // backbone features (avg/max/std) are produced on the person-found path.
-    assert_eq!(result.features.len(), 5);
+    // The RTMDet presence feature, the NLF depth feature, the raw 3D keypoint
+    // substrate, and the three pooled NLF backbone features (avg/max/std) are
+    // produced on the person-found path.
+    assert_eq!(result.features.len(), 6);
     assert_eq!(result.features[&FeatureId::RtmDetExtracted].len(), 384);
     assert_eq!(result.features[&FeatureId::NlfDepth].len(), 14);
     assert!(result.features[&FeatureId::NlfDepth]
+        .iter()
+        .all(|value| value.is_finite()));
+    assert_eq!(result.features[&FeatureId::RawKeypoints3d].len(), 51);
+    assert!(result.features[&FeatureId::RawKeypoints3d]
         .iter()
         .all(|value| value.is_finite()));
     for id in [

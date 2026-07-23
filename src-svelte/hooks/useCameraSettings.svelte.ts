@@ -17,6 +17,9 @@ export interface CameraSettings {
   claheStrength: number;
   gaussianBlurKernel: number;
   smoothingFrames: number;
+  showDetectionOverlay: boolean;
+  minimizeToTrayOnClose: boolean;
+  startHiddenOnLogin: boolean;
 }
 
 export interface CameraSettingsState {
@@ -42,6 +45,9 @@ const LOADING_SETTINGS: CameraSettings = {
   claheStrength: 0,
   gaussianBlurKernel: 0,
   smoothingFrames: 0,
+  showDetectionOverlay: false,
+  minimizeToTrayOnClose: false,
+  startHiddenOnLogin: false,
 };
 
 function requiredNumber(value: number | null, name: string): number {
@@ -66,7 +72,10 @@ function validateSettings(settings: CameraSettings): CameraSettings {
     || settings.alertVolume > 1) {
     throw new Error('Alert volume must be between 0 and 1.');
   }
-  if (typeof settings.autoCaptureEnabled !== 'boolean' || typeof settings.privacyMode !== 'boolean') {
+  if (typeof settings.autoCaptureEnabled !== 'boolean' || typeof settings.privacyMode !== 'boolean'
+    || typeof settings.showDetectionOverlay !== 'boolean'
+    || typeof settings.minimizeToTrayOnClose !== 'boolean'
+    || typeof settings.startHiddenOnLogin !== 'boolean') {
     throw new Error('Camera toggle settings are invalid.');
   }
   if (!Number.isFinite(settings.claheStrength)
@@ -115,6 +124,13 @@ function combine(camera: NativeCameraSettings, ui: NativeUiSettings): CameraSett
     claheStrength: requiredNumber(camera.claheStrength, 'CLAHE strength'),
     gaussianBlurKernel: camera.gaussianBlurKernel,
     smoothingFrames: camera.smoothingFrames,
+    // Optional in the generated bindings (serde default on the Rust field); a
+    // settings row from a prior app version omits it, so coalesce to off.
+    showDetectionOverlay: camera.showDetectionOverlay ?? false,
+    // UiSettings tray toggles default true natively (serde default_true); a
+    // settings row that predates them omits the fields, so coalesce to on.
+    minimizeToTrayOnClose: ui.minimizeToTrayOnClose ?? true,
+    startHiddenOnLogin: ui.startHiddenOnLogin ?? true,
   });
 }
 
@@ -130,10 +146,13 @@ function split(settings: CameraSettings): { camera: NativeCameraSettings; ui: Na
       claheStrength: settings.claheStrength,
       gaussianBlurKernel: settings.gaussianBlurKernel,
       smoothingFrames: settings.smoothingFrames,
+      showDetectionOverlay: settings.showDetectionOverlay,
     },
     ui: {
       alertVolume: settings.alertVolume,
       alertDelaySeconds: settings.alertDelaySeconds,
+      minimizeToTrayOnClose: settings.minimizeToTrayOnClose,
+      startHiddenOnLogin: settings.startHiddenOnLogin,
     },
   };
 }

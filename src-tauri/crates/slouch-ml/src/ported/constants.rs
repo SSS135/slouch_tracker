@@ -105,8 +105,8 @@ pub struct CameraResolution {
 }
 
 pub const CAMERA_RESOLUTION: CameraResolution = CameraResolution {
-    width: 800,
-    height: 600,
+    width: 1280,
+    height: 720,
     frame_rate: 30,
 };
 
@@ -151,6 +151,19 @@ pub const POSTURE_GEOMETRY_DIMS: usize = 10;
 pub const TORSO_INVARIANT_DIMS: usize = 7;
 pub const KEYPOINT_SCORES_DIMS: usize = 17;
 pub const RAW_KEYPOINTS_DIMS: usize = 34;
+
+// Hidden 3D keypoint substrate and the three computed 3D posture features derived from
+// it. STORE imports these to dimension-check the stored substrate and size the computed
+// vectors; slouch-domain duplicates the literals (it cannot depend on slouch-ml). The
+// substrate is 17 COCO keypoints × 3 coords, torso-normalized and hip-centered.
+pub const RAW_KEYPOINTS_3D_DIMS: usize = 17 * 3;
+pub const RAW_KEYPOINTS_3D_STORAGE_COST: usize = RAW_KEYPOINTS_3D_DIMS * FLOAT32_BYTES;
+pub const POSTURE_RAW_3D_DIMS: usize = 6;
+pub const POSTURE_GEOMETRY_3D_DIMS: usize = 10;
+pub const TORSO_INVARIANT_3D_DIMS: usize = 9;
+
+const _: () = assert!(RAW_KEYPOINTS_3D_DIMS == 51);
+const _: () = assert!(RAW_KEYPOINTS_3D_STORAGE_COST == 204);
 
 pub const KEYPOINT_RENDER_MIN_CONFIDENCE: f64 = 0.3;
 

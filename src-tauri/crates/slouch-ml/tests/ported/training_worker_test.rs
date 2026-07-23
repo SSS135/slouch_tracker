@@ -1127,3 +1127,139 @@ fn pca_drops_reservoir_for_a_posture_feature_absent_from_reservoir_samples() {
         result.warnings
     );
 }
+
+/// A reservoir sample carrying the hidden 3D keypoint substrate (`raw_keypoints_3d`, a
+/// stored feature the reservoir DOES capture). With it present, the computed 3D posture
+/// features resolve on the probe, so the PCA guard must NOT drop the reservoir.
+fn substrate_reservoir_sample() -> ReservoirSample {
+    let mut features = slouch_domain::FeatureMap::new();
+    features.insert(
+        FeatureId::RawKeypoints3d,
+        vec![0.1; FeatureId::RawKeypoints3d.metadata().dimensions],
+    );
+    ReservoirSample {
+        features,
+        keypoints: vec![Keypoint::new(0.5, 0.5, 0.5); 17],
+        bbox: BoundingBox {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 1.0,
+            y2: 1.0,
+            score: 0.9,
+            width: 1.0,
+            height: 1.0,
+        },
+    }
+}
+
+/// A reservoir sample WITHOUT the 3D substrate (carries only an NLF backbone embedding), so
+/// the computed 3D posture features are unavailable on the probe and must be dropped.
+fn substrate_absent_reservoir_sample() -> ReservoirSample {
+    let mut features = slouch_domain::FeatureMap::new();
+    features.insert(
+        FeatureId::NlfBackboneMax,
+        vec![0.0; FeatureId::NlfBackboneMax.metadata().dimensions],
+    );
+    ReservoirSample {
+        features,
+        keypoints: vec![Keypoint::new(0.5, 0.5, 0.5); 17],
+        bbox: BoundingBox {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 1.0,
+            y2: 1.0,
+            score: 0.9,
+            width: 1.0,
+            height: 1.0,
+        },
+    }
+}
+
+/// A labeled frame carrying the 3D substrate so the computed `posture_geometry_3d` feature
+/// resolves during training (passes the missing-features guard before the PCA drop-guard).
+fn substrate_frame(id: &str, label: FrameLabel) -> PostureFrame {
+    let mut posture_frame = frame(id, label);
+    posture_frame.features = BTreeMap::from([(
+        FeatureId::RawKeypoints3d,
+        vec![0.1; FeatureId::RawKeypoints3d.metadata().dimensions],
+    )]);
+    posture_frame
+}
+
+fn substrate_pca_worker(
+    reservoir: Vec<ReservoirSample>,
+) -> TrainingWorker<TestStorage, TestBackend, TestLogger, FixedClock> {
+    let mut pca_settings = settings();
+    pca_settings.dim_reduction_config = DimensionalityReductionConfig {
+        method: DimensionalityReductionMethod::Pca,
+        components: 5,
+    };
+    pca_settings.posture_feature_types = vec![FeatureId::PostureGeometry3d];
+    let storage = TestStorage {
+        state: Arc::new(Mutex::new(StorageState::default())),
+        datasets: VecDeque::from([Ok(Some(PostureDataset {
+            frames: vec![
+                substrate_frame("good", FrameLabel::Good),
+                substrate_frame("bad", FrameLabel::Bad),
+            ],
+            version: 1,
+            last_modified: 1.0,
+        }))]),
+        settings: Ok(Some(pca_settings)),
+        reservoir: Ok(reservoir),
+        fail_posture_save: false,
+        fail_presence_save: false,
+    };
+    make_worker(
+        storage,
+        TestBackend {
+            state: Arc::new(Mutex::new(BackendState::default())),
+            fail_cv_for: None,
+            fail_fit_for: None,
+        },
+        TestLogger::default(),
+    )
+}
+
+#[test]
+fn pca_keeps_reservoir_when_3d_substrate_is_present_for_a_computed_3d_feature() {
+    // posture_geometry_3d is a computed feature derived from the hidden raw_keypoints_3d
+    // substrate. Because the reservoir sample carries that substrate, the probe can extract
+    // the computed feature -> no drop-warning (the headline win: substrate flows into the
+    // reservoir automatically, so PCA fits on labeled frames + reservoir).
+    let mut worker = substrate_pca_worker(vec![substrate_reservoir_sample()]);
+    let response = worker.handle_message(TrainingWorkerMessage::Train { payload: None });
+    let [TrainingWorkerResponse::Result { result, models }] = &response[..] else {
+        panic!("expected result: {response:?}")
+    };
+    assert!(result.success);
+    assert!(models.posture.is_some());
+    assert!(
+        !result
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("is absent from reservoir samples")),
+        "raw_keypoints_3d substrate is present; no drop-warning expected, got {:?}",
+        result.warnings
+    );
+}
+
+#[test]
+fn pca_drops_reservoir_when_3d_substrate_is_absent_for_a_computed_3d_feature() {
+    // Same selection, but the reservoir sample lacks raw_keypoints_3d, so the computed
+    // posture_geometry_3d cannot be extracted on the probe. The guard must drop the reservoir
+    // (rather than hard-error) and surface a warning naming the computed feature.
+    let mut worker = substrate_pca_worker(vec![substrate_absent_reservoir_sample()]);
+    let response = worker.handle_message(TrainingWorkerMessage::Train { payload: None });
+    let [TrainingWorkerResponse::Result { result, models }] = &response[..] else {
+        panic!("expected result: {response:?}")
+    };
+    assert!(result.success);
+    assert!(models.posture.is_some());
+    assert!(
+        result.warnings.iter().any(|warning| warning
+            == "PCA fitted on labeled frames only: feature 'posture_geometry_3d' is absent from reservoir samples."),
+        "expected posture_geometry_3d reservoir-drop warning, got {:?}",
+        result.warnings
+    );
+}

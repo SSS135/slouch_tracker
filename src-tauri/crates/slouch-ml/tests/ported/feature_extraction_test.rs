@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use slouch_domain::{
     BoundingBox, FeatureId, FeatureMap, FeatureSource, FrameLabel, Keypoint, PostureFrame,
-    Thumbnail,
+    Thumbnail, LEFT_EAR, LEFT_EYE, LEFT_HIP, LEFT_SHOULDER, NOSE, RIGHT_EAR, RIGHT_EYE, RIGHT_HIP,
+    RIGHT_SHOULDER,
 };
 use slouch_ml::ported::{
     constants::{RTMPOSE_BACKBONE_POOLED_DIMS, RTMPOSE_GAU_POOLED_DIMS},
@@ -75,6 +76,87 @@ fn create_mock_frame(id: &str, include_all: bool) -> PostureFrame {
         keypoints: Vec::new(),
         bbox: container.bbox,
     }
+}
+
+/// A container carrying the hidden 3D substrate plus 17 confident keypoints, so the computed
+/// 3D posture features resolve through the public extraction dispatch. The substrate encodes a
+/// minimal non-degenerate torso (hip-centered, `|SC - HC| = 1`) so the frame is real.
+fn create_substrate_container(with_substrate: bool) -> MockFeatures {
+    let mut features = BTreeMap::new();
+    if with_substrate {
+        let mut substrate = vec![0.0_f32; FeatureId::RawKeypoints3d.metadata().dimensions];
+        let points = [
+            (NOSE, [0.0_f32, -1.20, 0.10]),
+            (LEFT_EYE, [-0.04, -1.25, 0.05]),
+            (RIGHT_EYE, [0.04, -1.25, 0.05]),
+            (LEFT_EAR, [-0.07, -1.25, 0.0]),
+            (RIGHT_EAR, [0.07, -1.25, 0.0]),
+            (LEFT_SHOULDER, [-0.20, -1.0, 0.0]),
+            (RIGHT_SHOULDER, [0.20, -1.0, 0.0]),
+            (LEFT_HIP, [-0.15, 0.0, 0.0]),
+            (RIGHT_HIP, [0.15, 0.0, 0.0]),
+        ];
+        for (coco, xyz) in points {
+            substrate[coco * 3] = xyz[0];
+            substrate[coco * 3 + 1] = xyz[1];
+            substrate[coco * 3 + 2] = xyz[2];
+        }
+        features.insert(FeatureId::RawKeypoints3d, substrate);
+    }
+    MockFeatures {
+        features,
+        keypoints: vec![Keypoint::new(0.0, 0.0, 0.9); 17],
+        bbox: BoundingBox {
+            x1: 0.0,
+            y1: 0.0,
+            x2: 1.0,
+            y2: 1.0,
+            score: 0.9,
+            width: 1.0,
+            height: 1.0,
+        },
+    }
+}
+
+#[test]
+fn extracts_computed_3d_features_from_the_hidden_substrate() {
+    let container = create_substrate_container(true);
+
+    // The substrate itself is a stored feature read straight from the container.
+    let substrate = extract_features(&container, FeatureId::RawKeypoints3d).unwrap();
+    assert_eq!(
+        substrate.len(),
+        FeatureId::RawKeypoints3d.metadata().dimensions
+    );
+
+    // The three computed 3D features resolve from the substrate + keypoints through dispatch.
+    for feature in [
+        FeatureId::PostureRaw3d,
+        FeatureId::PostureGeometry3d,
+        FeatureId::TorsoInvariant3d,
+    ] {
+        assert!(is_feature_available(&container, feature).unwrap());
+        let values = extract_features(&container, feature).unwrap();
+        assert_eq!(values.len(), feature.metadata().dimensions);
+        assert!(values.iter().all(|value| value.is_finite()));
+    }
+}
+
+#[test]
+fn computed_3d_feature_without_substrate_names_required_dependency() {
+    let container = create_substrate_container(false);
+
+    assert!(!is_feature_available(&container, FeatureId::PostureGeometry3d).unwrap());
+
+    let error = extract_features(&container, FeatureId::PostureGeometry3d).unwrap_err();
+    let message = error.to_string();
+    assert!(message.contains("not available in this container"));
+    // required_dependencies is populated for the computed 3D features, so the substrate id is
+    // named in the error instead of the "none" fallback.
+    assert!(
+        message.contains("raw_keypoints_3d"),
+        "expected the required dependency to be named: {message}"
+    );
 }
 
 #[test]

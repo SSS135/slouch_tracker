@@ -11,6 +11,7 @@
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",
     "global-shortcut:allow-is-registered",
-    "log:default"
+    "log:default",
+    "notification:default"
   ]
 }

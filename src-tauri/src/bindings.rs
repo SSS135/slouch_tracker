@@ -34,6 +34,8 @@ pub fn builder() -> tauri_specta::Builder<tauri::Wry> {
             crate::api::export_dataset,
             crate::api::import_dataset,
             crate::api::get_shortcut_status,
+            crate::api::get_autostart_enabled,
+            crate::api::set_autostart_enabled,
             crate::api::start_camera,
             crate::api::stop_camera,
             crate::api::list_cameras,
@@ -41,6 +43,7 @@ pub fn builder() -> tauri_specta::Builder<tauri::Wry> {
         .events(tauri_specta::collect_events![
             crate::api::UndoStatusChangedEvent,
             crate::api::NativeStateChangedEvent,
+            crate::api::TrackingStateChangedEvent,
         ])
 }
 

@@ -6,10 +6,16 @@ import * as useNativeCameraModule from '../../hooks/useNativeCamera.svelte';
 import * as useCanvasRendererModule from '../../hooks/useCanvasRenderer.svelte';
 import * as useWindowAspectModule from '../../hooks/useWindowAspect.svelte';
 import { createMockNativeInferenceResult } from '../../__tests__/utils/mockNativeInferenceResult';
+import { drawHumanLikeSkeleton, drawKeypointOverlay, drawDetectionBox } from '@/utils/canvasDrawing';
 
 vi.mock('../../hooks/useNativeCamera.svelte');
 vi.mock('../../hooks/useCanvasRenderer.svelte');
 vi.mock('../../hooks/useWindowAspect.svelte');
+vi.mock('@/utils/canvasDrawing', () => ({
+  drawHumanLikeSkeleton: vi.fn(),
+  drawKeypointOverlay: vi.fn(),
+  drawDetectionBox: vi.fn(),
+}));
 vi.mock('../../services/logging', () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
@@ -118,5 +124,107 @@ describe('PostureCamera native camera view', () => {
     renderCamera();
     const rendererMock = vi.mocked(useCanvasRendererModule.useCanvasRenderer);
     expect(rendererMock.mock.calls[0][0].processedView).toBe(false);
+  });
+
+  it('passes the detection-overlay flag to the renderer', () => {
+    render(PostureCamera, {
+      props: { onInferenceResult: mockOnInferenceResult, onFps: mockOnFps, showDetectionOverlay: true },
+    });
+    const options = vi.mocked(useCanvasRendererModule.useCanvasRenderer).mock.calls[0][0];
+    expect(options.showDetectionOverlay).toBe(true);
+  });
+
+  it('defaults the detection overlay off', () => {
+    renderCamera();
+    const options = vi.mocked(useCanvasRendererModule.useCanvasRenderer).mock.calls[0][0];
+    expect(options.showDetectionOverlay).toBe(false);
+  });
+
+  it('passes the inferred-frame URL and a detection sequence to the renderer', () => {
+    render(PostureCamera, {
+      props: { onInferenceResult: mockOnInferenceResult, onFps: mockOnFps, showDetectionOverlay: true },
+    });
+    const options = vi.mocked(useCanvasRendererModule.useCanvasRenderer).mock.calls[0][0];
+    expect(options.inferredFrameUrl).toMatch(/\/inferred$/);
+    expect(typeof options.detectionSequence).toBe('function');
+  });
+
+  it('advances the detection sequence once per inference result (detection-cadence display)', () => {
+    render(PostureCamera, {
+      props: { onInferenceResult: mockOnInferenceResult, onFps: mockOnFps, showDetectionOverlay: true },
+    });
+    const options = vi.mocked(useCanvasRendererModule.useCanvasRenderer).mock.calls[0][0];
+    const seq0 = options.detectionSequence!();
+    capturedOnResult?.(createMockNativeInferenceResult({ requestId: 1, token: 1 }));
+    const seq1 = options.detectionSequence!();
+    capturedOnResult?.(createMockNativeInferenceResult({ requestId: 2, token: 2 }));
+    const seq2 = options.detectionSequence!();
+    expect(seq1).toBe(seq0 + 1);
+    expect(seq2).toBe(seq1 + 1);
+  });
+
+  it('draws raw keypoint dots+lines and the box (not the avatar) when overlay on, privacy off', () => {
+    render(PostureCamera, {
+      props: {
+        onInferenceResult: mockOnInferenceResult,
+        onFps: mockOnFps,
+        showDetectionOverlay: true,
+        privacyMode: false,
+      },
+    });
+    capturedOnResult?.(createMockNativeInferenceResult());
+    const options = vi.mocked(useCanvasRendererModule.useCanvasRenderer).mock.calls[0][0];
+    const canvas = { width: 640, height: 480 } as HTMLCanvasElement;
+    options.onDraw?.({} as unknown as CanvasRenderingContext2D, canvas);
+    expect(drawKeypointOverlay).toHaveBeenCalled();
+    expect(drawDetectionBox).toHaveBeenCalled();
+    expect(drawHumanLikeSkeleton).not.toHaveBeenCalled();
+  });
+
+  it('draws nothing over the video when the overlay is off and privacy is off', () => {
+    renderCamera();
+    capturedOnResult?.(createMockNativeInferenceResult());
+    const options = vi.mocked(useCanvasRendererModule.useCanvasRenderer).mock.calls[0][0];
+    const canvas = { width: 640, height: 480 } as HTMLCanvasElement;
+    options.onDraw?.({} as unknown as CanvasRenderingContext2D, canvas);
+    expect(drawKeypointOverlay).not.toHaveBeenCalled();
+    expect(drawHumanLikeSkeleton).not.toHaveBeenCalled();
+    expect(drawDetectionBox).not.toHaveBeenCalled();
+  });
+
+  it('keeps the human-like avatar in privacy mode and adds only the box when overlay on', () => {
+    render(PostureCamera, {
+      props: {
+        onInferenceResult: mockOnInferenceResult,
+        onFps: mockOnFps,
+        showDetectionOverlay: true,
+        privacyMode: true,
+      },
+    });
+    capturedOnResult?.(createMockNativeInferenceResult());
+    const options = vi.mocked(useCanvasRendererModule.useCanvasRenderer).mock.calls[0][0];
+    const canvas = { width: 640, height: 480 } as HTMLCanvasElement;
+    options.onDraw?.({} as unknown as CanvasRenderingContext2D, canvas);
+    expect(drawHumanLikeSkeleton).toHaveBeenCalled();
+    expect(drawDetectionBox).toHaveBeenCalled();
+    expect(drawKeypointOverlay).not.toHaveBeenCalled();
+  });
+
+  it('keeps the avatar only (no box, no dots) in privacy mode with the overlay off', () => {
+    render(PostureCamera, {
+      props: {
+        onInferenceResult: mockOnInferenceResult,
+        onFps: mockOnFps,
+        showDetectionOverlay: false,
+        privacyMode: true,
+      },
+    });
+    capturedOnResult?.(createMockNativeInferenceResult());
+    const options = vi.mocked(useCanvasRendererModule.useCanvasRenderer).mock.calls[0][0];
+    const canvas = { width: 640, height: 480 } as HTMLCanvasElement;
+    options.onDraw?.({} as unknown as CanvasRenderingContext2D, canvas);
+    expect(drawHumanLikeSkeleton).toHaveBeenCalled();
+    expect(drawKeypointOverlay).not.toHaveBeenCalled();
+    expect(drawDetectionBox).not.toHaveBeenCalled();
   });
 });

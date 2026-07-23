@@ -12,6 +12,7 @@ use tauri::{
     ipc::{InvokeBody, Request, Response},
     AppHandle, Emitter, State,
 };
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
 
 use crate::{
@@ -185,6 +186,16 @@ pub struct NativeStateSnapshot {
 pub struct DatasetChangedEvent {
     version: u64,
     reason: String,
+}
+
+// Single-source-of-truth pause/resume signal. Emitted by the shared tray helper
+// whenever tracking is paused or resumed (tray menu, or the UI's start/stop-camera
+// commands) so every surface reflects the same native state.
+#[derive(Debug, Clone, Serialize, specta::Type, tauri_specta::Event)]
+#[serde(rename_all = "camelCase")]
+#[tauri_specta(event_name = "tracking-state-changed")]
+pub struct TrackingStateChangedEvent {
+    pub paused: bool,
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -1187,9 +1198,32 @@ pub fn get_shortcut_status() -> Result<ShortcutStatus, ApiError> {
     Ok(ShortcutStatus { registered: true })
 }
 
+// The Windows registry (HKCU\...\Run + Explorer\StartupApproved\Run) is the single
+// source of truth: Task Manager can flip it behind our back, so we never mirror it
+// into SQLite. auto-launch 0.5's is_enabled() already folds in the StartupApproved
+// record, so this reports the Task-Manager-effective state without extra work.
+#[tauri::command]
+#[specta::specta]
+pub fn get_autostart_enabled(app: AppHandle) -> Result<bool, ApiError> {
+    app.autolaunch().is_enabled().map_err(map_autostart_error)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<(), ApiError> {
+    let autolaunch = app.autolaunch();
+    if enabled {
+        autolaunch.enable()
+    } else {
+        autolaunch.disable()
+    }
+    .map_err(map_autostart_error)
+}
+
 #[tauri::command]
 #[specta::specta]
 pub fn start_camera(
+    app: AppHandle,
     state: State<'_, AppState>,
     on_result: tauri::ipc::Channel<InferenceUiResult>,
 ) -> Result<(), ApiError> {
@@ -1197,13 +1231,15 @@ pub fn start_camera(
         let _ = on_result.send(result);
     });
     state.camera.set_mode(CameraMode::Foreground)?;
-    state.camera.start_capture()
+    // Route the actual start through the shared pause helper so a UI-initiated
+    // resume also flips the tray menu text/icon and emits tracking-state-changed.
+    crate::tray::set_tracking_paused(&app, false)
 }
 
 #[tauri::command]
 #[specta::specta]
-pub fn stop_camera(state: State<'_, AppState>) -> Result<(), ApiError> {
-    state.camera.stop_capture()
+pub fn stop_camera(app: AppHandle) -> Result<(), ApiError> {
+    crate::tray::set_tracking_paused(&app, true)
 }
 
 #[tauri::command]
@@ -1637,6 +1673,14 @@ fn map_storage_read(error: StorageError) -> ApiError {
     ApiError::Storage(error.to_string())
 }
 
+// The autostart plugin surfaces OS/registry failures (e.g. a denied HKCU write)
+// through its own error type; funnel them through Internal so the UI shows the
+// text. Generic over Display so the mapping is unit-testable without constructing
+// the plugin's error type.
+fn map_autostart_error(error: impl std::fmt::Display) -> ApiError {
+    ApiError::Internal(format!("autostart registry operation failed: {error}"))
+}
+
 fn map_storage_write(error: StorageError) -> ApiError {
     match error {
         StorageError::Validation(message) => ApiError::InvalidRequest(message),
@@ -1842,6 +1886,22 @@ mod tests {
         assert!(ensure_quiescent_mutation(false, false, "mutation").is_ok());
         assert!(ensure_quiescent_mutation(true, false, "mutation").is_err());
         assert!(ensure_quiescent_mutation(false, true, "mutation").is_err());
+    }
+
+    #[test]
+    fn autostart_failures_map_to_internal_with_context() {
+        use crate::errors::ApiError;
+        let denied = std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "Access is denied. (os error 5)",
+        );
+        match super::map_autostart_error(denied) {
+            ApiError::Internal(message) => {
+                assert!(message.contains("autostart"), "{message}");
+                assert!(message.contains("Access is denied"), "{message}");
+            }
+            other => panic!("autostart errors must map to Internal, got {other:?}"),
+        }
     }
 
     #[test]

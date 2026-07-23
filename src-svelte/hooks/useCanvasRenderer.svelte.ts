@@ -35,6 +35,7 @@
 
 import { sampleImageGrid, type RGB } from '@/utils/colorUtils';
 import { renderSmoothedBicubicGrid } from '@/utils/bicubicGridRenderer';
+import { MonotonicFrameGate } from '@/utils/frameSequence';
 import type { PreviewFrameSource } from '@/services/dataset/thumbnailGenerator';
 
 export interface DrawCallback {
@@ -62,6 +63,22 @@ export interface UseCanvasRendererOptions {
    * the raw one. Ignored in privacy mode — the grid must keep obscuring the feed.
    */
   processedView?: boolean;
+  /**
+   * Detection-overlay diagnostic mode (privacy OFF). When on, the video layer
+   * shows ONLY the inferred (detector-input) frame, swapped once per detection
+   * result (see `detectionSequence`) instead of the ~30fps raw feed, and `onDraw`
+   * paints the raw keypoints/bbox over it — so the frame and overlay come from the
+   * same detection. When off, the privacy-off path is the unchanged 30fps preview.
+   */
+  showDetectionOverlay?: boolean;
+  /** `slouchcam` inferred-frame URL (detector-input JPEG, served without a demand stamp). */
+  inferredFrameUrl?: string;
+  /**
+   * Monotonic counter incremented once per inference result. In detection-overlay
+   * mode the renderer refreshes the inferred frame + overlay only when it changes,
+   * so the displayed video steps at detection cadence (~1 fps), not 30 fps.
+   */
+  detectionSequence?: () => number;
   /** Transparent overlay canvas (skeleton, and the privacy grid). */
   canvasRef?: CanvasRefObject;
   /** Native <img> video layer used for the real feed when privacy is off. */
@@ -134,6 +151,12 @@ export function useCanvasRenderer(
     const processedView =
       (options.processedView ?? false) && !privacyMode && Boolean(options.processedFrameUrl);
     const videoUrl = processedView ? options.processedFrameUrl! : frameUrl;
+    // Reading the flag here reruns the effect on a flip, so the overlay loop
+    // starts/stops cleanly (same pattern as privacyMode/processedView).
+    const showDetectionOverlay = options.showDetectionOverlay ?? false;
+    // Detector-input frame served without a demand stamp, so it stays the
+    // dispatcher-written inferred frame (detection cadence).
+    const inferredUrl = options.inferredFrameUrl ?? options.processedFrameUrl ?? frameUrl;
     if (!enabled || !overlay || !frameUrl) {
       return;
     }
@@ -279,10 +302,53 @@ export function useCanvasRenderer(
         renderPrivacy();
       };
 
+      // Detection-overlay (privacy OFF): show ONLY the inferred (detector-input)
+      // frame, swapped once per detection result, with the raw keypoints/bbox
+      // painted over it — the shown frame and overlay come from the same
+      // detection. No 30fps pump: the video visibly steps at detection cadence.
+      const refreshInferredFrame = (): void => {
+        if (!alive() || !img) return;
+        img.src = `${inferredUrl}?seq=${seq++}`;
+        img
+          .decode()
+          .then(() => {
+            if (!alive()) return;
+            options.onFrameSize?.(img.naturalWidth, img.naturalHeight);
+            isCanvasReady = true;
+            sizeOverlayToAspect(img.naturalWidth, img.naturalHeight);
+            ctx.clearRect(0, 0, overlay.width, overlay.height);
+            options.onDraw?.(ctx, overlay);
+          })
+          .catch(() => {
+            // 204 (no inferred frame yet) or decode error: the next detection retries.
+          });
+      };
+
+      // Strictly-newer gate: refresh the inferred frame + overlay only when the
+      // detection sequence advances, so a stale/reset sequence can never re-drive
+      // an older frame over a newer one (mirrors the native ordering guard).
+      const overlayGate = new MonotonicFrameGate();
+      const overlayTick = (): void => {
+        if (!alive()) {
+          rafId = null;
+          return;
+        }
+        rafId = requestAnimationFrame(overlayTick);
+        const current = options.detectionSequence?.() ?? 0;
+        if (overlayGate.admit(current)) {
+          refreshInferredFrame();
+        }
+      };
+
       if (privacyMode) {
         sampleTick();
         lastRenderAt = 0;
         rafId = requestAnimationFrame(renderTick);
+      } else if (showDetectionOverlay) {
+        // Feed latestFrameRef for capture thumbnails; the display + overlay are
+        // driven by detection results (overlayTick), not a 30fps timer.
+        sampleTick();
+        rafId = requestAnimationFrame(overlayTick);
       } else {
         void pumpVideo();
         sampleTick();

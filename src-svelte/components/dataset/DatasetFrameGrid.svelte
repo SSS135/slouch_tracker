@@ -92,16 +92,10 @@
     unused: false,
   });
   let contextMenu = $state<ContextMenuState | null>(null);
-  let isDragging = $state(false);
   let activeId = $state<string | null>(null);
-  let activeFrame = $state<DatasetFrameGridFrame | null>(null);
   let overLabel = $state<FrameLabel | null>(null);
-  let dragX = $state(0);
-  let dragY = $state(0);
   let contextMenuElement = $state<HTMLDivElement | null>(null);
   let contextMenuReturnFocus: HTMLElement | null = null;
-
-  const activeThumbnail = useThumbnailUrl(() => activeFrame?.thumbnail ?? null);
 
   const groupedFrames = $derived.by((): GroupedFrames => {
     const grouped: GroupedFrames = {
@@ -116,7 +110,8 @@
     }
 
     for (const group of Object.values(grouped) as DatasetFrameGridFrame[][]) {
-      group.sort((a: DatasetFrameGridFrame, b: DatasetFrameGridFrame) => (a.timestamp || 0) - (b.timestamp || 0));
+      // Newest first so freshly captured frames surface at the top of each section.
+      group.sort((a: DatasetFrameGridFrame, b: DatasetFrameGridFrame) => (b.timestamp || 0) - (a.timestamp || 0));
     }
 
     return grouped;
@@ -154,28 +149,24 @@
     };
   }
 
-  function handleDragStart(event: DragEvent): void {
-    const frameId = event.dataTransfer?.getData('application/x-slouch-frame-id');
-    const frame = frames.find((candidate) => candidate.id === frameId);
-
-    if (!frame) {
+  // The dragged frame id arrives through a component callback from the thumbnail,
+  // not from dataTransfer.getData() (which Chromium blanks outside the drop event),
+  // so `activeId` is the single source of truth for the whole drag gesture.
+  function handleFrameDragStart(frameId: string): void {
+    if (!frames.some((candidate) => candidate.id === frameId)) {
       return;
     }
-
-    activeFrame = frame;
-    activeId = frame.id;
-    dragX = event.clientX + 12;
-    dragY = event.clientY + 12;
-    isDragging = true;
+    activeId = frameId;
   }
 
   function handleDragOver(event: DragEvent, label: FrameLabel): void {
+    if (!activeId) {
+      return;
+    }
     event.preventDefault();
     if (event.dataTransfer) {
       event.dataTransfer.dropEffect = 'move';
     }
-    dragX = event.clientX + 12;
-    dragY = event.clientY + 12;
     overLabel = label;
   }
 
@@ -189,25 +180,17 @@
 
   function handleDrop(event: DragEvent, label: FrameLabel): void {
     event.preventDefault();
-    const frameId = event.dataTransfer?.getData('application/x-slouch-frame-id');
-    const isKnownActiveFrame = Boolean(
-      frameId && activeId === frameId && frames.some((frame) => frame.id === frameId),
-    );
-
-    if (isKnownActiveFrame && frameId && onFrameDrag) {
+    const frameId = activeId;
+    if (frameId && frames.some((frame) => frame.id === frameId) && onFrameDrag) {
       onFrameDrag(frameId, label);
     }
-
+    activeId = null;
     overLabel = null;
   }
 
-  function handleDragEnd(): void {
+  function handleFrameDragEnd(): void {
     activeId = null;
-    activeFrame = null;
-    isDragging = false;
     overLabel = null;
-    dragX = 0;
-    dragY = 0;
   }
 
   function handleDeleteFrame(frameId: string): void {
@@ -238,29 +221,12 @@
     if (value === 'image/jpeg' || value === 'image/png' || value === 'image/webp') return value;
     return undefined;
   }
-
-  function getLabelColor(label: FrameLabel): string {
-    switch (label) {
-      case 'good':
-        return '#28a745';
-      case 'bad':
-        return '#dc3545';
-      case 'away':
-        return '#3b82f6';
-      case 'unused':
-        return '#6c757d';
-      default:
-        return '#6c757d';
-    }
-  }
 </script>
 
 <div
   class="grid-root"
   role="region"
   aria-label="Dataset frames"
-  ondragstart={handleDragStart}
-  ondragend={handleDragEnd}
 >
   <div class="scroll-area">
     <div class="sections">
@@ -270,7 +236,7 @@
         {@const isOver = overLabel === section.label}
 
         <section
-          class:dragging={isDragging}
+          class:dragging={activeId !== null}
           class="frame-section"
           role="group"
           aria-label={section.title}
@@ -311,7 +277,6 @@
                     onFrameClick,
                     onFrameContextMenu: handleContextMenu,
                     onFrameDelete: onDeleteFrame ? handleDeleteFrame : undefined,
-                    onFrameRelabel: onFrameDrag,
                     onFramePreview,
                     onFramePreviewClear,
                   })}
@@ -323,19 +288,6 @@
       {/each}
     </div>
   </div>
-
-  {#if activeFrame}
-    <div class="drag-overlay" aria-hidden="true" style={`left: ${dragX}px; top: ${dragY}px;`}>
-      <DatasetFrameThumbnail
-        thumbnailUrl={activeThumbnail.url ?? undefined}
-        nativeThumbnailId={activeFrame.thumbnail ? undefined : activeFrame.id}
-        thumbnailMimeType={validatedThumbnailMimeType(activeFrame.thumbnailMimeType)}
-        label={activeFrame.label}
-        borderColor={getLabelColor(activeFrame.label)}
-        onPress={() => undefined}
-      />
-    </div>
-  {/if}
 </div>
 
 {#if contextMenu}
@@ -359,7 +311,6 @@
   onFrameClick: frameClick,
   onFrameContextMenu: frameContextMenu,
   onFrameDelete: frameDelete,
-  onFrameRelabel: frameRelabel,
   onFramePreview: framePreview,
   onFramePreviewClear: framePreviewClear,
 }: {
@@ -368,7 +319,6 @@
   onFrameClick: (id: string) => void;
   onFrameContextMenu: (id: string, event: MouseEvent) => void;
   onFrameDelete?: (id: string) => void;
-  onFrameRelabel?: (id: string, label: FrameLabel) => void;
   onFramePreview?: (thumbnailUrl: string, label: FrameLabel) => void;
   onFramePreviewClear?: () => void;
 })}
@@ -387,21 +337,9 @@
       onDelete={frameDelete ? () => frameDelete(frame.id) : undefined}
       onMouseEnter={framePreview}
       onMouseLeave={framePreviewClear}
+      onDragStart={onFrameDrag ? handleFrameDragStart : undefined}
+      onDragEnd={onFrameDrag ? handleFrameDragEnd : undefined}
     />
-    {#if frameRelabel}
-      <label class="label-select">
-        <span class="visually-hidden">Change label for frame {frame.id}</span>
-        <select
-          value={frame.label}
-          aria-label={`Change label for frame ${frame.id}`}
-          onchange={(event) => frameRelabel(frame.id, (event.currentTarget as HTMLSelectElement).value as FrameLabel)}
-        >
-          {#each sectionDefinitions as section (section.key)}
-            <option value={section.label}>{section.title.replace(' Frames', '')}</option>
-          {/each}
-        </select>
-      </label>
-    {/if}
   </div>
 {/snippet}
 
@@ -508,12 +446,6 @@
     transition: all 0.2s ease-out;
   }
 
-  .drag-overlay {
-    position: fixed;
-    z-index: 10000;
-    pointer-events: none;
-  }
-
   .context-menu {
     position: fixed;
     z-index: 10001;
@@ -546,35 +478,8 @@
     color: #ff8787;
   }
 
-  .frame-list-item,
-  .label-select {
+  .frame-list-item {
     display: block;
     width: 80px;
-  }
-
-  .label-select {
-    margin-top: 0.25rem;
-  }
-
-  .label-select select {
-    width: 100%;
-    min-height: 1.75rem;
-    border: 1px solid #495057;
-    border-radius: 0.25rem;
-    color: white;
-    background: #212529;
-    font-size: 0.7rem;
-  }
-
-  .visually-hidden {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
   }
 </style>

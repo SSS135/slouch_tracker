@@ -5,7 +5,8 @@ use slouch_domain::{
 };
 use slouch_ml::ported::constants::{
     NLF_BACKBONE_POOLED_DIMS, NLF_BACKBONE_POOLED_STORAGE_COST, NLF_DEPTH_DIMS,
-    NLF_DEPTH_STORAGE_COST, RTMDET_EXTRACTED_DIMS, RTMPOSE_BACKBONE_POOLED_DIMS,
+    NLF_DEPTH_STORAGE_COST, POSTURE_GEOMETRY_3D_DIMS, RAW_KEYPOINTS_3D_DIMS,
+    RAW_KEYPOINTS_3D_STORAGE_COST, RTMDET_EXTRACTED_DIMS, RTMPOSE_BACKBONE_POOLED_DIMS,
     RTMPOSE_GAU_POOLED_DIMS,
 };
 use slouch_store::ported::feature_registry::{
@@ -191,11 +192,12 @@ fn nlf_depth_is_a_stored_posture_feature_with_frozen_dimensions() {
 }
 
 #[test]
-fn selectable_features_exclude_the_retired_backbone_and_gau_pools() {
-    // The 6 RTMPose backbone/gau stored features are retired now that NLF is the
-    // sole pose model: the variants persist (dimensions/storage unchanged) so old
-    // datasets keep working, but they no longer surface for user selection.
-    // Every other registry entry stays selectable.
+fn selectable_features_exclude_the_retired_pools_and_the_hidden_3d_substrate() {
+    // Two distinct non-selectable categories:
+    //   1. Retired: the 6 RTMPose backbone/gau stored features. NLF is now the sole
+    //      pose model, so RTMPose no longer produces them. Their variants persist
+    //      (dimensions/storage unchanged) so old datasets keep working, but they no
+    //      longer surface for user selection.
     let retired = [
         FeatureId::BackboneFeatures,
         FeatureId::BackboneFeaturesMax,
@@ -204,14 +206,25 @@ fn selectable_features_exclude_the_retired_backbone_and_gau_pools() {
         FeatureId::GauFeaturesMax,
         FeatureId::GauFeaturesStd,
     ];
+    //   2. Hidden substrate: raw_keypoints_3d is produced by design at capture time
+    //      but is hidden from direct selection because it exists solely as the
+    //      dependency substrate consumed by the three computed 3D posture features.
+    //      This is NOT a retired feature - it is present-by-design.
+    let hidden_substrate = [FeatureId::RawKeypoints3d];
+    let excluded = retired
+        .iter()
+        .chain(hidden_substrate.iter())
+        .copied()
+        .collect::<Vec<_>>();
+
     let selectable = get_user_selectable_feature_types();
     let expected = FeatureId::ALL
         .into_iter()
-        .filter(|id| !retired.contains(id))
+        .filter(|id| !excluded.contains(id))
         .collect::<Vec<_>>();
     assert_eq!(selectable, expected);
-    assert_eq!(selectable.len(), FeatureId::ALL.len() - retired.len());
-    for id in retired {
+    assert_eq!(selectable.len(), FeatureId::ALL.len() - excluded.len());
+    for id in excluded {
         assert!(!selectable.contains(&id), "{}", id.as_str());
         assert!(
             !require_feature_definition(id.as_str())
@@ -228,11 +241,75 @@ fn selectable_features_exclude_the_retired_backbone_and_gau_pools() {
     assert!(selectable.contains(&FeatureId::NlfBackbone));
     assert!(selectable.contains(&FeatureId::NlfBackboneMax));
     assert!(selectable.contains(&FeatureId::NlfBackboneStd));
+    // The three computed 3D posture features ARE user-selectable even though their
+    // substrate is hidden.
+    assert!(selectable.contains(&FeatureId::PostureRaw3d));
+    assert!(selectable.contains(&FeatureId::PostureGeometry3d));
+    assert!(selectable.contains(&FeatureId::TorsoInvariant3d));
 
     // Oracle concrete metadata anchors for rtmdet_extracted (featureRegistry.test.ts:205-218).
     let rtmdet = require_feature_definition("rtmdet_extracted").unwrap();
     assert!(rtmdet.user_selectable);
     assert_eq!(rtmdet.model_type, Some(ModelCategory::Presence));
+}
+
+#[test]
+fn raw_keypoints_3d_is_a_hidden_stored_substrate() {
+    // raw_keypoints_3d is a 51-dim stored posture substrate: present-by-design,
+    // dispatched through the Stored extractor (read from the persisted feature map),
+    // and hidden from user selection. Its storage cost is dimensions * FLOAT32_BYTES.
+    let definition = require_feature_definition("raw_keypoints_3d").unwrap();
+    assert_eq!(definition.id, FeatureId::RawKeypoints3d);
+    assert_eq!(definition.name, "Raw Keypoints 3D");
+    assert_eq!(definition.dimensions, RAW_KEYPOINTS_3D_DIMS);
+    assert_eq!(definition.dimensions, 51);
+    assert_eq!(definition.storage_cost, RAW_KEYPOINTS_3D_STORAGE_COST);
+    assert_eq!(definition.storage_cost, 204);
+    assert_eq!(definition.storage_cost, RAW_KEYPOINTS_3D_DIMS * 4);
+    assert!(!definition.computed);
+    assert!(!is_computed_feature("raw_keypoints_3d").unwrap());
+    assert!(!definition.user_selectable);
+    assert_eq!(definition.model_type, Some(ModelCategory::Posture));
+    assert_eq!(definition.requires_fitting, None);
+
+    // Stored extractor: absent from the map -> None; present -> returned verbatim.
+    assert_eq!(
+        extract_feature("raw_keypoints_3d", &valid_frame()).unwrap(),
+        None
+    );
+    let mut populated = valid_frame();
+    populated
+        .features
+        .insert(FeatureId::RawKeypoints3d, vec![0.5; RAW_KEYPOINTS_3D_DIMS]);
+    let extracted = extract_feature("raw_keypoints_3d", &populated)
+        .unwrap()
+        .unwrap();
+    assert_eq!(extracted.len(), RAW_KEYPOINTS_3D_DIMS);
+    assert!(extracted.iter().all(|lane| *lane == 0.5));
+}
+
+#[test]
+fn posture_geometry_3d_is_a_selectable_computed_posture_feature() {
+    // posture_geometry_3d is a 10-dim computed posture feature (storage cost 0,
+    // requires_fitting = Some(false)) surfaced for user selection. It reads the
+    // raw_keypoints_3d substrate from the container plus the frame keypoints, so it
+    // is unavailable (None) when the substrate is absent - never a panic.
+    let definition = require_feature_definition("posture_geometry_3d").unwrap();
+    assert_eq!(definition.id, FeatureId::PostureGeometry3d);
+    assert_eq!(definition.dimensions, POSTURE_GEOMETRY_3D_DIMS);
+    assert_eq!(definition.dimensions, 10);
+    assert_eq!(definition.storage_cost, 0);
+    assert!(definition.computed);
+    assert!(is_computed_feature("posture_geometry_3d").unwrap());
+    assert!(definition.user_selectable);
+    assert_eq!(definition.model_type, Some(ModelCategory::Posture));
+    assert_eq!(definition.requires_fitting, Some(false));
+
+    // Substrate absent -> None (dependency not satisfied), never a panic.
+    assert_eq!(
+        extract_feature("posture_geometry_3d", &valid_frame()).unwrap(),
+        None
+    );
 }
 
 #[test]
@@ -326,7 +403,13 @@ fn stored_extractors_return_exact_vectors_and_preserve_missing_values() {
 
 #[test]
 fn every_computed_extractor_dispatches_with_its_registry_dimension() {
-    let value = valid_frame();
+    let mut value = valid_frame();
+    // The computed 3D features consume the raw_keypoints_3d substrate; provide a
+    // correct-length substrate so they dispatch. A degenerate substrate still yields
+    // a full-length neutral vector (validity 0), never None.
+    value
+        .features
+        .insert(FeatureId::RawKeypoints3d, vec![0.1; RAW_KEYPOINTS_3D_DIMS]);
     for definition in FEATURE_REGISTRY
         .iter()
         .filter(|definition| definition.computed)
@@ -377,6 +460,11 @@ fn malformed_sources_return_errors_or_missing_values_without_panicking() {
         FeatureId::RawKeypoints,
         FeatureId::PostureGeometry,
         FeatureId::TorsoInvariant,
+        // The computed 3D features follow the missing-value path: the `short` frame
+        // carries no raw_keypoints_3d substrate, so they resolve to None (never throw).
+        FeatureId::PostureRaw3d,
+        FeatureId::PostureGeometry3d,
+        FeatureId::TorsoInvariant3d,
     ] {
         // Oracle contract: these keypoint-driven extractors return null (never throw)
         // on missing/short keypoints (featureRegistry.test.ts:250-264).

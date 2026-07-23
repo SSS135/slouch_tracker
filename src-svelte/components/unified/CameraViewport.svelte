@@ -6,6 +6,7 @@
   import PostureStatusBadge from '../PostureStatusBadge.svelte';
   import CaptureButtonsOverlay from './CaptureButtonsOverlay.svelte';
   import FrameListOverlay from './FrameListOverlay.svelte';
+  import TrackingToggleButton from './TrackingToggleButton.svelte';
   import UndoButton from './UndoButton.svelte';
 
   export interface CameraViewportProps {
@@ -33,6 +34,9 @@
     onUndo?: () => void;
     canUndo?: boolean;
     lastAction?: CaptureAction | null;
+    trackingPaused?: boolean;
+    onToggleTracking?: () => void;
+    toggleTrackingDisabled?: boolean;
   }
 
   let {
@@ -60,6 +64,9 @@
     onUndo,
     canUndo = false,
     lastAction = null,
+    trackingPaused = false,
+    onToggleTracking,
+    toggleTrackingDisabled = false,
   }: CameraViewportProps = $props();
 
   const cameraContext = useCameraContext();
@@ -103,6 +110,29 @@
 
 <div class="viewport">
   {@render children()}
+
+  {#if trackingPaused}
+    <div class="paused-overlay" aria-hidden="true">
+      <div class="paused-card">
+        <svg width="40" height="40" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="7" y="5" width="4" height="14" rx="1" fill="currentColor" />
+          <rect x="13" y="5" width="4" height="14" rx="1" fill="currentColor" />
+        </svg>
+        <span class="paused-title">Tracking paused</span>
+        <span class="paused-hint">Press Resume to continue</span>
+      </div>
+    </div>
+  {/if}
+
+  {#if onToggleTracking}
+    <div class="tracking-toggle-position">
+      <TrackingToggleButton
+        paused={trackingPaused}
+        disabled={toggleTrackingDisabled}
+        onToggle={onToggleTracking}
+      />
+    </div>
+  {/if}
 
   {#if onSaveFrameAsGood && onSaveFrameAsBad && onSaveFrameAsAway}
     <FrameListOverlay
@@ -198,6 +228,51 @@
     top: 16px;
     left: 184px;
     z-index: 40;
+  }
+
+  .tracking-toggle-position {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    z-index: 70;
+    transform: translateX(-50%);
+  }
+
+  /* Calm, informational paused state — deliberately not styled as an error. */
+  .paused-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 45;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+
+  .paused-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 20px 28px;
+    border-radius: 16px;
+    color: rgb(255 255 255 / 82%);
+    background: rgb(0 0 0 / 55%);
+    box-shadow: 0 4px 24px rgb(0 0 0 / 45%);
+    backdrop-filter: blur(4px);
+    text-align: center;
+  }
+
+  .paused-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .paused-hint {
+    color: rgb(255 255 255 / 60%);
+    font-size: 0.8rem;
+    line-height: 1.2;
   }
 
   .status-position {

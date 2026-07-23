@@ -26,12 +26,29 @@ Slouch Tracker watches your webcam, estimates your body pose in real time, and w
 
 <!-- TODO: add screenshot/GIF -->
 
-## Install
+## Installation
 
-1. Download the latest NSIS installer (`.exe`) from the [GitHub Releases](https://github.com/SSS135/slouch_tracker/releases) page.
-2. Run the installer and launch **Slouch Tracker**.
+**System requirements:** Windows 10 or 11 (x64) with a **DirectX 12-capable GPU**. Inference runs through the DirectML execution provider; if no compatible GPU is present the app reports a clear error on startup rather than falling back silently.
 
-> **Note:** Release builds are **unsigned**. Windows SmartScreen will show an "unknown publisher" warning on first run — this is expected. Choose *More info → Run anyway* to proceed.
+**Camera placement:** for best detection quality, place the camera **to the side of you, at eye level or slightly above**. A side view makes slouching geometrically obvious to the pose model; strongly elevated or overhead angles weaken the depth-based posture cues.
+
+1. Download the latest installer (`Slouch Tracker_<version>_x64-setup.exe`) from the [GitHub Releases](https://github.com/SSS135/slouch_tracker/releases) page.
+2. (Recommended) Verify the download against `SHA256SUMS.txt` on the same release:
+   ```powershell
+   Get-FileHash '.\Slouch Tracker_1.0.0_x64-setup.exe' -Algorithm SHA256
+   ```
+   The printed hash must match the entry in `SHA256SUMS.txt`.
+3. Run the installer and launch **Slouch Tracker**.
+
+### "Windows protected your PC" (SmartScreen)
+
+Release builds are **unsigned** (there is no code-signing certificate), so on first run Windows SmartScreen shows a blue *"Windows protected your PC"* dialog. This is expected. Click **More info**, then **Run anyway**. Because the build is unsigned, verifying the SHA-256 against `SHA256SUMS.txt` (step 2 above) is the recommended way to confirm you have the authentic installer.
+
+### About the installer
+
+- **Bundles the ML models (~230 MB).** The installer embeds the RTMDet + NLF-L models, so no models are ever downloaded. On any system that already has the Microsoft WebView2 runtime — all of Windows 11 and virtually all of Windows 10 — installation is fully offline. On the rare stripped-down system without it (e.g. Windows 10 LTSC/IoT or a deliberately debloated install) the installer performs a **one-time** silent download of the small WebView2 runtime from Microsoft. Either way, **the app itself never touches the network at runtime** — all detection and training stay on-device.
+- **Per-user install.** Installs for the current user, so no administrator prompt is required.
+- **Your data survives uninstall.** By default the uninstaller leaves your dataset, trained models, and settings on disk. Deleting them is opt-in — tick the *delete application data* checkbox in the uninstaller only if you want a full wipe.
 
 ## Build from Source
 
@@ -134,6 +151,8 @@ npm run bindings:check
 ## License
 
 Slouch Tracker is released under the [MIT License](LICENSE).
+
+> **Binary licensing note:** The MIT license covers the source code only. The prebuilt binaries on the Releases page additionally bundle the NLF-L model weights, which are licensed for **non-commercial research use** — so the released binary as a whole is **non-commercial**.
 
 Third-party components and their licenses are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 

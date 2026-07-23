@@ -55,9 +55,9 @@ Collect (capture + label frames via save_capture) → SQLite dataset
 
 ### IPC Contract
 
-37 Tauri commands total, registered in `src-tauri/src/lib.rs`.
+39 Tauri commands total, registered in `src-tauri/src/lib.rs`.
 
-**Typed commands (34)** are annotated `#[specta::specta]` and exported through `tauri-specta` to `src/generated/bindings.generated.ts`. The frontend calls them only through `src-svelte/lib/native/client.ts`, which unwraps the `Result<T, ApiError>` envelope into `NativeCommandError`. Beyond the settings and dataset commands, these include the camera lifecycle commands `start_camera` / `stop_camera` / `list_cameras`, `get_needs_retraining` (auto-retrain hint), `get_reservoir_metadata` (feature reservoir state), and `cleanup_unused_frames`.
+**Typed commands (36)** are annotated `#[specta::specta]` and exported through `tauri-specta` to `src/generated/bindings.generated.ts`. The frontend calls them only through `src-svelte/lib/native/client.ts`, which unwraps the `Result<T, ApiError>` envelope into `NativeCommandError`. Beyond the settings and dataset commands, these include the camera lifecycle commands `start_camera` / `stop_camera` / `list_cameras`, `get_needs_retraining` (auto-retrain hint), `get_reservoir_metadata` (feature reservoir state), `cleanup_unused_frames`, and the login-autostart pair `get_autostart_enabled` / `set_autostart_enabled` (per-user `HKCU\...\Run` entry via `tauri-plugin-autostart`; the registry — including `Explorer\StartupApproved\Run`, which Task Manager toggles — is the sole source of truth, never mirrored into SQLite).
 
 **Raw-byte commands (3)** — `infer_frame`, `get_thumbnail`, `save_capture` — move bulk binary data. `infer_frame` is retained only as a test-harness entry point now that capture is native; `get_thumbnail` and `save_capture` remain on the live path:
 - Requests use raw bodies plus `x-slouch-*` headers: `x-slouch-ipc-version`, `x-slouch-pixel-format: rgba8`, `x-slouch-width/height/stride`, and for captures request id, one-use token, frame id, timestamp, label, MIME type.
@@ -123,7 +123,7 @@ The 6 legacy RTMPose-M poolings (`backbone_features` / `_max` / `_std`, `gau_fea
 ```
 src-tauri/
   src/               app crate: lib.rs (setup, plugins, global shortcuts),
-                     api.rs (AppState + 37 commands), actors.rs (Camera/Inference/TrainingActor),
+                     api.rs (AppState + 39 commands), actors.rs (Camera/Inference/TrainingActor),
                      bindings.rs (Specta builder), errors.rs, bin/export_bindings
   crates/
     slouch-domain/   DTOs, validation, labels, keypoints/bboxes, settings types,

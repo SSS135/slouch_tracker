@@ -1,5 +1,6 @@
 import type { Channel, InvokeArgs } from '@tauri-apps/api/core';
 import { clearMocks, mockIPC, mockWindows } from '@tauri-apps/api/mocks';
+import { events } from '@generated/bindings';
 import type {
   ActiveModelMetadata,
   AppStatus,
@@ -50,7 +51,7 @@ const metrics: HarnessMetrics = {
 // 1x1 PNG used as the mocked native `slouchcam` preview frame so the renderer's
 // createImageBitmap/canvas-ready path works under the browser harness.
 const FAKE_FRAME_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC';
 
 function fakeFrameBlob(): Blob {
   const binary = atob(FAKE_FRAME_BASE64);
@@ -68,6 +69,13 @@ function isSlouchcamUrl(input: RequestInfo | URL): boolean {
 
 export function getHarnessMetrics(): Readonly<HarnessMetrics> {
   return metrics;
+}
+
+// Fan the typed `tracking-state-changed` event through the mock event bus, exactly
+// as the native shared pause/resume helper does. Used both to echo start/stop_camera
+// and (via a window hook in real-main.ts) to let e2e simulate a tray-initiated flip.
+export function emitTrackingState(paused: boolean): Promise<void> {
+  return events.trackingStateChanged.emit({ paused });
 }
 
 function getArg<T>(args: InvokeArgs | undefined, key: string): T {
@@ -97,8 +105,12 @@ export function installMockTauri(): () => void {
     claheStrength: 3.5,
     gaussianBlurKernel: 5,
     smoothingFrames: 3,
+    showDetectionOverlay: false,
   };
-  let uiSettings = { alertVolume: 0.3, alertDelaySeconds: 5 };
+  let uiSettings = { alertVolume: 0.3, alertDelaySeconds: 5, minimizeToTrayOnClose: true, startHiddenOnLogin: true };
+  // Autostart is a registry-backed toggle natively; model it as in-memory state so
+  // the real-app harness can mount SettingsTab (which reads it on mount) and toggle it.
+  let autostartEnabled = false;
   let datasetVersion = 1;
   let frames: FrameMetadataDto[] = [{ ...initialFrame }];
   let undoFrames: FrameMetadataDto[] | null = null;
@@ -123,7 +135,9 @@ export function installMockTauri(): () => void {
       expanded: { x1: 0.15, y1: 0.05, x2: 0.85, y2: 0.95, width: 0.7, height: 0.9, score: 0.95 },
     },
     keypoints: Array.from({ length: 17 }, (_, index) => ({ x: 0.25 + index * 0.01, y: 0.25 + index * 0.01, score: 0.9 })),
-    classification: { presentProbability: 0.95, goodProbability: 0.8 },
+    // Faithful to the native contract: goodProbability comes only from a deployed
+    // posture classifier, so it is null whenever no active posture model exists.
+    classification: { presentProbability: 0.95, goodProbability: activeModels.posture ? 0.8 : null },
   });
 
   const appStatus = (): AppStatus => ({
@@ -160,6 +174,11 @@ export function installMockTauri(): () => void {
         return [];
       case 'get_shortcut_status':
         return { registered: true };
+      case 'get_autostart_enabled':
+        return autostartEnabled;
+      case 'set_autostart_enabled':
+        autostartEnabled = getArg<boolean>(args, 'enabled');
+        return null;
       case 'start_camera': {
         const channel = getArg<Channel<InferenceUiResult>>(args, 'onResult');
         const push = (): void => {
@@ -171,6 +190,10 @@ export function installMockTauri(): () => void {
         push();
         if (cameraInterval) clearInterval(cameraInterval);
         cameraInterval = setInterval(push, 200);
+        // The real start_camera command routes through the shared pause helper,
+        // which emits the resulting (resumed) state. Mirror that echo so the UI
+        // sync path is exercised end-to-end; a matching payload is a no-op.
+        void emitTrackingState(false);
         return null;
       }
       case 'stop_camera':
@@ -178,6 +201,8 @@ export function installMockTauri(): () => void {
           clearInterval(cameraInterval);
           cameraInterval = null;
         }
+        // Mirror the native stop_camera -> shared helper -> paused-state echo.
+        void emitTrackingState(true);
         return null;
       case 'list_cameras':
         return [{ index: '0', name: 'Mock Camera', description: 'harness capture device' }];
@@ -262,8 +287,8 @@ export function installMockTauri(): () => void {
         datasetVersion = 0;
         activeModels = { posture: null, presence: null };
         trainingSettings = null;
-        cameraSettings = { ...cameraSettings, cameraWidth: 800, cameraHeight: 600, captureIntervalSeconds: 0.2, autoCaptureEnabled: false, autoCaptureIntervalSeconds: 2, privacyMode: true, claheStrength: 3.5, gaussianBlurKernel: 5, smoothingFrames: 3 };
-        uiSettings = { alertVolume: 0.3, alertDelaySeconds: 5 };
+        cameraSettings = { ...cameraSettings, cameraWidth: 800, cameraHeight: 600, captureIntervalSeconds: 0.2, autoCaptureEnabled: false, autoCaptureIntervalSeconds: 2, privacyMode: true, claheStrength: 3.5, gaussianBlurKernel: 5, smoothingFrames: 3, showDetectionOverlay: false };
+        uiSettings = { alertVolume: 0.3, alertDelaySeconds: 5, minimizeToTrayOnClose: true, startHiddenOnLogin: true };
         return snapshot();
       case 'get_training_status':
         return { running: finishTraining !== null };
@@ -303,7 +328,7 @@ export function installMockTauri(): () => void {
         cameraSettings = getArg<typeof cameraSettings>(args, 'settings');
         return null;
       case 'reset_camera_settings':
-        cameraSettings = { ...cameraSettings, cameraWidth: 800, cameraHeight: 600, captureIntervalSeconds: 0.2, autoCaptureEnabled: false, autoCaptureIntervalSeconds: 2, privacyMode: true, claheStrength: 3.5, gaussianBlurKernel: 5, smoothingFrames: 3 };
+        cameraSettings = { ...cameraSettings, cameraWidth: 800, cameraHeight: 600, captureIntervalSeconds: 0.2, autoCaptureEnabled: false, autoCaptureIntervalSeconds: 2, privacyMode: true, claheStrength: 3.5, gaussianBlurKernel: 5, smoothingFrames: 3, showDetectionOverlay: false };
         return cameraSettings;
       case 'get_ui_settings':
         return uiSettings;
@@ -311,7 +336,7 @@ export function installMockTauri(): () => void {
         uiSettings = getArg<typeof uiSettings>(args, 'settings');
         return null;
       case 'reset_ui_settings':
-        uiSettings = { alertVolume: 0.3, alertDelaySeconds: 5 };
+        uiSettings = { alertVolume: 0.3, alertDelaySeconds: 5, minimizeToTrayOnClose: true, startHiddenOnLogin: true };
         return uiSettings;
       case 'get_training_settings':
         return trainingSettings;

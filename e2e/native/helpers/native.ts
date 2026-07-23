@@ -67,6 +67,7 @@ export const NEUTRAL_CAMERA_SETTINGS = {
   claheStrength: 0,
   gaussianBlurKernel: 0,
   smoothingFrames: 1,
+  showDetectionOverlay: false,
 };
 
 export function loadRgbaFixtureBase64(file: string): string {

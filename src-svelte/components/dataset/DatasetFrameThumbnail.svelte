@@ -17,6 +17,8 @@
     onMouseLeave?: () => void;
     onDelete?: () => void;
     frameId?: string;
+    onDragStart?: (frameId: string) => void;
+    onDragEnd?: () => void;
   }
 
   let {
@@ -32,6 +34,8 @@
     onMouseLeave,
     onDelete,
     frameId,
+    onDragStart,
+    onDragEnd,
   }: DatasetFrameThumbnailProps = $props();
 
   let isHovered = $state(false);
@@ -40,15 +44,8 @@
   let thumbnailError = $state<string | null>(null);
   let thumbnailLoading = $state(false);
   let thumbnailRetry = $state(0);
-  let dragOffsetX = $state(0);
-  let dragOffsetY = $state(0);
   let previewedUrl = $state<string | null>(null);
-  let dragOriginX = 0;
-  let dragOriginY = 0;
 
-  const transform = $derived(
-    isDragging ? `translate3d(${dragOffsetX}px, ${dragOffsetY}px, 0)` : undefined,
-  );
   const resolvedThumbnailUrl = $derived(thumbnailUrl ?? loadedThumbnailUrl);
 
   function isAllowedMimeType(value: string | undefined): value is ThumbnailMimeType {
@@ -112,42 +109,28 @@
     }
   });
 
-  function setBodyCursor(cursor: string): void {
-    if (typeof document !== 'undefined') {
-      document.body.style.cursor = cursor;
-    }
-  }
-
   function handleDragStart(event: DragEvent): void {
     if (!frameId) {
       event.preventDefault();
       return;
     }
 
-    isDragging = true;
-    dragOriginX = event.clientX;
-    dragOriginY = event.clientY;
-    dragOffsetX = 0;
-    dragOffsetY = 0;
-    setBodyCursor('grabbing');
-
+    // Populate the drag data store (some engines require setData for the drag to
+    // start) but do NOT mutate this element's layout/pointer-events here — doing so
+    // during dragstart aborts the native drag in Chromium. The dragged frame id is
+    // handed to the grid through a callback rather than re-read from dataTransfer,
+    // which Chromium protects (getData returns "") outside the drop handler.
     event.dataTransfer?.setData('application/x-slouch-frame-id', frameId);
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = 'move';
     }
-  }
-
-  function handleDrag(event: DragEvent): void {
-    if (!isDragging || (event.clientX === 0 && event.clientY === 0)) return;
-    dragOffsetX = event.clientX - dragOriginX;
-    dragOffsetY = event.clientY - dragOriginY;
+    isDragging = true;
+    onDragStart?.(frameId);
   }
 
   function handleDragEnd(): void {
     isDragging = false;
-    dragOffsetX = 0;
-    dragOffsetY = 0;
-    setBodyCursor('');
+    onDragEnd?.();
   }
 
   function handleMouseEnter(): void {
@@ -159,16 +142,6 @@
     onMouseLeave?.();
   }
 
-  function handleMouseDown(): void {
-    if (frameId) {
-      setBodyCursor('grabbing');
-    }
-  }
-
-  function handleMouseUp(): void {
-    setBodyCursor('');
-  }
-
   function stopDeletePointer(event: MouseEvent): void {
     event.stopPropagation();
     event.preventDefault();
@@ -178,8 +151,6 @@
     stopDeletePointer(event);
     onDelete?.();
   }
-
-  $effect(() => () => setBodyCursor(''));
 
 </script>
 
@@ -197,13 +168,10 @@
     draggable={Boolean(frameId)}
     data-testid={testID}
     data-frame-id={frameId}
-    style={`transform: ${transform ?? 'none'}; opacity: ${isDragging ? 0.5 : 1}; border-color: ${borderColor}; cursor: ${frameId ? 'grab' : 'pointer'};`}
+    style={`opacity: ${isDragging ? 0.5 : 1}; border-color: ${borderColor}; cursor: ${frameId ? 'grab' : 'pointer'};`}
     onclick={onPress}
     oncontextmenu={onContextMenu}
-    onmousedown={handleMouseDown}
-    onmouseup={handleMouseUp}
     ondragstart={handleDragStart}
-    ondrag={handleDrag}
     ondragend={handleDragEnd}
   >
     {#if resolvedThumbnailUrl}

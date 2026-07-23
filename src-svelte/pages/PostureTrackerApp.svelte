@@ -7,6 +7,7 @@
   import PostureCamera from '@/components/PostureCamera.svelte';
   import ErrorBoundary from '@/components/ErrorBoundary.svelte';
   import { useCameraSettings } from '@/hooks/useCameraSettings';
+  import { useTrackingToggle } from '@/hooks/useTrackingToggle.svelte';
   import { useNotification } from '@/hooks/useNotification';
   import { useFrameSampler, type CapturedFrame } from '@/hooks/useFrameSampler';
   import type { PreviewFrameSource } from '@/services/dataset/thumbnailGenerator';
@@ -17,8 +18,9 @@
   import { datasetKeys, useDatasetOperations } from '@/hooks/useDatasetOperations';
   import { usePostureSound } from '@/hooks/usePostureSound';
   import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts';
-  import { nativeClient } from '@/lib/native/client';
+  import { nativeClient, NativeCommandError } from '@/lib/native/client';
   import { useNativeAppState } from '@/lib/state/nativeApp.svelte';
+  import { logger } from '@/services/logging/logger';
   import { MAX_BUFFER_SIZE } from '@/services/dataset/constants';
   import { FrameLabel, type CaptureAction } from '@/services/dataset/types';
   import CameraViewport from '@/components/unified/CameraViewport.svelte';
@@ -35,6 +37,8 @@
   let isPanelCollapsed = $state(true);
   let resetModalOpen = $state(false);
   let isCanvasReady = $state(false);
+  // Latest native camera start error (null when clear); drives the resume-retry state.
+  let cameraError = $state<string | null>(null);
   // Ephemeral preview of the detector-input feed; deliberately not persisted.
   let processedView = $state(false);
   let modelMetadata = $state<ActiveModelMetadata>({ posture: null, presence: null });
@@ -45,6 +49,19 @@
   let lastActionUrl: string | null = null;
   let lastAutoRecordTime = -Infinity;
   let modelMetadataGeneration = 0;
+  // Sticky proof that a posture model classified at least once this session. Live
+  // `goodProbability` is presence-gated (null while the person is away), so without a
+  // latch hasModel would drop back to "No Model Trained" whenever the person leaves
+  // while the `modelMetadata` snapshot is still stale-null. Cleared only when native
+  // state is reconciled (reset / import / native-state-changed), which carries truth.
+  let liveModelProven = $state(false);
+  // Guards the one-shot metadata refetch that heals a stale-null snapshot the first
+  // time a live classification contradicts it — no polling.
+  let modelMetadataHealed = false;
+  // Arms the reactive self-heal auto-train to fire at most once per rising edge of the
+  // "trainable but no current model" condition; re-armed only when that condition clears
+  // again, so a completed train that still reports needsRetraining never loops.
+  let autoTrainArmed = true;
 
   const canvasRef: ElementRef<HTMLCanvasElement> = { current: null };
   const previewFrameRef: ElementRef<PreviewFrameSource> = { current: null };
@@ -73,13 +90,74 @@
   const recentFrames = $derived(frameSampler.recentFrames);
   const visibleFrames = $derived(frozenFrames ?? recentFrames);
   const queuedFrameCount = $derived(frozenFrames ? Math.max(0, recentFrames.length - frozenFrames.length) : 0);
-  const hasModel = $derived(Boolean(modelMetadata.posture));
-  const systemReady = $derived(cameraSettings.ready && Boolean(nativeApp.status?.inferenceReady) && isCanvasReady);
+  // `goodProbability` is populated only by a deployed posture classifier (the same
+  // signal that fires the alert sound), so a live non-null value is authoritative
+  // proof a model is running — even when the `modelMetadata` snapshot (refreshed only
+  // on mount / reset / train-complete) missed a deploy and still reads null.
+  const liveModelActive = $derived(
+    typeof inferenceResult?.classification?.goodProbability === 'number',
+  );
+  // Latch that proof so leaving the frame (goodProbability -> null, presence-gated)
+  // does not flip the badge back to "No Model Trained". Cleared on native reconcile.
+  $effect(() => {
+    if (liveModelActive) liveModelProven = true;
+  });
+  // Heal the underlying snapshot exactly once when a live classification contradicts a
+  // null snapshot, so hasModel and every other reader of modelMetadata (auto-capture
+  // gating, model info, settings) reflect the truth instead of leaning on the latch.
+  $effect(() => {
+    if (liveModelActive && !modelMetadata.posture && !modelMetadataLoading && !modelMetadataHealed) {
+      modelMetadataHealed = true;
+      void loadModelMetadata().catch(() => undefined);
+    }
+  });
+  const hasModel = $derived(Boolean(modelMetadata.posture) || liveModelActive || liveModelProven);
+  // Capture readiness follows the LIVE detection pipeline, not the one-shot
+  // `inferenceReady` status snapshot. That snapshot is read once during startup
+  // init and never refreshed, so a slow model load can latch it false while
+  // inference is fully up and streaming results — which permanently disabled
+  // capture. `frameSampler.isLive` (fresh valid detections arriving) is itself
+  // proof the native inference pipeline is ready, so it is the authoritative gate.
+  const systemReady = $derived(cameraSettings.ready && isCanvasReady);
   // Gate on pipeline liveness, not per-frame token consumption, so the buttons
   // stay enabled across auto-capture instead of blinking each interval. A click
   // during the consumed gap is deferred to the next result by requestCapture.
   const captureReady = $derived(systemReady && frameSampler.isLive);
   const canUndo = $derived(datasetOps.canUndo.data?.available ?? false);
+
+  // Session-only pause/resume of tracking. `paused` OR's into PostureCamera's
+  // `paused` prop below, so pausing is a real native stop_camera (not a frontend
+  // freeze) and resume a real start_camera. `isCanvasReady` (preview frames
+  // flowing) is the "running" signal; `cameraError` keeps the button retryable
+  // after a failed resume. Never persisted.
+  const trackingToggle = useTrackingToggle({
+    get cameraRunning() { return isCanvasReady; },
+    get cameraError() { return cameraError; },
+    get settingsReady() { return cameraSettings.ready; },
+  });
+
+  // Clear the last detection the instant tracking pauses so capture buttons
+  // disable, the status classification clears, and no posture alert fires.
+  $effect(() => {
+    if (trackingToggle.paused) inferenceResult = null;
+  });
+
+  // Native is the single source of truth for pause state: tray menu / global
+  // hotkey toggles arrive as `tracking-state-changed`. Adopting the payload here
+  // keeps the UI button, overlay and camera gate in lockstep with the backend.
+  // Frontend-initiated toggles round-trip through start/stop_camera -> the shared
+  // native helper -> this same event; `applyNativePaused` absorbs those echoes.
+  $effect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void nativeClient.onTrackingStateChanged((payload) => {
+      trackingToggle.applyNativePaused(payload.paused);
+    }).then((cleanup) => disposed ? cleanup() : (unlisten = cleanup))
+      .catch((cause: unknown) => {
+        notification.showError(`Failed to subscribe to tracking state: ${cause instanceof Error ? cause.message : String(cause)}`);
+      });
+    return () => { disposed = true; unlisten?.(); };
+  });
 
   async function loadModelMetadata(): Promise<void> {
     const generation = ++modelMetadataGeneration;
@@ -100,6 +178,32 @@
 
   $effect(() => {
     void loadModelMetadata().catch(() => undefined);
+  });
+
+  // Self-healing auto-train: whenever the dataset is trainable but the deployed model is
+  // missing or stale (needsRetraining), train once. This covers the cases the save-only
+  // trigger misses — app start with data already collected, a training-settings change,
+  // or an earlier deploy that was superseded — so "our models auto train" holds without a
+  // fresh capture. Purely reactive on already-fetched query state; no polling.
+  const retrainNeeded = $derived(
+    cameraSettings.ready
+    && datasetOps.stats.data?.hasMinimumFrames === true
+    && datasetOps.needsRetraining.data === true,
+  );
+  $effect(() => {
+    if (!retrainNeeded) { autoTrainArmed = true; return; }
+    if (trainingState.isTraining) return;
+    if (!autoTrainArmed) return;
+    autoTrainArmed = false;
+    void autoTrain();
+  });
+  // needsRetraining already refetches on dataset-changed and every save invalidation, but
+  // not on a training-settings edit; TrainingConfigContext bumps persistedRevision after it
+  // persists, so refresh the flag here to let the trigger above see a settings-driven change.
+  $effect(() => {
+    const revision = trainingConfig.persistedRevision;
+    if (!trainingConfig.ready || revision === 0) return;
+    void datasetOps.needsRetraining.refetch();
   });
 
   $effect(() => {
@@ -157,18 +261,32 @@
   async function refreshAndRetrain(): Promise<void> {
     await datasetOps.invalidateAll();
     const refreshed = await datasetOps.stats.refetch();
-    if (refreshed.data?.hasMinimumFrames) {
-      // The silent auto-retrain deploys a model in the background. Without
-      // reloading metadata once it lands, hasModel (and the status badge) would
-      // keep reading the pre-train value — showing "No Model Trained" while the
-      // runtime already classifies. onModelDeployed fires only after the
-      // persist-then-publish deploy succeeds (posture-only pairs included).
-      void training.trainAndDeploy({
+    if (refreshed.data?.hasMinimumFrames) void autoTrain();
+  }
+
+  // Single training entry point shared by the save-triggered retrain and the reactive
+  // self-heal above. onModelDeployed reloads the model metadata so hasModel/the badge stop
+  // reading the pre-train value. Retries once when the deploy is superseded by a concurrent
+  // dataset/settings change (SnapshotChanged -> datasetChanged); stays silent when another
+  // job already owns training; warns without looping if the dataset still needs retraining.
+  async function autoTrain(attempt = 0): Promise<void> {
+    try {
+      await training.trainAndDeploy({
         doCV: false,
         onModelDeployed: () => { void handleTrainingComplete(); },
-      }).catch((cause: unknown) => {
-        notification.showError(`Automatic retraining failed: ${cause instanceof Error ? cause.message : String(cause)}`);
       });
+      const stillNeeded = await datasetOps.needsRetraining.refetch();
+      if (stillNeeded.data === true) {
+        logger.warn('training', 'Auto-train completed but the dataset still reports needsRetraining; stopping to avoid a loop.');
+      }
+    } catch (cause) {
+      if (cause instanceof Error && /already running/i.test(cause.message)) return;
+      if (cause instanceof NativeCommandError && cause.kind === 'datasetChanged' && attempt === 0) {
+        logger.warn('training', 'Auto-train deploy was superseded by a dataset or settings change; retrying once.');
+        await autoTrain(attempt + 1);
+        return;
+      }
+      notification.showError(`Automatic training failed: ${cause instanceof Error ? cause.message : String(cause)}`);
     }
   }
 
@@ -254,6 +372,12 @@
 
   async function reconcileNativeState(state: NativeStateSnapshot_Serialize): Promise<void> {
     modelMetadataGeneration += 1;
+    // Native state was replaced (reset / import / native-state-changed): drop the
+    // session latch and re-arm the one-shot heal so the reconciled snapshot is
+    // authoritative and a removed model correctly returns the badge to untrained.
+    liveModelProven = false;
+    modelMetadataHealed = false;
+    autoTrainArmed = true;
     frameSampler.clearFrames();
     frozenFrames = null;
     inferenceResult = null;
@@ -364,6 +488,9 @@
         onUndo={() => { void undo(); }}
         {canUndo}
         {lastAction}
+        trackingPaused={trackingToggle.paused}
+        onToggleTracking={trackingToggle.toggle}
+        toggleTrackingDisabled={trackingToggle.disabled}
       >
         <PostureCamera
           onInferenceResult={(result) => { inferenceResult = result; }}
@@ -374,7 +501,9 @@
           latestFrameRef={previewFrameRef}
           privacyMode={settings.privacyMode}
           {processedView}
-          paused={!cameraSettings.ready}
+          showDetectionOverlay={settings.showDetectionOverlay}
+          paused={!cameraSettings.ready || trackingToggle.paused}
+          onCameraError={(error) => { cameraError = error; }}
         />
       </CameraViewport>
     </ErrorBoundary>

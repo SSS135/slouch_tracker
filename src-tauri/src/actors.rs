@@ -1342,10 +1342,13 @@ mod camera {
     struct CameraShared {
         latest_frame: Mutex<Option<Vec<u8>>>,
         // JPEG of the exact preprocessed RGBA the detector sees (post
-        // CLAHE/blur/temporal smoothing). Refreshed at capture rate (~30fps) while
-        // the processed view is actively watched, otherwise at the ~1fps detection
-        // rate by the dispatcher (the idle fallback).
-        processed_frame: Mutex<Option<Vec<u8>>>,
+        // CLAHE/blur/temporal smoothing), paired with the monotonic capture
+        // sequence of the newest source frame it was built from. Two producers
+        // write this cell — the capture-rate preview preprocessor (~30fps while the
+        // processed view is watched) and the ~1fps dispatcher fallback — so the
+        // sequence is the ordering key: a write only lands if it is strictly newer,
+        // keeping the served frame monotonic in capture time (no stale flicker).
+        processed_frame: Mutex<Option<(u64, Vec<u8>)>>,
         // Instant of the most recent `slouchcam …/processed` pull. The capture loop
         // treats a stamp within PROCESSED_DEMAND_WINDOW as live demand and drives
         // the processed-view preview at capture rate; stale/absent means zero extra
@@ -1528,9 +1531,11 @@ mod camera {
             self.shared.latest_frame.lock().ok()?.clone()
         }
 
-        /// The freshest processed (detector-input) JPEG frame; `None` until a
-        /// detection has run since the camera started.
-        pub fn processed_frame_bytes(&self) -> Option<Vec<u8>> {
+        /// The freshest processed (detector-input) JPEG frame paired with its
+        /// monotonic capture sequence; `None` until a detection has run since the
+        /// camera started. The sequence is echoed to the webview so both layers
+        /// agree on frame ordering.
+        pub fn processed_frame_snapshot(&self) -> Option<(u64, Vec<u8>)> {
             self.shared.processed_frame.lock().ok()?.clone()
         }
 
@@ -1610,6 +1615,10 @@ mod camera {
     struct DetectionJob {
         buffers: Vec<Buffer>,
         settings: CameraSettings,
+        // Monotonic capture sequence of the newest buffer (the frame detection runs
+        // on). Carried so the dispatcher's processed-frame store is ordered against
+        // the capture-rate preview writes and can never regress the served frame.
+        capture_seq: u64,
     }
 
     /// Bounded(1), drop-oldest slot between the capture thread (producer) and the
@@ -1798,6 +1807,11 @@ mod camera {
         // detection. A detection dispatches the last `smoothing_frames` entries so
         // temporal smoothing averages true camera-rate frames.
         let mut frame_ring: VecDeque<Buffer> = VecDeque::with_capacity(FRAME_RING_CAPACITY);
+        // Monotonic capture counter: one tick per frame this thread pulls (main loop
+        // + background bursts), never reset for the actor's life. It tags every
+        // processed-frame store so out-of-order writes from the two producers are
+        // rejected and the served processed frame stays monotonic in capture time.
+        let mut capture_seq: u64 = 0;
 
         loop {
             if camera.is_some() {
@@ -1854,6 +1868,11 @@ mod camera {
                 };
                 match frame {
                     Ok(buffer) => {
+                        // Tag this capture. Every processed-frame store carries the
+                        // sequence of the newest source frame it was built from, so
+                        // the served processed cell can never regress in capture time.
+                        capture_seq = capture_seq.wrapping_add(1);
+
                         // Keep the freshest frame for the preview in BOTH modes:
                         // Foreground stores at ~30fps for a smooth feed; Background
                         // stores each detection frame (~1fps) so a visible-but-unfocused
@@ -1890,6 +1909,7 @@ mod camera {
                                     &buffer,
                                     &mut preview_preprocessor,
                                     settings,
+                                    capture_seq,
                                     &shared,
                                 ) {
                                     log::debug!(target: "camera", "processed-view preview update skipped: {error}");
@@ -1936,16 +1956,24 @@ mod camera {
                                                 want,
                                                 frame_format,
                                                 &shared,
+                                                &mut capture_seq,
                                             );
                                         }
                                         // Dispatch the last `want` consecutive frames
                                         // (oldest→newest); the newest is the frame
                                         // detection runs on. These clones are the sole
-                                        // per-detection copies.
+                                        // per-detection copies. `capture_seq` now tags
+                                        // that newest frame (post-burst), so the
+                                        // dispatcher's store is ordered against the
+                                        // capture-rate preview writes.
                                         let start = frame_ring.len().saturating_sub(want);
                                         let buffers: Vec<Buffer> =
                                             frame_ring.iter().skip(start).cloned().collect();
-                                        dispatcher.submit(DetectionJob { buffers, settings });
+                                        dispatcher.submit(DetectionJob {
+                                            buffers,
+                                            settings,
+                                            capture_seq,
+                                        });
                                     }
                                 }
                                 Err(error) => {
@@ -2087,44 +2115,52 @@ mod camera {
         }
     }
 
-    /// Opens the device at the best MJPEG format the webcam advertises, prioritizing
-    /// frame rate: the preview needs ~30fps regardless of mode, and the loop's read
-    /// cadence — not the device — sets the effective rate. Pinning the settings
-    /// resolution is deliberately avoided: some webcams reserve their high frame
-    /// rates for specific resolutions (e.g. only ~1fps at 800x600), so frame rate
-    /// wins over resolution. The detection pipeline downscales internally, so any
-    /// reasonable resolution is fine.
+    const NEGOTIATION_TARGET_WIDTH: u32 = 1280;
+    const NEGOTIATION_TARGET_HEIGHT: u32 = 720;
+
+    /// Ranks an MJPEG capture mode for negotiation; higher tuples win under
+    /// `max_by_key`. Ordered priorities: (1) the resolution closest to 720p wins,
+    /// preferring at-or-above 720p over anything below it; (2) the highest fps that
+    /// is still <= 30.
+    fn mjpeg_format_rank(width: u32, height: u32, fps: u32) -> (i64, i64, i64, i64) {
+        let fps = i64::from(fps);
+        let area = i64::from(width) * i64::from(height);
+        let target_area =
+            i64::from(NEGOTIATION_TARGET_WIDTH) * i64::from(NEGOTIATION_TARGET_HEIGHT);
+
+        let at_or_above = area >= target_area;
+        // At-or-above 720p: prefer the smallest such mode (closest from above);
+        // below 720p: prefer the largest (closest from below). The group bit keeps
+        // the two orderings from crossing.
+        let res_group = i64::from(at_or_above);
+        let res_tiebreak = if at_or_above { -area } else { area };
+        let (fps_group, fps_key) = if fps <= 30 { (1, fps) } else { (0, -fps) };
+
+        (res_group, res_tiebreak, fps_group, fps_key)
+    }
+
+    /// Opens the device at the best MJPEG mode the webcam advertises, preferring
+    /// 1280x720 at the highest fps <= 30 (see `mjpeg_format_rank`), falling back to
+    /// the nearest lower resolution only when no 720p-class mode is offered.
     fn open_camera(settings: &CameraSettings) -> Result<(Camera, FrameFormat), String> {
         let index = CameraIndex::Index(0);
         let base = RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
         let mut camera = Camera::new(index, base).map_err(|error| error.to_string())?;
 
-        // Enumerate the device's supported formats and pick the best MJPEG one by
-        // frame rate. `compatible_camera_formats` needs &mut and may fail on some
-        // backends; on failure we fall back to a settings-resolution MJPEG request.
+        // Enumerate the device's supported formats and pick the best MJPEG mode by
+        // the 720p-preferring policy. `compatible_camera_formats` needs &mut and may
+        // fail on some backends; on failure we fall back to a settings-resolution
+        // MJPEG request.
         let chosen = camera.compatible_camera_formats().ok().and_then(|formats| {
             formats
                 .into_iter()
                 .filter(|candidate| candidate.format() == FrameFormat::MJPEG)
                 .max_by_key(|candidate| {
-                    let fps = i64::from(candidate.frame_rate());
-                    // Prefer the highest fps that is still <= 30; if every MJPEG
-                    // mode exceeds 30, fall back to the smallest (closest to 30
-                    // from above). `group` ranks <=30 above >30; within a group the
-                    // fps key sorts the winner to the top.
-                    let (group, fps_key) = if fps <= 30 {
-                        (1_i64, fps)
-                    } else {
-                        (0_i64, -fps)
-                    };
-                    let width = i64::from(candidate.width());
-                    let height = i64::from(candidate.height());
-                    // Tie-break among equal fps: prefer ~640x480. On this MSMF
-                    // backend the effective capture rate is resolution-dependent
-                    // (720p+ pins to ~1fps), and 640x480 is still detection-friendly.
-                    let in_range = i64::from((320..=640).contains(&width));
-                    let distance = (width - 640).abs() + (height - 480).abs();
-                    (group, fps_key, in_range, -distance)
+                    mjpeg_format_rank(
+                        candidate.width(),
+                        candidate.height(),
+                        candidate.frame_rate(),
+                    )
                 })
         });
 
@@ -2249,10 +2285,17 @@ mod camera {
     }
 
     /// Processed-view preview store: JPEG-encode the exact preprocessed RGBA frame
-    /// the detector is about to see so `slouchcam …/processed` can serve it. Runs
-    /// once per detection (~1 fps), so the encode cost is negligible. Best-effort:
-    /// a failed encode only skips this preview update, never the detection.
-    fn store_processed_frame(frame: &ImageData, shared: &CameraShared) {
+    /// the detector is about to see so `slouchcam …/processed` can serve it, tagged
+    /// with `capture_seq` (the newest source frame's capture sequence). Two producers
+    /// write this cell — the ~30fps preview preprocessor and the ~1fps dispatcher —
+    /// so the store only lands when `capture_seq` is strictly newer than the frame
+    /// already there; a stale (older-source) write from either producer is dropped.
+    /// This is what keeps the served processed frame monotonic in capture time and
+    /// stops the ~1fps dispatcher write from flickering an older average over the
+    /// smooth preview stream (the effect grows with `smoothing_frames`). Returns
+    /// whether the frame was stored. Best-effort: a failed encode skips this preview
+    /// update, never the detection.
+    fn store_processed_frame(frame: &ImageData, capture_seq: u64, shared: &CameraShared) -> bool {
         // The image crate's JPEG encoder rejects Rgba8 input; strip the (always
         // opaque) alpha channel and encode as Rgb8.
         let mut rgb = Vec::with_capacity(frame.data.len() / 4 * 3);
@@ -2268,11 +2311,21 @@ mod camera {
         ) {
             Ok(()) => {
                 if let Ok(mut cell) = shared.processed_frame.lock() {
-                    *cell = Some(jpeg);
+                    // Strictly-newer guard: never let an older-source frame overwrite
+                    // a newer one, regardless of which producer or thread wrote first.
+                    if cell
+                        .as_ref()
+                        .is_none_or(|(stored, _)| capture_seq > *stored)
+                    {
+                        *cell = Some((capture_seq, jpeg));
+                        return true;
+                    }
                 }
+                false
             }
             Err(error) => {
                 log::warn!(target: "camera", "processed preview JPEG encode failed: {error}");
+                false
             }
         }
     }
@@ -2285,6 +2338,7 @@ mod camera {
         buffer: &Buffer,
         preprocessor: &mut NativePreprocessor,
         settings: &CameraSettings,
+        capture_seq: u64,
         shared: &CameraShared,
     ) -> Result<(), ApiError> {
         let image = decode_rgba(buffer).map_err(ApiError::InvalidRequest)?;
@@ -2294,7 +2348,7 @@ mod camera {
         let processed = preprocessor
             .process_latest(settings)
             .map_err(ApiError::InvalidRequest)?;
-        store_processed_frame(&processed, shared);
+        store_processed_frame(&processed, capture_seq, shared);
         Ok(())
     }
 
@@ -2320,6 +2374,7 @@ mod camera {
         want: usize,
         frame_format: FrameFormat,
         shared: &CameraShared,
+        capture_seq: &mut u64,
     ) {
         let Some(active) = camera.as_mut() else {
             return;
@@ -2327,6 +2382,10 @@ mod camera {
         for _ in 1..want {
             match active.frame() {
                 Ok(buffer) => {
+                    // Each burst frame advances the capture sequence so the newest
+                    // ring entry (the frame detection runs on) carries the highest
+                    // sequence, keeping the dispatcher's store ordered.
+                    *capture_seq = capture_seq.wrapping_add(1);
                     // Keep the preview on the freshest (detected-on) frame too.
                     store_preview_frame(&buffer, frame_format, shared);
                     push_frame_ring(ring, buffer);
@@ -2365,7 +2424,12 @@ mod camera {
         let processed = preprocessor
             .process_latest(&job.settings)
             .map_err(ApiError::InvalidRequest)?;
-        store_processed_frame(&processed, shared);
+        // Tagged with the job's newest capture sequence: while the processed view is
+        // actively watched the capture-rate preview writes carry a newer sequence, so
+        // this ~1fps store is dropped and can't flicker an older average over the
+        // smooth stream. When the view is not watched, this is the only writer and
+        // always advances the sequence.
+        store_processed_frame(&processed, job.capture_seq, shared);
         let id = *request_id;
         *request_id = request_id.wrapping_add(1);
         let result = inference
@@ -2426,6 +2490,167 @@ mod camera {
                 description: info.description().to_string(),
             })
             .collect())
+    }
+
+    #[cfg(test)]
+    mod ordering_tests {
+        use super::*;
+
+        fn best_mjpeg(candidates: &[(u32, u32, u32)]) -> (u32, u32, u32) {
+            candidates
+                .iter()
+                .copied()
+                .max_by_key(|&(width, height, fps)| mjpeg_format_rank(width, height, fps))
+                .expect("at least one candidate")
+        }
+
+        #[test]
+        fn negotiation_prefers_720p_over_vga_at_equal_fps() {
+            assert_eq!(
+                best_mjpeg(&[(640, 480, 30), (1280, 720, 30)]),
+                (1280, 720, 30)
+            );
+        }
+
+        #[test]
+        fn negotiation_prefers_720p_over_higher_resolution() {
+            // 720p is the closest mode at-or-above the target; larger modes are farther.
+            assert_eq!(
+                best_mjpeg(&[(1920, 1080, 30), (1280, 720, 30)]),
+                (1280, 720, 30)
+            );
+        }
+
+        #[test]
+        fn negotiation_takes_highest_fps_up_to_30_at_720p() {
+            assert_eq!(
+                best_mjpeg(&[(1280, 720, 15), (1280, 720, 60), (1280, 720, 30)]),
+                (1280, 720, 30)
+            );
+        }
+
+        #[test]
+        fn negotiation_falls_back_to_closest_lower_when_no_720p() {
+            // No 720p-class mode offered: pick the largest resolution below it.
+            assert_eq!(
+                best_mjpeg(&[(320, 240, 30), (640, 480, 30), (800, 600, 30)]),
+                (800, 600, 30)
+            );
+        }
+
+        #[test]
+        fn negotiation_prefers_above_720p_over_vga_when_no_exact_720p() {
+            // With 720p itself absent, an above-720p mode still beats a VGA one.
+            assert_eq!(
+                best_mjpeg(&[(1920, 1080, 30), (640, 480, 30)]),
+                (1920, 1080, 30)
+            );
+        }
+
+        #[test]
+        fn negotiation_tie_breaks_on_higher_fps_within_lower_fallback() {
+            assert_eq!(
+                best_mjpeg(&[(640, 480, 15), (640, 480, 30)]),
+                (640, 480, 30)
+            );
+        }
+
+        fn solid_frame(width: u32, height: u32, value: u8) -> ImageData {
+            ImageData {
+                data: vec![value; (width as usize) * (height as usize) * 4],
+                width,
+                height,
+            }
+        }
+
+        fn stored_seq(shared: &CameraShared) -> Option<u64> {
+            shared
+                .processed_frame
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|(seq, _)| *seq)
+        }
+
+        fn stored_bytes(shared: &CameraShared) -> Option<Vec<u8>> {
+            shared
+                .processed_frame
+                .lock()
+                .unwrap()
+                .as_ref()
+                .map(|(_, bytes)| bytes.clone())
+        }
+
+        #[test]
+        fn processed_store_rejects_stale_and_equal_capture_sequences() {
+            let shared = CameraShared::new();
+            // First write into an empty cell always lands.
+            assert!(store_processed_frame(&solid_frame(2, 2, 10), 5, &shared));
+            assert_eq!(stored_seq(&shared), Some(5));
+
+            // A strictly newer write lands.
+            assert!(store_processed_frame(&solid_frame(2, 2, 20), 6, &shared));
+            assert_eq!(stored_seq(&shared), Some(6));
+            let newest = stored_bytes(&shared);
+
+            // An older-source write is dropped (the ~1fps dispatcher stale case).
+            assert!(!store_processed_frame(&solid_frame(2, 2, 30), 4, &shared));
+            assert_eq!(stored_seq(&shared), Some(6));
+            // The equal-sequence write is dropped too (already served).
+            assert!(!store_processed_frame(&solid_frame(2, 2, 40), 6, &shared));
+            assert_eq!(stored_seq(&shared), Some(6));
+            // The cell still holds the newest frame's bytes, never the stale ones.
+            assert_eq!(stored_bytes(&shared), newest);
+        }
+
+        #[test]
+        fn interleaved_preview_and_dispatcher_writes_never_regress_served_frame() {
+            // Models smoothing_frames > 1 steady state: the capture-rate preview
+            // preprocessor advances the sequence every frame while the dispatcher
+            // periodically tries to store a frame built from older source captures.
+            let shared = CameraShared::new();
+            let mut served: Vec<u64> = Vec::new();
+            let mut preview_seq = 0_u64;
+            for step in 0..30_u64 {
+                // Preview writes at capture rate — always the newest source frame.
+                preview_seq += 1;
+                store_processed_frame(&solid_frame(2, 2, (step % 200) as u8), preview_seq, &shared);
+                if let Some(seq) = stored_seq(&shared) {
+                    served.push(seq);
+                }
+                // ~Every 10th frame the dispatcher tries to store a frame whose newest
+                // source capture is several frames stale (thread lag under smoothing).
+                if step % 10 == 9 {
+                    let stale = preview_seq.saturating_sub(4);
+                    assert!(
+                        !store_processed_frame(&solid_frame(2, 2, 200), stale, &shared),
+                        "stale dispatcher write must be rejected while preview leads"
+                    );
+                    if let Some(seq) = stored_seq(&shared) {
+                        served.push(seq);
+                    }
+                }
+            }
+            // The served sequence never regresses — no older frame is ever displayed.
+            for pair in served.windows(2) {
+                assert!(pair[1] >= pair[0], "served frame regressed: {served:?}");
+            }
+            assert_eq!(stored_seq(&shared), Some(preview_seq));
+        }
+
+        #[test]
+        fn dispatcher_write_resumes_once_preview_demand_stops() {
+            // When the processed view is closed the preview stops writing; the next
+            // detection's newest capture is necessarily newer than the last preview
+            // frame (the capture loop keeps advancing the sequence), so the
+            // dispatcher's store resumes driving the cell.
+            let shared = CameraShared::new();
+            assert!(store_processed_frame(&solid_frame(2, 2, 10), 20, &shared));
+            // Capture kept advancing while the view was off; the detection stores with
+            // a newer capture sequence and lands.
+            assert!(store_processed_frame(&solid_frame(2, 2, 50), 25, &shared));
+            assert_eq!(stored_seq(&shared), Some(25));
+        }
     }
 }
 

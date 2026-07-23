@@ -1,6 +1,30 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const applicationPath = '/index.svelte-app-harness.html';
+
+// Drive a real Chromium HTML5 drag-and-drop through the browser's own drag
+// pipeline (trusted mouse input), not synthetic dispatchEvent. Chromium only
+// promotes a mousedown into a native drag after the pointer travels, so a small
+// initial move precedes the travel to the target and a final settling move
+// guarantees a dragover on the target before the drop.
+async function dragThumbnailToSection(page: Page, source: Locator, target: Locator): Promise<void> {
+  await source.scrollIntoViewIfNeeded();
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  if (!sourceBox || !targetBox) throw new Error('Drag source or target had no bounding box.');
+
+  const startX = sourceBox.x + sourceBox.width / 2;
+  const startY = sourceBox.y + sourceBox.height / 2;
+  const endX = targetBox.x + targetBox.width / 2;
+  const endY = targetBox.y + targetBox.height / 2;
+
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(startX + 8, startY + 8, { steps: 6 });
+  await page.mouse.move(endX, endY, { steps: 16 });
+  await page.mouse.move(endX, endY, { steps: 4 });
+  await page.mouse.up();
+}
 
 test.beforeEach(async ({ page }) => {
   await page.goto(applicationPath, { waitUntil: 'commit' });
@@ -31,14 +55,99 @@ test('real app keeps capture buttons live and captures one distinct frame per la
   await expect.poll(() => readCaptureCalls(page), { timeout: 10_000 }).toBe(2);
 });
 
+test('real app pauses and resumes tracking from the top-center toggle, gating capture while paused', async ({ page }) => {
+  const good = page.getByRole('button', { name: 'Good' });
+  await expect(good).toBeEnabled({ timeout: 15_000 });
+
+  // Active tracking: the toggle reads "Pause" and is live.
+  const pause = page.getByRole('button', { name: 'Pause tracking' });
+  await expect(pause).toBeEnabled({ timeout: 15_000 });
+
+  // Pause -> the toggle flips to "Resume" (aria-pressed) and capture is withdrawn
+  // as the native stop_camera halts the detection stream.
+  await pause.click();
+  const resume = page.getByRole('button', { name: 'Resume tracking' });
+  await expect(resume).toBeVisible();
+  await expect(resume).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('Tracking paused')).toBeVisible();
+  await expect(good).toBeDisabled({ timeout: 6_000 });
+
+  // Resume -> start_camera restores the stream, the toggle flips back to "Pause"
+  // and capture comes live again.
+  await resume.click();
+  await expect(page.getByRole('button', { name: 'Pause tracking' })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Tracking paused')).toHaveCount(0);
+  await expect(good).toBeEnabled({ timeout: 15_000 });
+});
+
+const emitTrackingState = (page: Page, paused: boolean): Promise<void> =>
+  page.evaluate(
+    (value) => (
+      window as typeof window & { __SLOUCH_EMIT_TRACKING_STATE__: (p: boolean) => Promise<void> }
+    ).__SLOUCH_EMIT_TRACKING_STATE__(value),
+    paused,
+  );
+
+test('real app reflects a native/tray-initiated pause and resume from the tracking-state event', async ({ page }) => {
+  const good = page.getByRole('button', { name: 'Good' });
+  await expect(good).toBeEnabled({ timeout: 15_000 });
+
+  // Tracking is live: the top-center toggle reads "Pause".
+  await expect(page.getByRole('button', { name: 'Pause tracking' })).toBeEnabled({ timeout: 15_000 });
+
+  // Simulate the native backend (tray menu / global hotkey) pausing tracking by
+  // emitting the typed event. The UI button, overlay and capture gate must adopt
+  // it as the single source of truth — no click on the frontend control.
+  await emitTrackingState(page, true);
+  const resume = page.getByRole('button', { name: 'Resume tracking' });
+  await expect(resume).toBeVisible();
+  await expect(resume).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('Tracking paused')).toBeVisible();
+  await expect(good).toBeDisabled({ timeout: 6_000 });
+
+  // A duplicate pause echo (as the redundant stop_camera would produce) must not
+  // churn the UI: it stays paused, exactly once.
+  await emitTrackingState(page, true);
+  await expect(resume).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByText('Tracking paused')).toBeVisible();
+
+  // Simulate the native backend resuming: the UI recovers to the live "Pause"
+  // state and capture comes back.
+  await emitTrackingState(page, false);
+  await expect(page.getByRole('button', { name: 'Pause tracking' })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Tracking paused')).toHaveCount(0);
+  await expect(good).toBeEnabled({ timeout: 15_000 });
+});
+
+test('real app relabels a frame by dragging it onto another section (real Chromium HTML5 DnD)', async ({ page }) => {
+  await page.getByRole('button', { name: 'Open control panel' }).click();
+  await page.getByRole('tab', { name: 'Training' }).click();
+
+  const source = page.getByRole('button', { name: 'Preview frame frame-1 labeled good' });
+  await expect(source).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Good Frames (1)' })).toBeVisible();
+  const badSection = page.getByRole('group', { name: 'Bad Frames' });
+
+  await dragThumbnailToSection(page, source, badSection);
+
+  // The drop actually relabelled the frame: it now lives under Bad Frames and its
+  // accessible name flipped from "labeled good" to "labeled bad".
+  await expect(page.getByRole('button', { name: 'Preview frame frame-1 labeled bad' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Preview frame frame-1 labeled good' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Bad Frames (1)' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Good Frames (0)' })).toBeVisible();
+});
+
 test('real app relabels and deletes through paged metadata with authoritative native undo', async ({ page }) => {
   await page.getByRole('button', { name: 'Open control panel' }).click();
   await page.getByRole('tab', { name: 'Training' }).click();
 
-  const label = page.getByRole('combobox', { name: 'Change label for frame frame-1' });
-  await expect(label).toHaveValue('good');
-  await label.selectOption('bad');
-  await expect(label).toHaveValue('bad');
+  // Relabel through the right-click context menu (the per-thumbnail dropdown is gone).
+  const good = page.getByRole('button', { name: 'Preview frame frame-1 labeled good' });
+  await expect(good).toBeVisible();
+  await good.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Move to Bad' }).click();
+  await expect(page.getByRole('button', { name: 'Preview frame frame-1 labeled bad' })).toBeVisible();
 
   const undo = page.getByRole('button', { name: 'Undo' });
   await expect(undo).toBeVisible();
@@ -46,7 +155,7 @@ test('real app relabels and deletes through paged metadata with authoritative na
   await expect(undo).toHaveAttribute('aria-expanded', 'true');
   await expect(undo).toHaveAttribute('aria-describedby');
   await undo.click();
-  await expect(label).toHaveValue('good');
+  await expect(page.getByRole('button', { name: 'Preview frame frame-1 labeled good' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Delete frame frame-1 labeled good' }).click();
   await expect(page.getByRole('button', { name: 'Preview frame frame-1 labeled good' })).toHaveCount(0);

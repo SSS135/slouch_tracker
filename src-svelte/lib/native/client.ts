@@ -27,6 +27,7 @@ import {
   type ShortcutStatus,
   type TrainingEvent_Deserialize,
   type TrainingResultResponse_Serialize,
+  type TrackingStateChangedEvent,
   type TrainingSettings_Deserialize,
   type TrainingSettings_Serialize,
   type TrainingStatus,
@@ -237,6 +238,12 @@ export const nativeClient = {
   async getShortcutStatus(): Promise<ShortcutStatus> {
     return unwrapNativeResult(await commands.getShortcutStatus());
   },
+  async getAutostartEnabled(): Promise<boolean> {
+    return unwrapNativeResult(await commands.getAutostartEnabled());
+  },
+  async setAutostartEnabled(enabled: boolean): Promise<void> {
+    unwrapNativeResult(await commands.setAutostartEnabled(enabled));
+  },
   async startCamera(onResult: Channel<InferenceUiResult>): Promise<void> {
     unwrapNativeResult(await commands.startCamera(onResult));
   },
@@ -263,6 +270,11 @@ export const nativeClient = {
     handler: (event: NativeStateChangedEvent_Deserialize) => void,
   ): Promise<UnlistenFn> {
     return events.nativeStateChanged.listen((event) => handler(event.payload));
+  },
+  onTrackingStateChanged(
+    handler: (event: TrackingStateChangedEvent) => void,
+  ): Promise<UnlistenFn> {
+    return events.trackingStateChanged.listen((event) => handler(event.payload));
   },
 };
 

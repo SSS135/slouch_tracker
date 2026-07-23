@@ -14,6 +14,10 @@ use super::engineered_features::{
     extract_joint_4d_features, extract_posture_geometry_features, extract_posture_raw_features,
     extract_raw_keypoints, extract_torso_invariant_features, EngineeredFeaturesError,
 };
+use super::keypoints_3d_features::{
+    extract_posture_geometry_3d, extract_posture_raw_3d, extract_torso_invariant_3d,
+    Keypoints3dError,
+};
 use super::rtmdet_engineered_features::{
     extract_keypoint_scores_feature, extract_rtm_det_engineered_features,
     RtmDetEngineeredFeaturesError,
@@ -81,6 +85,7 @@ pub enum FeatureExtractionError {
     },
     Engineered(EngineeredFeaturesError),
     RtmDetEngineered(RtmDetEngineeredFeaturesError),
+    Keypoints3d(Keypoints3dError),
 }
 
 impl fmt::Display for FeatureExtractionError {
@@ -123,6 +128,7 @@ impl fmt::Display for FeatureExtractionError {
             }
             Self::Engineered(error) => error.fmt(formatter),
             Self::RtmDetEngineered(error) => error.fmt(formatter),
+            Self::Keypoints3d(error) => error.fmt(formatter),
         }
     }
 }
@@ -138,6 +144,12 @@ impl From<EngineeredFeaturesError> for FeatureExtractionError {
 impl From<RtmDetEngineeredFeaturesError> for FeatureExtractionError {
     fn from(error: RtmDetEngineeredFeaturesError) -> Self {
         Self::RtmDetEngineered(error)
+    }
+}
+
+impl From<Keypoints3dError> for FeatureExtractionError {
+    fn from(error: Keypoints3dError) -> Self {
+        Self::Keypoints3d(error)
     }
 }
 
@@ -195,7 +207,8 @@ where
             | FeatureId::NlfDepth
             | FeatureId::NlfBackbone
             | FeatureId::NlfBackboneMax
-            | FeatureId::NlfBackboneStd => Ok(container.features().get(&feature_id).cloned()),
+            | FeatureId::NlfBackboneStd
+            | FeatureId::RawKeypoints3d => Ok(container.features().get(&feature_id).cloned()),
             FeatureId::RtmDetEngineered => extract_rtm_det_engineered_features(
                 Some(container.keypoints()),
                 Some(container.bbox().original_bbox()),
@@ -221,6 +234,30 @@ where
                 .map_err(FeatureExtractionError::from),
             FeatureId::TorsoInvariant => extract_torso_invariant_features(container.keypoints())
                 .map_err(FeatureExtractionError::from),
+            FeatureId::PostureRaw3d => extract_posture_raw_3d(
+                container
+                    .features()
+                    .get(&FeatureId::RawKeypoints3d)
+                    .map(Vec::as_slice),
+                container.keypoints(),
+            )
+            .map_err(FeatureExtractionError::from),
+            FeatureId::PostureGeometry3d => extract_posture_geometry_3d(
+                container
+                    .features()
+                    .get(&FeatureId::RawKeypoints3d)
+                    .map(Vec::as_slice),
+                container.keypoints(),
+            )
+            .map_err(FeatureExtractionError::from),
+            FeatureId::TorsoInvariant3d => extract_torso_invariant_3d(
+                container
+                    .features()
+                    .get(&FeatureId::RawKeypoints3d)
+                    .map(Vec::as_slice),
+                container.keypoints(),
+            )
+            .map_err(FeatureExtractionError::from),
         };
 
     let Some(feature_array) = extracted? else {
@@ -237,10 +274,20 @@ where
                 available_features.join(", ")
             }
         ));
+        // The computed 3D features consume the hidden `raw_keypoints_3d` substrate; naming it
+        // makes a missing-substrate failure self-explanatory in the error message.
+        let required_dependencies = match feature_id {
+            FeatureId::PostureRaw3d
+            | FeatureId::PostureGeometry3d
+            | FeatureId::TorsoInvariant3d => {
+                vec![FeatureId::RawKeypoints3d.as_str().to_owned()]
+            }
+            _ => Vec::new(),
+        };
         return Err(FeatureExtractionError::FeatureUnavailable {
             feature_type: feature_name.to_owned(),
             available_features,
-            required_dependencies: Vec::new(),
+            required_dependencies,
         });
     };
 

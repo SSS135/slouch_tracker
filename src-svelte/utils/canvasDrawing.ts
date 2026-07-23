@@ -360,3 +360,123 @@ export function drawHumanLikeSkeleton(
 
   drawFace(ctx, keypoints, canvasWidth, canvasHeight, threshold, color, noseColor, earColor, baseScale);
 }
+
+export interface DetectionBox {
+  x1: number | null;
+  y1: number | null;
+  x2: number | null;
+  y2: number | null;
+  score: number | null;
+}
+
+/**
+ * Draw the original detection bounding box with a "person <score>" confidence
+ * chip, for the diagnostic detection overlay. Box coordinates are 0-1 normalized
+ * to the full frame (same space as the skeleton keypoints), so they scale by the
+ * canvas dimensions. Line width and font scale with baseScale = canvasWidth / 640.
+ */
+export function drawDetectionBox(
+  ctx: CanvasRenderingContext2D,
+  bbox: DetectionBox,
+  canvasWidth: number,
+  canvasHeight: number,
+  options?: { color?: string }
+): void {
+  const { x1, y1, x2, y2 } = bbox;
+  if (x1 === null || y1 === null || x2 === null || y2 === null) return;
+
+  const color = options?.color ?? '#4dabf7';
+  const baseScale = canvasWidth / 640;
+  const left = x1 * canvasWidth;
+  const top = y1 * canvasHeight;
+  const width = (x2 - x1) * canvasWidth;
+  const height = (y2 - y1) * canvasHeight;
+
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1, 2 * baseScale);
+  ctx.strokeRect(left, top, width, height);
+
+  const label = `person ${(bbox.score ?? 0).toFixed(2)}`;
+  const fontSize = Math.max(11, 14 * baseScale);
+  ctx.font = `600 ${fontSize}px sans-serif`;
+  const padX = 4 * baseScale;
+  const chipHeight = fontSize + 6 * baseScale;
+  const chipWidth = ctx.measureText(label).width + padX * 2;
+  // Anchor the chip at the box top-left, above the top edge; drop it just inside
+  // when the box hugs the top of the frame so the label never clips off-canvas.
+  const chipTop = top - chipHeight >= 0 ? top - chipHeight : top;
+
+  ctx.fillStyle = color;
+  ctx.fillRect(left, chipTop, chipWidth, chipHeight);
+  ctx.fillStyle = '#0b1e2d';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.fillText(label, left + padX, chipTop + chipHeight / 2);
+  ctx.restore();
+}
+
+// Standard COCO 17-keypoint skeleton edges: face (nose-eyes-ears), shoulder
+// girdle, arms, hip girdle, torso sides, and legs.
+const COCO_SKELETON_EDGES: ReadonlyArray<readonly [number, number]> = [
+  [NOSE, LEFT_EYE], [NOSE, RIGHT_EYE], [LEFT_EYE, LEFT_EAR], [RIGHT_EYE, RIGHT_EAR],
+  [LEFT_SHOULDER, RIGHT_SHOULDER],
+  [LEFT_SHOULDER, LEFT_ELBOW], [LEFT_ELBOW, LEFT_WRIST],
+  [RIGHT_SHOULDER, RIGHT_ELBOW], [RIGHT_ELBOW, RIGHT_WRIST],
+  [LEFT_HIP, RIGHT_HIP],
+  [LEFT_SHOULDER, LEFT_HIP], [RIGHT_SHOULDER, RIGHT_HIP],
+  [LEFT_HIP, LEFT_KNEE], [LEFT_KNEE, LEFT_ANKLE],
+  [RIGHT_HIP, RIGHT_KNEE], [RIGHT_KNEE, RIGHT_ANKLE],
+];
+
+/**
+ * Diagnostic pose overlay: raw keypoint dots + straight COCO skeleton lines,
+ * drawn exactly as the latest detection produced them (NO smoothing). This is
+ * the diagnostic detection overlay, distinct from the privacy-mode human avatar.
+ * Keypoints are 0-1 normalized to the full frame. Points and edges whose score
+ * is at or below `threshold` are skipped. Line width and dot radius scale with
+ * the baseScale = canvasWidth / 640 convention.
+ */
+export function drawKeypointOverlay(
+  ctx: CanvasRenderingContext2D,
+  keypoints: Keypoint[],
+  canvasWidth: number,
+  canvasHeight: number,
+  options?: { color?: string; threshold?: number }
+): void {
+  const threshold = options?.threshold ?? KEYPOINT_DRAW_THRESHOLD;
+  const color = options?.color ?? '#00e676';
+  const baseScale = canvasWidth / 640;
+  const visible = (kp: Keypoint | undefined): kp is Keypoint =>
+    kp !== undefined && kp.score > threshold;
+
+  ctx.save();
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1, 1.5 * baseScale);
+  ctx.lineCap = 'round';
+  for (const [a, b] of COCO_SKELETON_EDGES) {
+    const kpa = keypoints[a];
+    const kpb = keypoints[b];
+    if (visible(kpa) && visible(kpb)) {
+      ctx.beginPath();
+      ctx.moveTo(kpa.x * canvasWidth, kpa.y * canvasHeight);
+      ctx.lineTo(kpb.x * canvasWidth, kpb.y * canvasHeight);
+      ctx.stroke();
+    }
+  }
+
+  const dotRadius = Math.max(2, 3 * baseScale);
+  ctx.lineWidth = Math.max(1, baseScale);
+  for (const kp of keypoints) {
+    if (!visible(kp)) continue;
+    ctx.beginPath();
+    ctx.arc(kp.x * canvasWidth, kp.y * canvasHeight, dotRadius, 0, 2 * Math.PI);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = '#0b1e2d';
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}

@@ -42,6 +42,23 @@
     classification: { presentProbability: 0.95, goodProbability },
   });
 
+  // Person present but no posture model deployed: presence comes from the RTMDet
+  // fallback, goodProbability is null (the runtime produces it only from a loaded
+  // posture classifier).
+  const presenceOnly = (requestId: number, token: number): InferenceUiResult => ({
+    ...result(requestId, token),
+    classification: { presentProbability: 0.95, goodProbability: null },
+  });
+
+  // Person left the frame: no detection, so the runtime emits no classification.
+  const away = (requestId: number, token: number): InferenceUiResult => ({
+    ...result(requestId, token),
+    personFound: false,
+    bbox: null,
+    keypoints: null,
+    classification: null,
+  });
+
   onMount(() => {
     onCanvasReady?.(true);
     onFps(30);
@@ -52,4 +69,6 @@
   <button type="button" onclick={() => onInferenceResult(result(1, 101))}>Load inference A</button>
   <button type="button" onclick={() => onInferenceResult(result(2, 102))}>Load inference B</button>
   <button type="button" onclick={() => onInferenceResult(result(3, 103, 0.2))}>Load bad inference</button>
+  <button type="button" onclick={() => onInferenceResult(presenceOnly(4, 104))}>Load presence-only inference</button>
+  <button type="button" onclick={() => onInferenceResult(away(5, 105))}>Load away inference</button>
 </div>

@@ -38,6 +38,25 @@ test('round-trips and resets Rust-owned camera and UI settings', async ({ page }
   await expect(page.getByTestId('settings-status')).toHaveText('800/0.3');
 });
 
+test('renders tray startup toggles checked by default and persists an unchecked toggle across a reload', async ({ page }) => {
+  const minimize = page.getByRole('checkbox', { name: 'Minimize to tray on close' });
+  const startHidden = page.getByRole('checkbox', { name: 'Start hidden at login' });
+
+  // Native omits both fields but serde defaults them true, so both toggles load on.
+  await expect(minimize).toBeChecked();
+  await expect(startHidden).toBeChecked();
+
+  await minimize.uncheck();
+  await expect(page.getByTestId('startup-status')).toHaveText('false/true');
+
+  // Re-reading through the native settings pipeline keeps the persisted value:
+  // the unchecked toggle survives, the untouched one stays on.
+  await page.getByRole('button', { name: 'Reload startup settings' }).click();
+  await expect(minimize).not.toBeChecked();
+  await expect(startHidden).toBeChecked();
+  await expect(page.getByTestId('startup-status')).toHaveText('false/true');
+});
+
 test('reports ordered training success, cancellation, and typed failure', async ({ page }) => {
   await page.getByRole('button', { name: 'Train success' }).click();
   await expect(page.getByTestId('training-status')).toHaveText('completed');

@@ -6,8 +6,10 @@ import { vi } from 'vitest';
 
 import {
   drawHumanLikeSkeleton,
+  drawDetectionBox,
+  drawKeypointOverlay,
 } from '../canvasDrawing';
-import type { SmoothedKeypoint } from '../canvasDrawing';
+import type { SmoothedKeypoint, Keypoint } from '../canvasDrawing';
 
 describe('canvasDrawing', () => {
   describe('boundary detection', () => {
@@ -215,5 +217,95 @@ describe('canvasDrawing', () => {
         expect(mockCtx.translate).toHaveBeenCalledTimes(1);
       });
     });
+  });
+});
+
+describe('drawDetectionBox', () => {
+  let ctx: CanvasRenderingContext2D;
+
+  beforeEach(() => {
+    ctx = {
+      save: vi.fn(),
+      restore: vi.fn(),
+      strokeRect: vi.fn(),
+      fillRect: vi.fn(),
+      fillText: vi.fn(),
+      measureText: vi.fn(() => ({ width: 60 }) as TextMetrics),
+      strokeStyle: '',
+      fillStyle: '',
+      lineWidth: 0,
+      font: '',
+      textBaseline: 'alphabetic' as CanvasTextBaseline,
+      textAlign: 'start' as CanvasTextAlign,
+    } as unknown as CanvasRenderingContext2D;
+  });
+
+  it('strokes the box rectangle scaled to the canvas dimensions', () => {
+    drawDetectionBox(ctx, { x1: 0.1, y1: 0.2, x2: 0.8, y2: 0.9, score: 0.87 }, 640, 480);
+    // left=0.1*640, top=0.2*480, width=0.7*640, height=0.7*480
+    const [left, top, width, height] = vi.mocked(ctx.strokeRect).mock.calls[0];
+    expect(left).toBeCloseTo(64);
+    expect(top).toBeCloseTo(96);
+    expect(width).toBeCloseTo(448);
+    expect(height).toBeCloseTo(336);
+  });
+
+  it('labels the box with a two-decimal confidence', () => {
+    drawDetectionBox(ctx, { x1: 0.1, y1: 0.2, x2: 0.8, y2: 0.9, score: 0.8666 }, 640, 480);
+    expect(vi.mocked(ctx.fillText).mock.calls[0][0]).toBe('person 0.87');
+  });
+
+  it('draws nothing when any coordinate is null', () => {
+    drawDetectionBox(ctx, { x1: null, y1: 0.2, x2: 0.8, y2: 0.9, score: 0.9 }, 640, 480);
+    expect(ctx.strokeRect).not.toHaveBeenCalled();
+    expect(ctx.fillText).not.toHaveBeenCalled();
+  });
+});
+
+describe('drawKeypointOverlay', () => {
+  let ctx: CanvasRenderingContext2D;
+
+  const keypoints = (score: number): Keypoint[] =>
+    Array.from({ length: 17 }, (_, i) => ({ x: 0.1 + i * 0.02, y: 0.1 + i * 0.02, score }));
+
+  beforeEach(() => {
+    ctx = {
+      save: vi.fn(),
+      restore: vi.fn(),
+      beginPath: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      stroke: vi.fn(),
+      arc: vi.fn(),
+      fill: vi.fn(),
+      strokeStyle: '',
+      fillStyle: '',
+      lineWidth: 0,
+      lineCap: 'butt' as CanvasLineCap,
+    } as unknown as CanvasRenderingContext2D;
+  });
+
+  it('draws a dot per keypoint and a line per COCO edge when all are confident', () => {
+    drawKeypointOverlay(ctx, keypoints(0.9), 640, 480);
+    // 17 keypoints -> 17 dots (arc); 16 COCO edges -> 16 lines (moveTo/lineTo).
+    expect(ctx.arc).toHaveBeenCalledTimes(17);
+    expect(ctx.moveTo).toHaveBeenCalledTimes(16);
+    expect(ctx.lineTo).toHaveBeenCalledTimes(16);
+  });
+
+  it('skips keypoints and edges at or below the score threshold', () => {
+    drawKeypointOverlay(ctx, keypoints(0.2), 640, 480);
+    expect(ctx.arc).not.toHaveBeenCalled();
+    expect(ctx.moveTo).not.toHaveBeenCalled();
+  });
+
+  it('draws only the edge whose both endpoints clear the threshold', () => {
+    const kps = keypoints(0.1);
+    // LEFT_SHOULDER (5) - LEFT_ELBOW (7) is a COCO edge; make only those confident.
+    kps[5] = { x: 0.4, y: 0.4, score: 0.9 };
+    kps[7] = { x: 0.5, y: 0.6, score: 0.9 };
+    drawKeypointOverlay(ctx, kps, 640, 480);
+    expect(ctx.arc).toHaveBeenCalledTimes(2); // two dots
+    expect(ctx.moveTo).toHaveBeenCalledTimes(1); // one edge
   });
 });

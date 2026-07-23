@@ -61,10 +61,18 @@ pub enum FeatureTypeSchema {
     NlfBackboneMax,
     #[serde(rename = "nlf_backbone_std")]
     NlfBackboneStd,
+    #[serde(rename = "raw_keypoints_3d")]
+    RawKeypoints3d,
+    #[serde(rename = "posture_raw_3d")]
+    PostureRaw3d,
+    #[serde(rename = "posture_geometry_3d")]
+    PostureGeometry3d,
+    #[serde(rename = "torso_invariant_3d")]
+    TorsoInvariant3d,
 }
 
 impl FeatureTypeSchema {
-    pub const ALL: [Self; 21] = [
+    pub const ALL: [Self; 25] = [
         Self::BackboneFeatures,
         Self::BackboneFeaturesMax,
         Self::BackboneFeaturesStd,
@@ -86,6 +94,10 @@ impl FeatureTypeSchema {
         Self::NlfBackbone,
         Self::NlfBackboneMax,
         Self::NlfBackboneStd,
+        Self::RawKeypoints3d,
+        Self::PostureRaw3d,
+        Self::PostureGeometry3d,
+        Self::TorsoInvariant3d,
     ];
 }
 

@@ -3,7 +3,7 @@ const GENERATED: &str = include_str!("../../src/generated/bindings.generated.ts"
 const REGISTRATION: &str = include_str!("../src/lib.rs");
 const GENERATOR: &str = include_str!("../src/bindings.rs");
 
-const COMMANDS: [(&str, &str); 37] = [
+const COMMANDS: [(&str, &str); 39] = [
     ("app_status", "appStatus"),
     ("initialize_inference", "initializeInference"),
     ("infer_frame", "inferFrame"),
@@ -38,6 +38,8 @@ const COMMANDS: [(&str, &str); 37] = [
     ("export_dataset", "exportDataset"),
     ("import_dataset", "importDataset"),
     ("get_shortcut_status", "getShortcutStatus"),
+    ("get_autostart_enabled", "getAutostartEnabled"),
+    ("set_autostart_enabled", "setAutostartEnabled"),
     ("start_camera", "startCamera"),
     ("stop_camera", "stopCamera"),
     ("list_cameras", "listCameras"),
