@@ -36,10 +36,10 @@ Privacy mode with the live skeleton avatar. Detection keeps running while the ca
 
 **Camera placement:** for best detection quality, place the camera to the side of you, at eye level or slightly above. A side view makes slouching geometrically obvious to the pose model; strongly elevated or overhead angles weaken the depth-based posture cues.
 
-1. Download the latest installer (`Slouch Tracker_<version>_x64-setup.exe`) from the [GitHub Releases](https://github.com/SSS135/slouch_tracker/releases) page.
+1. Download the latest installer (`Slouch.Tracker_<version>_x64-setup.exe`) from the [GitHub Releases](https://github.com/SSS135/slouch_tracker/releases) page.
 2. (Recommended) Verify the download against `SHA256SUMS.txt` on the same release:
    ```powershell
-   Get-FileHash '.\Slouch Tracker_1.0.0_x64-setup.exe' -Algorithm SHA256
+   Get-FileHash '.\Slouch.Tracker_1.0.0_x64-setup.exe' -Algorithm SHA256
    ```
    The printed hash must match the entry in `SHA256SUMS.txt`.
 3. Run the installer and launch **Slouch Tracker**.
