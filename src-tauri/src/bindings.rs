@@ -39,6 +39,8 @@ pub fn builder() -> tauri_specta::Builder<tauri::Wry> {
             crate::api::start_camera,
             crate::api::stop_camera,
             crate::api::list_cameras,
+            crate::api::get_pose_model_status,
+            crate::api::ensure_pose_model,
         ])
         .events(tauri_specta::collect_events![
             crate::api::UndoStatusChangedEvent,

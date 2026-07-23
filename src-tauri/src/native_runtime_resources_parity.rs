@@ -55,17 +55,33 @@ fn package_shaped_startup_resolves_locked_runtime_and_loads_active_models() {
         checked += 1;
     }
     assert_eq!(
-        checked, 8,
-        "runtime DLLs, notices, and all models must be locked"
+        checked, 7,
+        "runtime DLLs, notices, and the packaged detector model must be locked"
     );
 
     let packaged_runtime =
         fixture_root.join("resources/onnxruntime/windows-x86_64/onnxruntime.dll");
     let packaged_detector = fixture_root.join("resources/models/rtmdet-nano.onnx");
-    let packaged_nlf = fixture_root.join("resources/models/nlf_l_crop_fp16.onnx");
     assert!(packaged_runtime.is_file());
     assert!(packaged_detector.is_file());
-    assert!(packaged_nlf.is_file());
+
+    // NLF-L is no longer bundled into the installer: it is downloaded at first run
+    // into the app data directory, where find_resource's data-dir search locates it.
+    // Assert it is absent from the package, stage the model at the data-dir download
+    // path from the on-disk (git LFS) copy, and prove a package-shaped startup loads
+    // it for native inference from that runtime location rather than the bundle.
+    assert!(
+        !fixture_root
+            .join("resources/models/nlf_l_crop_fp16.onnx")
+            .is_file(),
+        "the NLF pose model must not be packaged into the installer bundle",
+    );
+    let nlf_bytes = std::fs::read(source_root.join("resources/models/nlf_l_crop_fp16.onnx"))
+        .expect("on-disk NLF model (git LFS) backing the data-dir download fixture");
+    let downloaded_nlf = data_dir.join("models").join("nlf_l_crop_fp16.onnx");
+    std::fs::create_dir_all(downloaded_nlf.parent().expect("data-dir model parent"))
+        .expect("create the runtime download directory");
+    std::fs::write(&downloaded_nlf, &nlf_bytes).expect("stage the runtime-downloaded NLF model");
 
     let state = crate::api::initialize_state(data_dir.clone(), fixture_root.clone())
         .expect("startup must resolve the package-shaped runtime and SQLite state");
@@ -73,9 +89,9 @@ fn package_shaped_startup_resolves_locked_runtime_and_loads_active_models() {
         .inference
         .send(crate::actors::initialize_message(
             packaged_detector,
-            packaged_nlf,
+            downloaded_nlf.clone(),
         ))
-        .expect("active packaged model initialization");
+        .expect("active model initialization from the packaged detector and downloaded pose model");
     assert!(responses.iter().any(|response| matches!(
         response,
         WorkerResponse::Initialized { provider } if provider == "native"

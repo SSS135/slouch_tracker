@@ -8,6 +8,7 @@
   import ErrorBoundary from '@/components/ErrorBoundary.svelte';
   import { useCameraSettings } from '@/hooks/useCameraSettings';
   import { useTrackingToggle } from '@/hooks/useTrackingToggle.svelte';
+  import { usePoseModelDownload } from '@/hooks/usePoseModelDownload.svelte';
   import { useNotification } from '@/hooks/useNotification';
   import { useFrameSampler, type CapturedFrame } from '@/hooks/useFrameSampler';
   import type { PreviewFrameSource } from '@/services/dataset/thumbnailGenerator';
@@ -24,6 +25,7 @@
   import { MAX_BUFFER_SIZE } from '@/services/dataset/constants';
   import { FrameLabel, type CaptureAction } from '@/services/dataset/types';
   import CameraViewport from '@/components/unified/CameraViewport.svelte';
+  import PoseModelDownloadScreen from '@/components/PoseModelDownloadScreen.svelte';
   import ConfirmationModal from '@/components/dataset/ConfirmationModal.svelte';
   import SettingsTab from '@/components/unified/SettingsTab.svelte';
   import TrainingTab from '@/components/unified/TrainingTab.svelte';
@@ -134,6 +136,15 @@
     get cameraRunning() { return isCanvasReady; },
     get cameraError() { return cameraError; },
     get settingsReady() { return cameraSettings.ready; },
+  });
+
+  // First-run gate: when the native pose-model file is absent, block the app on a
+  // one-time download. On completion, re-run inference init so the app proceeds
+  // without a restart (Rust resolves the freshly downloaded file lazily). This
+  // screen takes precedence over the GPU/DX12 init-error overlay below, so a
+  // missing model is never misreported as a hardware failure.
+  const poseModelGate = usePoseModelDownload({
+    onReady: () => nativeApp.initialize(),
   });
 
   // Clear the last detection the instant tracking pauses so capture buttons
@@ -536,7 +547,9 @@
   {:else if modelMetadataLoading}
     <div class="model-loading" role="status">Loading model status…</div>
   {/if}
-  {#if nativeApp.error}
+  {#if poseModelGate.blocking}
+    <PoseModelDownloadScreen state={poseModelGate.phase} onCancel={poseModelGate.cancel} onRetry={poseModelGate.retry} />
+  {:else if nativeApp.error}
     <div class="settings-loading" role="alert">
       <div class="blocking-error">
         <strong>Native initialization failed</strong>

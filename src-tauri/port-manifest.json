@@ -6,12 +6,12 @@
     ".plans/rust-typescript-refactor-plan.md": "37b5b7de11a181baffeea07a7cff409de97e7248ac996a3249f188778a358826",
     "PORTING.md": "a444c12d89218bfa70673b16b4bea4e5aaa4bccbfb579256af0dece71d38e545",
     "package-lock.json": "aa81d40f7d9056eb283d8298017f705c4cb810ae3a1775545689045f42851bdf",
-    "src-tauri/Cargo.lock": "621eb8e12093b73169dad79cdd5c5ce7fa05054bec66184c63ae6742e9c15d57",
-    "src-tauri/tauri.conf.json": "2ea66f3546a1acef935ba96b2c71aedd122886c4d84b20d3e6a32600610ff7b5",
-    "src-tauri/resource-lock.json": "2b6dd84f21f109419a021a32a109179c37a80d069a0ce9b26a54da3ed5c73906",
-    "src-tauri/model-format-v1.md": "67e6375d75232e692490e40a29fa797fabd951e704c8ddd932063fc658725543",
-    "src-tauri/schema/live-v1.sql": "f1e41ad8a8bc4f3912c859c6e3c8cbe3fa2745e6d54f376453786eefdd6f1680",
-    "src-tauri/schema/archive-v1.sql": "4a953a2cf961581b2c00c69283a6c52d86bbd42858533ec18bcc01d44ca6be94"
+    "src-tauri/Cargo.lock": "0c2d0f199dd9ba33541f73730906bf5c71ea40e9c0d46e36068e17fc79291d34",
+    "src-tauri/tauri.conf.json": "4785e096882e364ea601aca49d151d981d50031f09acfb1332ee6948689752a5",
+    "src-tauri/resource-lock.json": "9100b98eb7845da5068cf0ec95fc3dc6786ade84c934eacb2d9f00c6c069a563",
+    "src-tauri/model-format-v1.md": "97dd0935b04c5d7e8243613bd80e828cd538c872753fb972cf9b9b0cf43dd42c",
+    "src-tauri/schema/live-v1.sql": "3041078928c35b237f43d0688bad83540e1205b8076ce0769f87a08b021c3a7a",
+    "src-tauri/schema/archive-v1.sql": "cd046047e101e136630104dd9d52e0a1641c8cebc765329cfe2505393cd5dbf1"
   },
   "sourceInventory": [
     {

@@ -86,9 +86,11 @@ libloading = "0.8"
 specta = { workspace = true }
 specta-typescript = { workspace = true }
 tauri-specta = { workspace = true }
-
-[dev-dependencies]
+# First-run pose-model downloader (src/model_download.rs): SHA-256 verification of
+# the streamed file, and a small blocking HTTP client sized for a dedicated
+# download thread. rustls-only TLS (no OpenSSL/native toolchain dependency).
 sha2 = { workspace = true }
+ureq = { version = "2.12.1", default-features = false, features = ["tls", "gzip"] }
 
 # App-level EcoQoS power management (src/power.rs). Pinned to the 0.62.2 copy
 # already resolved transitively; only the two features that surface

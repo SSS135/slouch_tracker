@@ -7,6 +7,8 @@ import type {
   DatasetPage,
   FrameMetadataDto,
   NativeStateSnapshot_Serialize,
+  PoseModelDownloadEvent,
+  PoseModelStatus,
   TrainingEvent_Deserialize,
   TrainingResultResponse_Deserialize,
   TrainingResultResponse_Serialize,
@@ -71,6 +73,32 @@ export function getHarnessMetrics(): Readonly<HarnessMetrics> {
   return metrics;
 }
 
+// ~245 MB, matching the real NLF model, so the screen's byte math reads realistically.
+const POSE_MODEL_TOTAL_BYTES = 245 * 1024 * 1024;
+
+// First-run pose-model download harness. `installMockTauri` seeds the initial
+// status (default ready; `?poseModel=downloadRequired` forces the download gate)
+// and captures the download channel; `real-main.ts` exposes the driver on window
+// so e2e can step the scripted event sequence (progress/verifying/ready/failed).
+interface PoseModelHarness {
+  status: PoseModelStatus;
+  channel: Channel<PoseModelDownloadEvent> | null;
+}
+
+const poseModel: PoseModelHarness = { status: { type: 'ready', path: 'mock://nlf_l_crop_fp16.onnx' }, channel: null };
+
+export function setPoseModelDownloadRequired(): void {
+  poseModel.status = { type: 'downloadRequired', totalBytes: POSE_MODEL_TOTAL_BYTES };
+}
+
+export function emitPoseModelEvent(event: PoseModelDownloadEvent): void {
+  // Keep the queryable status coherent with the stream the way Rust does: a
+  // completed download makes the file resolvable; a failure leaves it required.
+  if (event.type === 'ready') poseModel.status = { type: 'ready', path: 'mock://nlf_l_crop_fp16.onnx' };
+  if (event.type === 'failed') poseModel.status = { type: 'downloadRequired', totalBytes: POSE_MODEL_TOTAL_BYTES };
+  poseModel.channel?.onmessage(event);
+}
+
 // Fan the typed `tracking-state-changed` event through the mock event bus, exactly
 // as the native shared pause/resume helper does. Used both to echo start/stop_camera
 // and (via a window hook in real-main.ts) to let e2e simulate a tray-initiated flip.
@@ -93,6 +121,14 @@ export function installMockTauri(): () => void {
 
   const failModelMetadata = typeof window !== 'undefined'
     && new URLSearchParams(window.location.search).get('failModelMeta') === '1';
+
+  // Seed the first-run pose-model gate. Default ready keeps every existing test/e2e
+  // unaffected; `?poseModel=downloadRequired` boots into the blocking download screen.
+  poseModel.channel = null;
+  poseModel.status = (typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).get('poseModel') === 'downloadRequired')
+    ? { type: 'downloadRequired', totalBytes: POSE_MODEL_TOTAL_BYTES }
+    : { type: 'ready', path: 'mock://nlf_l_crop_fp16.onnx' };
 
   let inferenceReady = false;
   let cameraSettings = {
@@ -351,6 +387,15 @@ export function installMockTauri(): () => void {
       case 'get_active_model_metadata':
         if (failModelMetadata) throw { kind: 'storage', message: 'deterministic model metadata failure' };
         return activeModels;
+      case 'get_pose_model_status':
+        return poseModel.status;
+      case 'ensure_pose_model': {
+        // Capture the channel so the window-hook driver (real-main.ts) can step the
+        // scripted download; the command itself resolves once the stream reaches
+        // its terminal event, mirroring the native long-running command.
+        poseModel.channel = getArg<Channel<PoseModelDownloadEvent>>(args, 'onEvent');
+        return null;
+      }
       case 'export_dataset':
         return { frameCount: frames.length, datasetVersion };
       case 'import_dataset':

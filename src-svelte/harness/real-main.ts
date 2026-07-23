@@ -1,7 +1,13 @@
 import { mount } from 'svelte';
 import '../app.css';
 import App from '../App.svelte';
-import { emitTrackingState, getHarnessMetrics, installMockTauri } from './mockTauri';
+import {
+  emitPoseModelEvent,
+  emitTrackingState,
+  getHarnessMetrics,
+  installMockTauri,
+  setPoseModelDownloadRequired,
+} from './mockTauri';
 
 installMockTauri();
 
@@ -15,6 +21,16 @@ Object.defineProperty(window, '__SLOUCH_HARNESS_METRICS__', {
 Object.defineProperty(window, '__SLOUCH_EMIT_TRACKING_STATE__', {
   configurable: true,
   value: (paused: boolean) => emitTrackingState(paused),
+});
+
+// Lets Playwright drive the first-run pose-model download: boot with
+// `?poseModel=downloadRequired`, then step the scripted event sequence.
+Object.defineProperty(window, '__SLOUCH_POSE_MODEL__', {
+  configurable: true,
+  value: {
+    setDownloadRequired: () => setPoseModelDownloadRequired(),
+    emit: (event: unknown) => emitPoseModelEvent(event as Parameters<typeof emitPoseModelEvent>[0]),
+  },
 });
 
 const target = document.getElementById('root');

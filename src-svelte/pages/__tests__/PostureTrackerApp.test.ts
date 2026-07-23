@@ -4,6 +4,7 @@ import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FrameLabel } from '@/services/dataset/types';
 import { NativeCommandError } from '@/lib/native/client';
+import type { PoseModelPhase } from '@/hooks/usePoseModelDownload.svelte';
 import { reactiveBox } from '@/__tests__/utils/reactiveBox.svelte';
 
 const mocks = vi.hoisted(() => {
@@ -116,6 +117,12 @@ const mocks = vi.hoisted(() => {
       initialize: vi.fn().mockResolvedValue(undefined),
       reconcile: vi.fn(),
     },
+    poseModel: {
+      phase: { kind: 'ready' } as PoseModelPhase,
+      blocking: false,
+      cancel: vi.fn(),
+      retry: vi.fn(),
+    },
   };
 });
 
@@ -141,6 +148,9 @@ vi.mock('@/hooks/useBackgroundProcessing', () => ({ useBackgroundProcessing: () 
 vi.mock('@/hooks/useGlobalShortcuts', () => ({ useGlobalShortcuts: vi.fn() }));
 vi.mock('@/lib/state/nativeApp.svelte', () => ({
   useNativeAppState: () => mocks.nativeApp,
+}));
+vi.mock('@/hooks/usePoseModelDownload.svelte', () => ({
+  usePoseModelDownload: () => mocks.poseModel,
 }));
 vi.mock('@/lib/native/client', async () => {
   const actual = await vi.importActual<typeof import('@/lib/native/client')>('@/lib/native/client');
@@ -196,6 +206,8 @@ beforeEach(() => {
   mocks.dataset.canUndo.data = { available: false, depth: 0, nextAction: null, revision: 0 };
   mocks.native.getActiveModelMetadata.mockResolvedValue({ posture: null, presence: null });
   mocks.native.resetTrainingSettings.mockResolvedValue(null);
+  mocks.poseModel.phase = { kind: 'ready' };
+  mocks.poseModel.blocking = false;
 });
 
 afterEach(() => {
@@ -734,5 +746,39 @@ describe('PostureTrackerApp camera-settings error recovery', () => {
     await waitFor(() => expect(screen.getByText('Reset failed: native storage error.')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Reset camera settings' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry camera settings' })).toBeInTheDocument();
+  });
+});
+
+describe('PostureTrackerApp first-run pose-model gate', () => {
+  it('blocks on the download setup screen and suppresses the GPU init error while a download is required', async () => {
+    // A missing model must never be misreported as a DirectX/DirectML hardware
+    // failure: the download screen takes precedence over the init-error overlay.
+    mocks.poseModel.blocking = true;
+    mocks.poseModel.phase = { kind: 'downloading', received: 0, total: 245 * 1024 * 1024 };
+    mocks.nativeApp.error = new Error('DirectX 12 GPU adapter unavailable');
+
+    render(PostureTrackerApp);
+
+    expect(await screen.findByRole('dialog', { name: 'Setting up posture detection' })).toBeInTheDocument();
+    expect(screen.getByText(/one-time download of the pose-detection model/i)).toBeInTheDocument();
+    expect(screen.queryByText('Native initialization failed')).not.toBeInTheDocument();
+    expect(screen.queryByText(/DirectX 12 GPU adapter unavailable/)).not.toBeInTheDocument();
+  });
+
+  it('still renders the GPU/DX12 init failure as today when the model is present', async () => {
+    mocks.poseModel.blocking = false;
+    mocks.nativeApp.error = new Error('DirectX 12 GPU adapter unavailable');
+
+    render(PostureTrackerApp);
+
+    expect(await screen.findByText('Native initialization failed')).toBeInTheDocument();
+    expect(screen.getByText(/DirectX 12 GPU adapter unavailable/)).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Setting up posture detection' })).not.toBeInTheDocument();
+  });
+
+  it('shows no setup screen once the model is ready', async () => {
+    await renderReady();
+    expect(screen.queryByRole('dialog', { name: 'Setting up posture detection' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/one-time download of the pose-detection model/i)).not.toBeInTheDocument();
   });
 });

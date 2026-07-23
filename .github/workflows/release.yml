@@ -28,6 +28,10 @@ jobs:
           key: lfs-${{ runner.os }}-${{ hashFiles('.lfs-assets-id') }}
           restore-keys: lfs-${{ runner.os }}-
 
+      # The NLF-L pose model is intentionally NOT in git/LFS or this workflow. It is
+      # published once (a manual, one-time user action) to the dedicated `models-v1`
+      # GitHub release and downloaded by the app at first run. LFS here only carries
+      # small assets (RTMDet detector, icon PNGs, alert audio), so this pull is cheap.
       - name: Pull LFS objects
         run: git lfs pull
 

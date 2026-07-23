@@ -21,6 +21,7 @@ use crate::{
         TrainingActor, TrainingEvent, TrainingStage,
     },
     errors::ApiError,
+    model_download,
 };
 use slouch_domain::ported::messages::schemas::ImageData;
 use slouch_domain::{
@@ -59,6 +60,8 @@ pub struct AppState {
     inference_ready: AtomicBool,
     shutdown_started: AtomicBool,
     training_running: AtomicBool,
+    pose_download_running: AtomicBool,
+    pose_download_cancel: Arc<AtomicBool>,
     next_training_job_id: AtomicU64,
     import_reserved: AtomicBool,
     importing: AtomicBool,
@@ -79,11 +82,20 @@ impl AppState {
         if self.shutdown_started.swap(true, Ordering::AcqRel) {
             return;
         }
+        // Signal any in-flight pose-model download thread to stop streaming.
+        self.pose_download_cancel.store(true, Ordering::Release);
         self.inference_ready.store(false, Ordering::Release);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         self.training.shutdown_until(deadline);
         self.camera.shutdown_until(deadline);
         self.inference.shutdown_until(deadline);
+    }
+
+    /// Whether the NLF pose model is resolvable now (packaged, pre-placed, or
+    /// already downloaded). Startup uses this to defer inference initialization
+    /// on a first run rather than treating a missing model as a hard failure.
+    pub(crate) fn pose_model_present(&self) -> bool {
+        self.model_paths.nlf().is_some()
     }
 }
 
@@ -93,10 +105,33 @@ impl Drop for AppState {
     }
 }
 
+// Model files are resolved lazily from their search roots rather than cached as
+// paths: the NLF pose model can appear at runtime (first-run download into
+// `{data_dir}/models`), so `initialize_inference` re-resolves it on every call.
 #[derive(Debug, Clone)]
 struct ModelPaths {
-    rtmdet: Option<PathBuf>,
-    nlf: Option<PathBuf>,
+    resource_dir: PathBuf,
+    data_dir: PathBuf,
+}
+
+impl ModelPaths {
+    fn rtmdet(&self) -> Option<PathBuf> {
+        find_resource(&self.resource_dir, &self.data_dir, "rtmdet-nano.onnx")
+    }
+
+    fn nlf(&self) -> Option<PathBuf> {
+        find_resource(
+            &self.resource_dir,
+            &self.data_dir,
+            model_download::POSE_MODEL_FILENAME,
+        )
+    }
+
+    fn pose_model_target(&self) -> PathBuf {
+        self.data_dir
+            .join("models")
+            .join(model_download::POSE_MODEL_FILENAME)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, specta::Type)]
@@ -350,13 +385,11 @@ fn initialize_inference_state(state: &AppState) -> Result<(), ApiError> {
     state.inference_ready.store(false, Ordering::Release);
     let rtmdet = state
         .model_paths
-        .rtmdet
-        .clone()
+        .rtmdet()
         .ok_or_else(|| ApiError::NotReady("RTMDet model resource is unavailable".into()))?;
     let nlf = state
         .model_paths
-        .nlf
-        .clone()
+        .nlf()
         .ok_or_else(|| ApiError::NotReady("NLF pose model resource is unavailable".into()))?;
     ensure_worker_initialized(
         state
@@ -1248,6 +1281,92 @@ pub fn list_cameras(state: State<'_, AppState>) -> Result<Vec<CameraDeviceInfo>,
     state.camera.list_devices()
 }
 
+// Cheap, network-free classification of the NLF pose model so the frontend can
+// distinguish "download required" from a GPU/DirectML failure BEFORE inference init.
+#[tauri::command]
+#[specta::specta]
+pub fn get_pose_model_status(
+    state: State<'_, AppState>,
+) -> Result<model_download::PoseModelStatus, ApiError> {
+    let resolved = state.model_paths.nlf();
+    let running = state.pose_download_running.load(Ordering::Acquire);
+    let partial_present =
+        model_download::partial_path(&state.model_paths.pose_model_target()).exists();
+    Ok(model_download::pose_model_status(
+        resolved,
+        running,
+        partial_present,
+    ))
+}
+
+// Downloads the NLF pose model once if it is not already present. A packaged,
+// pre-placed, or already-downloaded file makes this a no-op that never touches the
+// network. Otherwise exactly one download runs at a time on a dedicated thread,
+// streaming progress over `on_event` and cancelling on app shutdown.
+#[tauri::command]
+#[specta::specta]
+pub fn ensure_pose_model(
+    state: State<'_, AppState>,
+    on_event: tauri::ipc::Channel<model_download::PoseModelDownloadEvent>,
+) -> Result<(), ApiError> {
+    use model_download::PoseModelDownloadEvent;
+    if state.model_paths.nlf().is_some() {
+        let _ = on_event.send(PoseModelDownloadEvent::Ready);
+        return Ok(());
+    }
+    if state.pose_download_running.swap(true, Ordering::AcqRel) {
+        return Err(ApiError::Busy(
+            "pose model download already in progress".into(),
+        ));
+    }
+    let target = state.model_paths.pose_model_target();
+    let cancel = state.pose_download_cancel.clone();
+    let events = on_event.clone();
+    let outcome = std::thread::Builder::new()
+        .name("nlf-download".into())
+        .spawn(move || {
+            let source = model_download::HttpByteSource::new(model_download::POSE_MODEL_URL);
+            model_download::run_pose_download(
+                &source,
+                &target,
+                model_download::POSE_MODEL_SHA256,
+                model_download::POSE_MODEL_BYTES,
+                &cancel,
+                |event| {
+                    let _ = events.send(event);
+                },
+            )
+        })
+        .map_err(|error| ApiError::Internal(format!("failed to start download thread: {error}")))
+        .and_then(|handle| {
+            handle
+                .join()
+                .map_err(|_| ApiError::Internal("download thread panicked".into()))?
+                .map_err(map_download_error)
+        });
+    state.pose_download_running.store(false, Ordering::Release);
+    match &outcome {
+        Ok(()) => {
+            let _ = on_event.send(PoseModelDownloadEvent::Ready);
+        }
+        Err(error) => {
+            let _ = on_event.send(PoseModelDownloadEvent::Failed {
+                reason: error.to_string(),
+            });
+        }
+    }
+    outcome
+}
+
+fn map_download_error(error: model_download::DownloadError) -> ApiError {
+    match error {
+        model_download::DownloadError::Cancelled => {
+            ApiError::Cancelled("pose model download cancelled".into())
+        }
+        other => ApiError::Internal(other.to_string()),
+    }
+}
+
 pub fn initialize_state(data_dir: PathBuf, resource_dir: PathBuf) -> Result<AppState, ApiError> {
     initialize_onnx_runtime(&resource_dir)?;
     std::fs::create_dir_all(&data_dir).map_err(|error| ApiError::Storage(error.to_string()))?;
@@ -1255,8 +1374,8 @@ pub fn initialize_state(data_dir: PathBuf, resource_dir: PathBuf) -> Result<AppS
         DatasetStorage::open(data_dir.join("slouch-tracker.sqlite3")).map_err(map_storage_read)?,
     );
     let model_paths = ModelPaths {
-        rtmdet: find_resource(&resource_dir, "rtmdet-nano.onnx"),
-        nlf: find_resource(&resource_dir, "nlf_l_crop_fp16.onnx"),
+        resource_dir,
+        data_dir,
     };
     let training = TrainingActor::start(storage.clone())?;
     let inference = match InferenceActor::start(storage.clone()) {
@@ -1284,6 +1403,8 @@ pub fn initialize_state(data_dir: PathBuf, resource_dir: PathBuf) -> Result<AppS
         inference_ready: AtomicBool::new(false),
         shutdown_started: AtomicBool::new(false),
         training_running: AtomicBool::new(false),
+        pose_download_running: AtomicBool::new(false),
+        pose_download_cancel: Arc::new(AtomicBool::new(false)),
         next_training_job_id: AtomicU64::new(1),
         import_reserved: AtomicBool::new(false),
         importing: AtomicBool::new(false),
@@ -1349,13 +1470,17 @@ fn preload_runtime_dependency(resource_dir: &Path, filename: &str) {
     }
 }
 
-fn find_resource(resource_dir: &Path, filename: &str) -> Option<PathBuf> {
+// Packaged resource dirs are searched first so a dev build or installed app with
+// the model bundled is unaffected; `{data_dir}/models` is searched last as the
+// destination of the first-run download and the manual pre-placement location.
+fn find_resource(resource_dir: &Path, data_dir: &Path, filename: &str) -> Option<PathBuf> {
     [
         resource_dir.join("resources/models").join(filename),
         resource_dir.join("models").join(filename),
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("resources/models")
             .join(filename),
+        data_dir.join("models").join(filename),
     ]
     .into_iter()
     .find(|path| path.is_file())

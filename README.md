@@ -1,6 +1,6 @@
 # Slouch Tracker
 
-**Privacy-first webcam posture tracker for Windows. All detection and model training run on-device — nothing ever leaves your machine.**
+**Privacy-first webcam posture tracker for Windows. All detection and model training run on-device; nothing ever leaves your machine.**
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078D6)
@@ -8,29 +8,33 @@
 ![Rust](https://img.shields.io/badge/Rust-1.88%2B-DEA584)
 ![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00)
 
-Slouch Tracker watches your webcam, estimates your body pose in real time, and warns you when you start slouching. It runs entirely as a native Windows desktop app: the camera, ML inference, feature extraction, model training, and storage are all handled locally in Rust. There are no cloud services, no accounts, and no network calls.
+Slouch Tracker watches your webcam, estimates your body pose in real time, and warns you when you start slouching. It runs entirely as a native Windows desktop app: the camera, ML inference, feature extraction, model training, and storage are all handled locally in Rust. There are no cloud services and no accounts. The app's only network access, ever, is a one-time download of the pose-detection model on first launch (see [About the installer](#about-the-installer)); after that it runs fully offline.
 
 ## Features
 
-- **Real-time posture detection** — RTMDet-nano (person detection) + NLF-L (17-keypoint + 3D depth) pose estimation on DirectML, running through native ONNX Runtime via the Rust `ort` crate.
-- **Train your own models** — Collect and label your own frames, then train personalized classifiers in-app. Six registry-driven classifier types (`mlp`, `knn`, `svm`, `kmeans_prototype`, `gaussian_nb`, `kmeans_logistic`) with a UI that auto-generates parameter controls.
-- **Flexible features** — 12 user-selectable feature types (RTMDet features, NLF-L 3D-depth features, and geometric/keypoint features) with normalization (`z_score`/`layer`/`none`) and dimensionality reduction (`pca`/`random_projection`/`none`).
-- **In-app data collection** — Capture frames with `G` (good), `B` (bad), and `A` (away) keys, plus global hotkeys `Ctrl+Win+G` / `Ctrl+Win+B` / `Ctrl+Win+A` that work even when the app is not focused.
-- **Cross-validated training** — One-click training with optional k-fold cross-validation and reported metrics; progress streams live over a Tauri channel.
-- **Local SQLite storage** — Frames, keypoints, feature vectors, thumbnails, settings, and trained models are stored in a local SQLite database.
-- **Dataset export/import** — Portable `.slouchpack` archives via native file dialogs.
-- **Privacy mode** — Obscures the live preview while detection keeps running.
-- **Focus-aware power behavior** — Smooth ~30 fps preview when focused, detection at ~1 fps in every mode, and EcoQoS / efficiency mode when the window is backgrounded. Typical CPU usage is ~1–2%.
+- Real-time posture detection: RTMDet-nano finds the person, NLF-L estimates 17 keypoints plus 3D depth, and both run on DirectML through native ONNX Runtime (the Rust `ort` crate).
+- Train your own models: collect and label your own frames, then train a personalized classifier in-app. Six classifier types (`mlp`, `knn`, `svm`, `kmeans_prototype`, `gaussian_nb`, `kmeans_logistic`), with parameter controls generated from the classifier registry.
+- Flexible features: 12 selectable feature types (RTMDet features, NLF-L 3D-depth features, geometric and keypoint features), plus normalization (`z_score`/`layer`/`none`) and dimensionality reduction (`pca`/`random_projection`/`none`).
+- In-app data collection: capture frames with the `G` (good), `B` (bad), and `A` (away) keys, or with the global hotkeys `Ctrl+Win+G` / `Ctrl+Win+B` / `Ctrl+Win+A`, which work while the app is unfocused.
+- Cross-validated training: one click, optional k-fold cross-validation with reported metrics, progress streamed live over a Tauri channel.
+- Local SQLite storage for frames, keypoints, feature vectors, thumbnails, settings, and trained models.
+- Dataset export and import as portable `.slouchpack` archives via native file dialogs.
+- Privacy mode: obscures the live preview while detection keeps running.
+- Focus-aware power use: ~30 fps preview when focused, detection at ~1 fps in every mode, and EcoQoS efficiency mode when the window is backgrounded. Typical CPU usage is 1 to 2%.
 
 ## Screenshots
 
-<!-- TODO: add screenshot/GIF -->
+Privacy mode with the live skeleton avatar. Detection keeps running while the camera feed stays obscured:
+
+| Good posture | Bad posture |
+|---|---|
+| ![Good posture detected](docs/screenshots/good-posture.png) | ![Bad posture detected](docs/screenshots/bad-posture.png) |
 
 ## Installation
 
-**System requirements:** Windows 10 or 11 (x64) with a **DirectX 12-capable GPU**. Inference runs through the DirectML execution provider; if no compatible GPU is present the app reports a clear error on startup rather than falling back silently.
+**System requirements:** Windows 10 or 11 (x64) with a DirectX 12-capable GPU. Inference runs through the DirectML execution provider; if no compatible GPU is present the app reports a clear error on startup rather than falling back silently.
 
-**Camera placement:** for best detection quality, place the camera **to the side of you, at eye level or slightly above**. A side view makes slouching geometrically obvious to the pose model; strongly elevated or overhead angles weaken the depth-based posture cues.
+**Camera placement:** for best detection quality, place the camera to the side of you, at eye level or slightly above. A side view makes slouching geometrically obvious to the pose model; strongly elevated or overhead angles weaken the depth-based posture cues.
 
 1. Download the latest installer (`Slouch Tracker_<version>_x64-setup.exe`) from the [GitHub Releases](https://github.com/SSS135/slouch_tracker/releases) page.
 2. (Recommended) Verify the download against `SHA256SUMS.txt` on the same release:
@@ -42,23 +46,43 @@ Slouch Tracker watches your webcam, estimates your body pose in real time, and w
 
 ### "Windows protected your PC" (SmartScreen)
 
-Release builds are **unsigned** (there is no code-signing certificate), so on first run Windows SmartScreen shows a blue *"Windows protected your PC"* dialog. This is expected. Click **More info**, then **Run anyway**. Because the build is unsigned, verifying the SHA-256 against `SHA256SUMS.txt` (step 2 above) is the recommended way to confirm you have the authentic installer.
+Release builds are unsigned (there is no code-signing certificate), so on first run Windows SmartScreen shows a blue "Windows protected your PC" dialog. This is expected. Click **More info**, then **Run anyway**. Because the build is unsigned, verifying the SHA-256 against `SHA256SUMS.txt` (step 2 above) is the recommended way to confirm you have the authentic installer.
 
 ### About the installer
 
-- **Bundles the ML models (~230 MB).** The installer embeds the RTMDet + NLF-L models, so no models are ever downloaded. On any system that already has the Microsoft WebView2 runtime — all of Windows 11 and virtually all of Windows 10 — installation is fully offline. On the rare stripped-down system without it (e.g. Windows 10 LTSC/IoT or a deliberately debloated install) the installer performs a **one-time** silent download of the small WebView2 runtime from Microsoft. Either way, **the app itself never touches the network at runtime** — all detection and training stay on-device.
-- **Per-user install.** Installs for the current user, so no administrator prompt is required.
-- **Your data survives uninstall.** By default the uninstaller leaves your dataset, trained models, and settings on disk. Deleting them is opt-in — tick the *delete application data* checkbox in the uninstaller only if you want a full wipe.
+- The installer is small. It bundles the person-detection model (RTMDet-nano, ~4 MB) and the native ONNX Runtime, but not the pose model. The first time you launch Slouch Tracker, it downloads the pose model (`nlf_l_crop_fp16.onnx`, ~245 MB) once from the project's [GitHub Releases](https://github.com/SSS135/slouch_tracker/releases), verifies it against a pinned SHA-256, and caches it in your app-data directory. This one-time download is the only network access the app ever makes; once it completes, all detection and training run fully offline. To prepare a machine that never touches the network, see [Fully offline installation](#fully-offline-installation) below.
+- WebView2 runtime, at install time, on some systems: any system that already has the Microsoft WebView2 runtime (all of Windows 11 and virtually all of Windows 10) installs offline. On the rare stripped-down system without it, such as Windows 10 LTSC/IoT or a deliberately debloated install, the setup program downloads the small WebView2 runtime from Microsoft once. This is a Windows component fetched by the installer, separate from the pose-model download the app does on first launch.
+- Per-user install: installs for the current user, so no administrator prompt is required.
+- Your data survives uninstall. By default the uninstaller leaves your dataset, trained models, and settings on disk. Deleting them is opt-in: tick the *delete application data* checkbox in the uninstaller only if you want a full wipe.
 
-## Build from Source
+### Fully offline installation
+
+If a machine will never have internet access, place the pose model manually before first launch. The app detects it and never attempts the download:
+
+1. On any connected machine, download the pose model from
+   `https://github.com/SSS135/slouch_tracker/releases/download/models-v1/nlf_l_crop_fp16.onnx`.
+2. Verify its SHA-256; the printed hash must equal
+   `33bd300cd5a65681a5d671debd82a63f842c7420443cd9bb7424ca7aef82cca8`:
+   ```powershell
+   Get-FileHash '.\nlf_l_crop_fp16.onnx' -Algorithm SHA256
+   ```
+3. Copy the file into your app-data models folder (create the `models` folder if it does not exist):
+   `%APPDATA%\com.slouchtracker.main\models\nlf_l_crop_fp16.onnx`.
+   `%APPDATA%` expands to `C:\Users\<YourName>\AppData\Roaming`, so the full path is
+   `C:\Users\<YourName>\AppData\Roaming\com.slouchtracker.main\models\nlf_l_crop_fp16.onnx`.
+4. Install and launch **Slouch Tracker**. It checks this path before any network request:
+   - If the file is present and the hash matches, the app starts normally and makes no network requests at all.
+   - If the file is present but corrupt (hash mismatch), the app reports that the pose model is invalid and offers to re-download it; replace it with a correct copy to stay fully offline.
+
+## Build from source
 
 ### Prerequisites
 
 - **Windows 10/11 (x64)**
-- **Git LFS — mandatory.** The ONNX models (`rtmdet-nano.onnx` ~4 MB, `nlf_l_crop_fp16.onnx` ~233 MB) and the app icons are stored via Git LFS. Cloning **without** Git LFS installed produces pointer files instead of the real assets and the build will be broken.
+- **Git LFS**, required. The RTMDet detection model (`rtmdet-nano.onnx`, ~4 MB) and the app icons are stored via Git LFS; cloning without Git LFS installed produces pointer files instead of the real assets, and the build will be broken. The larger NLF-L pose model (~245 MB) is not in the repository. Dev builds obtain it the same way end users do (first-run download), or you can place it manually; see the note under *Steps*.
 - **Rust 1.88+** (with the `x86_64-pc-windows-msvc` toolchain)
 - **Node.js 20+**
-- **Visual Studio 2022** with the *Desktop development with C++* workload (any edition — Community works)
+- **Visual Studio 2022** with the *Desktop development with C++* workload (any edition; Community works)
 - **WebView2 runtime** (preinstalled on Windows 11; on Windows 10 install the Evergreen runtime from Microsoft)
 
 ### Steps
@@ -84,11 +108,13 @@ npm run tauri:build:win
 > Cargo must run inside a Visual Studio 2022 x64 developer environment (vcvars64). `npm run tauri:*` handles this when launched from a developer shell; for raw `cargo` commands, first run:
 > `call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"`.
 
+> Pose model for dev builds: development and release builds do not bundle the NLF-L pose model. On first launch the app downloads it automatically, or you can pre-place `nlf_l_crop_fp16.onnx` (SHA-256 `33bd300cd5a65681a5d671debd82a63f842c7420443cd9bb7424ca7aef82cca8`) at either `src-tauri\resources\models\nlf_l_crop_fp16.onnx` or the app-data path `%APPDATA%\com.slouchtracker.main\models\nlf_l_crop_fp16.onnx`. See [Fully offline installation](#fully-offline-installation).
+
 ## Usage
 
-The app is a single window: a live camera viewport with overlay controls, plus a slide-in panel with **Settings**, **Collect**, and **Training** tabs.
+The app is a single window: a live camera viewport with overlay controls, plus a slide-in panel with Settings, Collect, and Training tabs.
 
-**Capture keys** (while the app is focused):
+Capture keys (while the app is focused):
 
 | Key | Action |
 |-----|--------|
@@ -98,22 +124,22 @@ The app is a single window: a live camera viewport with overlay controls, plus a
 | `C` | Clear sampled frames |
 | `U` | Undo last dataset change |
 
-**Global hotkeys** (work while the app is unfocused): `Ctrl+Win+G` / `Ctrl+Win+B` / `Ctrl+Win+A` capture good / bad / away with an audio confirmation beep.
+Global hotkeys (work while the app is unfocused): `Ctrl+Win+G` / `Ctrl+Win+B` / `Ctrl+Win+A` capture good / bad / away with an audio confirmation beep.
 
-**Training workflow:**
+Training workflow:
 
 1. Collect labeled frames for *good*, *bad*, and *away* postures.
-2. Open the **Training** tab, pick features / classifier / normalization / reduction, and press **Train**.
+2. Open the Training tab, pick features, classifier, normalization, and reduction, and press **Train**.
 3. Review the cross-validation metrics. The trained model is deployed automatically for live detection.
 
 The app tracks whether the model needs retraining as you add data, so you can keep refining it as your dataset grows.
 
 ## Privacy
 
-- **Everything is local.** Detection, feature extraction, and training all run on your own machine in native Rust. There are no network calls and no telemetry.
-- **Your data stays on disk.** Frames, keypoints, feature vectors, thumbnails, settings, and trained models live in a local SQLite database under your user app-data directory.
-- **Privacy mode** obscures the live preview (blurred) while detection continues, so you can keep tracking without a visible camera feed on screen.
-- **Portable, not cloud.** Datasets move only when *you* export a `.slouchpack` file through a native save dialog.
+- Everything runs locally. Detection, feature extraction, and training are native Rust on your own machine. The app's only network use, ever, is the one-time download of the pose-detection model on first launch (see [About the installer](#about-the-installer)), and you can avoid even that by pre-placing the model (see [Fully offline installation](#fully-offline-installation)). There is no telemetry.
+- Your data stays on disk. Frames, keypoints, feature vectors, thumbnails, settings, and trained models live in a local SQLite database under your user app-data directory.
+- Privacy mode obscures the live preview (blurred) while detection continues, so you can keep tracking without a visible camera feed on screen.
+- Datasets leave the machine only when you export a `.slouchpack` file through a native save dialog.
 
 ## Architecture
 
@@ -152,13 +178,13 @@ npm run bindings:check
 
 Slouch Tracker is released under the [MIT License](LICENSE).
 
-> **Binary licensing note:** The MIT license covers the source code only. The prebuilt binaries on the Releases page additionally bundle the NLF-L model weights, which are licensed for **non-commercial research use** — so the released binary as a whole is **non-commercial**.
+> Binary licensing note: the MIT license covers the source code. The installer bundles only MIT and Apache-2.0 components, including the Apache-2.0 RTMDet detector. The NLF-L pose model is downloaded on first launch from the project's Releases, hosted with the permission of its author, István Sárándi. Because the pose-model weights are non-commercial, **the Slouch Tracker application is for non-commercial scientific research, non-commercial education, or non-commercial artistic use cases only.**
 
 Third-party components and their licenses are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ### Acknowledgments
 
-- [OpenMMLab](https://github.com/open-mmlab) — RTMDet person-detection model.
-- [NLF (Neural Localizer Fields)](https://github.com/isarandi/nlf) — NLF-L 3D human-pose model (weights are for non-commercial research use only).
-- [Microsoft ONNX Runtime](https://github.com/microsoft/onnxruntime) — native inference runtime.
-- [Tauri](https://tauri.app) — the desktop application framework.
+- [OpenMMLab](https://github.com/open-mmlab): RTMDet person-detection model.
+- [NLF (Neural Localizer Fields)](https://github.com/isarandi/nlf): NLF-L 3D human-pose model (weights are for non-commercial research use only).
+- [Microsoft ONNX Runtime](https://github.com/microsoft/onnxruntime): native inference runtime.
+- [Tauri](https://tauri.app): the desktop application framework.

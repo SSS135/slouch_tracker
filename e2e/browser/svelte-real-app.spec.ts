@@ -119,6 +119,40 @@ test('real app reflects a native/tray-initiated pause and resume from the tracki
   await expect(good).toBeEnabled({ timeout: 15_000 });
 });
 
+const emitPoseModelEvent = (page: Page, event: Record<string, unknown>): Promise<void> =>
+  page.evaluate(
+    (value) => (
+      window as typeof window & { __SLOUCH_POSE_MODEL__: { emit: (e: unknown) => void } }
+    ).__SLOUCH_POSE_MODEL__.emit(value),
+    event,
+  );
+
+test('real app runs the first-run pose-model download screen, then becomes usable without a reload', async ({ page }) => {
+  const megabyte = 1024 * 1024;
+  await page.goto(`${applicationPath}?poseModel=downloadRequired`, { waitUntil: 'commit' });
+
+  // First launch with the model absent: a blocking one-time setup screen appears
+  // and auto-starts the download. A missing model is setup, never a GPU failure.
+  const dialog = page.getByRole('dialog', { name: 'Setting up posture detection' });
+  await expect(dialog).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/one-time download of the pose-detection model/i)).toBeVisible();
+  await expect(page.getByText(/NLF by István Sárándi/)).toBeVisible();
+  await expect(page.getByText('Native initialization failed')).toHaveCount(0);
+
+  // Progress is driven by the native download events.
+  await emitPoseModelEvent(page, { type: 'started', totalBytes: 245 * megabyte });
+  await emitPoseModelEvent(page, { type: 'progress', received: 122 * megabyte, total: 245 * megabyte });
+  await expect(page.getByText(/122 MB of 245 MB \(49%\)/)).toBeVisible();
+  await emitPoseModelEvent(page, { type: 'verifying' });
+  await expect(page.getByText('Verifying the downloaded model…')).toBeVisible();
+
+  // On ready the screen dismisses and inference re-initializes in place: the app
+  // proceeds without a restart and capture goes live.
+  await emitPoseModelEvent(page, { type: 'ready' });
+  await expect(dialog).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByRole('button', { name: 'Good' })).toBeEnabled({ timeout: 15_000 });
+});
+
 test('real app relabels a frame by dragging it onto another section (real Chromium HTML5 DnD)', async ({ page }) => {
   await page.getByRole('button', { name: 'Open control panel' }).click();
   await page.getByRole('tab', { name: 'Training' }).click();

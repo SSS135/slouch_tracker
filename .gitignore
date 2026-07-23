@@ -66,3 +66,9 @@ src-tauri/WixTools/
 /src-tauri/reviews/
 /.claude/settings.local.json
 /.mcp.json
+
+# release/test artifacts (untracked; regenerable or machine-local)
+/.target-installer-verify/
+*.slouchpack
+*.db
+*.sqlite

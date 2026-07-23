@@ -83,10 +83,12 @@
     },
     {
       "id": "nlf-l-crop-fp16",
-      "source": "isarandi/nlf (github releases) — NLF-L crop model, fp16-converted export; v2 export adds backbone_feats output",
+      "source": "https://github.com/SSS135/slouch_tracker/releases/download/models-v1/nlf_l_crop_fp16.onnx",
+      "provenance": "isarandi/nlf (github releases) — NLF-L crop model, fp16-converted export; v2 export adds backbone_feats output",
+      "runtimeDownloaded": true,
       "bytes": 244722283,
       "sha256": "33bd300cd5a65681a5d671debd82a63f842c7420443cd9bb7424ca7aef82cca8",
-      "packagedPath": "resources/models/nlf_l_crop_fp16.onnx"
+      "packagedPath": null
     }
   ]
 }

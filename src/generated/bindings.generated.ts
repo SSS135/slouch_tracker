@@ -57,6 +57,8 @@ export const commands = {
 	startCamera: (onResult: Channel<InferenceUiResult>) => typedError<null, ApiError>(__TAURI_INVOKE("start_camera", { onResult })),
 	stopCamera: () => typedError<null, ApiError>(__TAURI_INVOKE("stop_camera")),
 	listCameras: () => typedError<CameraDeviceInfo[], ApiError>(__TAURI_INVOKE("list_cameras")),
+	getPoseModelStatus: () => typedError<PoseModelStatus, ApiError>(__TAURI_INVOKE("get_pose_model_status")),
+	ensurePoseModel: (onEvent: Channel<PoseModelDownloadEvent>) => typedError<null, ApiError>(__TAURI_INVOKE("ensure_pose_model", { onEvent })),
 };
 
 /** Events */
@@ -336,6 +338,10 @@ export type ParameterScale = "linear" | "exponential";
 export type ParameterType = "range" | "select" | "number" | "boolean";
 
 export type ParameterValue = number | null | string | boolean;
+
+export type PoseModelDownloadEvent = { type: "started"; totalBytes: number } | { type: "progress"; received: number; total: number } | { type: "verifying" } | { type: "ready" } | { type: "failed"; reason: string };
+
+export type PoseModelStatus = { type: "ready"; path: string } | { type: "downloadRequired"; totalBytes: number } | { type: "downloading" };
 
 export type ReservoirMetadata = {
 	totalSeen: number,

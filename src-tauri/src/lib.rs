@@ -2,6 +2,7 @@ mod actors;
 mod api;
 mod bindings;
 mod errors;
+mod model_download;
 #[cfg(test)]
 mod native_runtime_resources_parity;
 mod power;
@@ -263,6 +264,8 @@ pub fn run() {
             api::start_camera,
             api::stop_camera,
             api::list_cameras,
+            api::get_pose_model_status,
+            api::ensure_pose_model,
         ])
         .setup(|app| {
             #[cfg(any(debug_assertions, feature = "devbuild"))]
@@ -301,8 +304,22 @@ pub fn run() {
             #[cfg(feature = "devbuild")]
             app.handle().plugin(tauri_plugin_wdio::init())?;
 
-            api::initialize_inference(app.state::<api::AppState>())
-                .map_err(std::io::Error::other)?;
+            // Defer inference initialization on a first run where the NLF pose model
+            // has not been downloaded yet: a missing model must not crash startup
+            // (the frontend downloads it via ensure_pose_model, then re-calls
+            // initialize_inference). When the model IS present a genuine init failure
+            // (for example no DirectX 12 GPU) still aborts startup as before.
+            {
+                let app_state = app.state::<api::AppState>();
+                if app_state.pose_model_present() {
+                    api::initialize_inference(app_state).map_err(std::io::Error::other)?;
+                } else {
+                    log::info!(
+                        target: "inference",
+                        "NLF pose model not present; deferring inference initialization until first-run download completes"
+                    );
+                }
+            }
 
             tray::build_tray(app.handle())?;
 

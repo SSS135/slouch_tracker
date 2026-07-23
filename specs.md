@@ -36,7 +36,7 @@ unfocused (the detection rate), off when the window is hidden/minimized.
 - `src-svelte/hooks/`, `src-svelte/components/` — pull the `slouchcam://` preview into a native `<img>`, draw keypoint overlays, and issue capture/training commands
 - `src-svelte/lib/native/client.ts` — the single frontend gateway to all native commands (argument validation + typed error unwrapping)
 
-**Model resources** (`src-tauri/resources/models/`): `rtmdet-nano.onnx`, `nlf_l_crop_fp16.onnx`. NLF-L (Neural Localizer Fields) runs on the DirectML execution provider; the 17 COCO keypoints are assembled from its `coords2d` output (inverted through the un-expanded RTMDet square crop) and per-joint confidence is calibrated from its `uncertainty` output, while `coords3d_rel` supplies supplementary posture-depth features.
+**Model resources**: `src-tauri/resources/models/` bundles only `rtmdet-nano.onnx`. The larger NLF-L pose model (`nlf_l_crop_fp16.onnx`) is **not** bundled — it is downloaded once on first launch (SHA-256-pinned) from the project's GitHub Releases into the app-data directory (`%APPDATA%\com.slouchtracker.main\models\`), and resolved at runtime from there or from `resources/models/` if pre-placed. NLF-L (Neural Localizer Fields) runs on the DirectML execution provider; the 17 COCO keypoints are assembled from its `coords2d` output (inverted through the un-expanded RTMDet square crop) and per-joint confidence is calibrated from its `uncertainty` output, while `coords3d_rel` supplies supplementary posture-depth features.
 
 ### ML Training Pipeline
 
@@ -55,9 +55,11 @@ Collect (capture + label frames via save_capture) → SQLite dataset
 
 ### IPC Contract
 
-39 Tauri commands total, registered in `src-tauri/src/lib.rs`.
+41 Tauri commands total, registered in `src-tauri/src/lib.rs`.
 
-**Typed commands (36)** are annotated `#[specta::specta]` and exported through `tauri-specta` to `src/generated/bindings.generated.ts`. The frontend calls them only through `src-svelte/lib/native/client.ts`, which unwraps the `Result<T, ApiError>` envelope into `NativeCommandError`. Beyond the settings and dataset commands, these include the camera lifecycle commands `start_camera` / `stop_camera` / `list_cameras`, `get_needs_retraining` (auto-retrain hint), `get_reservoir_metadata` (feature reservoir state), `cleanup_unused_frames`, and the login-autostart pair `get_autostart_enabled` / `set_autostart_enabled` (per-user `HKCU\...\Run` entry via `tauri-plugin-autostart`; the registry — including `Explorer\StartupApproved\Run`, which Task Manager toggles — is the sole source of truth, never mirrored into SQLite).
+**Typed commands (38)** are annotated `#[specta::specta]` and exported through `tauri-specta` to `src/generated/bindings.generated.ts`. The frontend calls them only through `src-svelte/lib/native/client.ts`, which unwraps the `Result<T, ApiError>` envelope into `NativeCommandError`. Beyond the settings and dataset commands, these include the camera lifecycle commands `start_camera` / `stop_camera` / `list_cameras`, `get_needs_retraining` (auto-retrain hint), `get_reservoir_metadata` (feature reservoir state), `cleanup_unused_frames`, and the login-autostart pair `get_autostart_enabled` / `set_autostart_enabled` (per-user `HKCU\...\Run` entry via `tauri-plugin-autostart`; the registry — including `Explorer\StartupApproved\Run`, which Task Manager toggles — is the sole source of truth, never mirrored into SQLite).
+
+**First-run pose-model download**: the NLF-L pose model is not bundled; the typed command pair `get_pose_model_status` / `ensure_pose_model` (included in the 38 typed count above) downloads it once on first launch from the project's GitHub Releases (SHA-256-pinned) into the app-data directory, streaming progress over a per-call `Channel<PoseModelDownloadEvent>`. Startup no longer fails when the model is absent; a missing model is surfaced as this one-time download, never as the DirectML/GPU hard-fail, and inference initializes lazily against the freshly downloaded file without a restart.
 
 **Raw-byte commands (3)** — `infer_frame`, `get_thumbnail`, `save_capture` — move bulk binary data. `infer_frame` is retained only as a test-harness entry point now that capture is native; `get_thumbnail` and `save_capture` remain on the live path:
 - Requests use raw bodies plus `x-slouch-*` headers: `x-slouch-ipc-version`, `x-slouch-pixel-format: rgba8`, `x-slouch-width/height/stride`, and for captures request id, one-use token, frame id, timestamp, label, MIME type.
@@ -123,7 +125,7 @@ The 6 legacy RTMPose-M poolings (`backbone_features` / `_max` / `_std`, `gau_fea
 ```
 src-tauri/
   src/               app crate: lib.rs (setup, plugins, global shortcuts),
-                     api.rs (AppState + 39 commands), actors.rs (Camera/Inference/TrainingActor),
+                     api.rs (AppState + 41 commands), actors.rs (Camera/Inference/TrainingActor),
                      bindings.rs (Specta builder), errors.rs, bin/export_bindings
   crates/
     slouch-domain/   DTOs, validation, labels, keypoints/bboxes, settings types,
@@ -134,7 +136,7 @@ src-tauri/
     slouch-store/    SQLite storage, archive export/import, model container format,
                      feature reservoir
   schema/            live-v1.sql, archive-v1.sql
-  resources/         models/ (rtmdet-nano.onnx, nlf_l_crop_fp16.onnx), onnxruntime/ (dll + notices)
+  resources/         models/ (rtmdet-nano.onnx; NLF-L pose model downloaded at first run, not bundled), onnxruntime/ (dll + notices)
   model-format-v1.md model container specification
 
 src/generated/       bindings.generated.ts (machine-written — never hand-edit),

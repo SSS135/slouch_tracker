@@ -8,7 +8,8 @@ third-party software and machine-learning model files that are covered by
 their own licenses. Those components remain under their respective licenses;
 the notices below are provided to satisfy their attribution requirements. This
 file covers material that is redistributed as part of a Slouch Tracker release
-(bundled model files, the bundled ONNX Runtime, and code statically compiled
+(the bundled RTMDet person-detection model, the NLF-L pose model that the app
+downloads on first run, the bundled ONNX Runtime, and code statically compiled
 into the desktop binary), followed by a summary of the wider dependency tree.
 
 Per-component sections list: name, version (where known), license,
@@ -79,9 +80,11 @@ License, Version 2.0. In accordance with that license this notices file:
 
 ## 2. NLF-L 3D human-pose model (isarandi/nlf)
 
-One additional ONNX model file is bundled in every release under
-`src-tauri/resources/models/` and loaded at runtime by the native ONNX Runtime
-on the DirectML execution provider:
+This pose model is **not bundled in the installer**. It is downloaded **once,
+on first launch**, from the Slouch Tracker project's own GitHub Releases,
+verified against a pinned SHA-256, and cached in the user's app-data directory
+(`%APPDATA%\com.slouchtracker.main\models\`). It is loaded at runtime by the
+native ONNX Runtime on the DirectML execution provider:
 
 | File | Size | Role |
 | --- | --- | --- |
@@ -99,21 +102,31 @@ on the DirectML execution provider:
 - **Code license:** the NLF source repository is licensed under the **MIT
   License**, Copyright (c) 2024 István Sárándi.
 - **Model-weights license — IMPORTANT (non-commercial):** the released NLF
-  model weights, from which the bundled ONNX file is derived, are — per the
-  upstream project — **"released for noncommercial research use only."** This
-  restriction applies to the pre-trained weights and therefore to the bundled
-  `nlf_l_crop_fp16.onnx` file. The permissive MIT license covers the NLF
-  *code*, not the *weights*. Any redistribution or commercial use of a Slouch
-  Tracker build that includes this model file must comply with the NLF weights'
-  non-commercial research-use restriction. (Contrast the OpenMMLab models in
-  section 1, which are Apache-2.0 and carry no such restriction.)
-- **Modifications (the bundled file is a modified export, not an upstream
+  model weights, from which this ONNX file is derived, are — per the upstream
+  project — **"released for noncommercial research use only."** This
+  restriction applies to the pre-trained weights and therefore to the
+  downloaded `nlf_l_crop_fp16.onnx` file and to any Slouch Tracker install that
+  has fetched it. The permissive MIT license covers the NLF *code*, not the
+  *weights*. Any redistribution or commercial use must comply with the NLF
+  weights' non-commercial research-use restriction. (Contrast the OpenMMLab
+  model in section 1, which is Apache-2.0 and carries no such restriction.)
+- **Redistribution / hosting permission:** the fp16 ONNX file offered from the
+  Slouch Tracker Releases is a derivative of the NLF-L weights, hosted **with
+  the express written permission of the weights' author, István Sárándi**
+  (email, 2026-07-23), granted on the conditions that the NLF paper and
+  repository are credited and that the application is clearly stated to be
+  for non-commercial scientific research, non-commercial education, or
+  non-commercial artistic use cases only. Those conditions are honored here,
+  in the README's licensing note, and in the in-app attribution; the file
+  remains subject to the weights' "noncommercial research use only" terms.
+- **Modifications (this file is a modified export, not an upstream
   artifact):** the upstream NLF-L "crop" model was exported to ONNX and then
   converted to **fp16** weights, with float32 graph inputs/outputs preserved
-  (`keep_io_types`). The application feeds a 384×384 RGB crop and reads the
-  `coords3d_rel` and `uncertainty` outputs to derive scale/rotation-aware
-  posture-depth features; only these derived features are stored, and the raw
-  model outputs are not persisted.
+  (`keep_io_types`); the export additionally exposes a supplementary
+  `backbone_feats` graph output. The application feeds a 384×384 RGB crop and
+  reads the `coords3d_rel` and `uncertainty` outputs to derive
+  scale/rotation-aware posture-depth features; only these derived features are
+  stored, and the raw model outputs are not persisted.
 
 ---
 

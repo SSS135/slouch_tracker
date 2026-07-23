@@ -23,6 +23,8 @@ import {
   type InferenceUiResult,
   type NativeStateChangedEvent_Deserialize,
   type NativeStateSnapshot_Serialize,
+  type PoseModelDownloadEvent,
+  type PoseModelStatus,
   type ReservoirMetadata,
   type ShortcutStatus,
   type TrainingEvent_Deserialize,
@@ -252,6 +254,12 @@ export const nativeClient = {
   },
   async listCameras(): Promise<CameraDeviceInfo[]> {
     return unwrapNativeResult(await commands.listCameras());
+  },
+  async getPoseModelStatus(): Promise<PoseModelStatus> {
+    return unwrapNativeResult(await commands.getPoseModelStatus());
+  },
+  async ensurePoseModel(onEvent: Channel<PoseModelDownloadEvent>): Promise<void> {
+    unwrapNativeResult(await commands.ensurePoseModel(onEvent));
   },
   getThumbnail,
   saveCapture,

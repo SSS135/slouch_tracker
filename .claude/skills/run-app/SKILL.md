@@ -17,13 +17,13 @@ Compiles the Rust backend and opens the app window with live detection.
 1. **Needs the MSVC x64 env.** `tauri dev` invokes `cargo`, which needs
    `vcvars64.bat` on PATH (for `link.exe`). Without it the Rust build fails.
 2. **git-bash mangles Windows paths/`cmd` args.** Launching via
-   `cmd //c 'cd /d X:\... && call vcvars && npm run tauri:dev'` from git-bash
+   `cmd //c 'cd /d <repo root> && call vcvars && npm run tauri:dev'` from git-bash
    fails (`/d` and paths get MSYS-translated → "path not found"). Run it from a
    native `cmd`/terminal, or via a `.bat` wrapper invoked by ABSOLUTE path.
 
 **Human recipe** — in a normal `cmd` window (not git-bash):
 ```
-cd /d X:\src\rust\slouch_tracker
+cd /d <repo root>
 call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
 npm run tauri:dev
 ```
@@ -33,7 +33,7 @@ it by absolute path in the background (it's a long-lived GUI process):
 ```
 # launch_app.bat:
 #   @echo off
-#   cd /d X:\src\rust\slouch_tracker
+#   cd /d <repo root>
 #   call "C:\Program Files\...\VC\Auxiliary\Build\vcvars64.bat"
 #   call npm run tauri:dev
 cmd //c "C:\full\path\to\launch_app.bat"   # run_in_background: true
@@ -81,6 +81,6 @@ process).
 - **Rust build link errors / `link.exe` not found** → vcvars64 wasn't loaded.
 - **"path not found" launching from git-bash** → MSYS mangled the command; use
   the `.bat` wrapper or a native `cmd` window.
-- **Stale `X:\src\web\slouch_tracker` path in a build error** → leftover
+- **A stale absolute path from a previous checkout location in a build error** → leftover
   Tauri build-script cache from a project move. Fix with a targeted clean:
   `cargo clean -p tauri -p tauri-plugin-dialog -p tauri-plugin-fs -p tauri-plugin-log -p tauri-plugin-global-shortcut -p app` (avoids nuking the ~54 GB `target`).
