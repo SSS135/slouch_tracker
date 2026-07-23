@@ -73,5 +73,6 @@ jobs:
           $exe = Get-ChildItem -Path src-tauri/target -Recurse -Filter '*-setup.exe' | Select-Object -First 1
           if (-not $exe) { throw 'No NSIS *-setup.exe was produced' }
           $hash = (Get-FileHash -Algorithm SHA256 $exe.FullName).Hash.ToLower()
-          "$hash  $($exe.Name)" | Out-File -Encoding ascii SHA256SUMS.txt
+          $assetName = $exe.Name -replace ' ', '.'
+          "$hash  $assetName" | Out-File -Encoding ascii SHA256SUMS.txt
           gh release upload ${{ github.ref_name }} SHA256SUMS.txt --clobber
