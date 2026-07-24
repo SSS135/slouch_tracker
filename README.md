@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/Svelte-5-FF3E00" alt="Svelte 5">
 </p>
 
-**Slouch Tracker watches your webcam, estimates your body pose in real time, and warns you when you start slouching.** Everything — camera capture, ML inference, model training, and storage — runs locally in native Rust; there are no cloud services, no accounts, and no telemetry. The only network access the app ever makes is a one-time ~245 MB pose-model download on first launch (see [About the installer](#about-the-installer)); after that it runs fully offline.
+**Slouch Tracker watches your webcam and warns you when you start slouching.** Everything runs on your own computer: no cloud services, no accounts, no telemetry. The only time it ever touches the network is a one-time ~245 MB download of its pose model on first launch (see [About the installer](#about-the-installer)); after that it works fully offline.
 
 ## See it working
 
@@ -21,46 +21,73 @@ Privacy mode with the live skeleton avatar. Detection keeps running while the ca
 |---|---|
 | ![Good posture detected: upright skeleton avatar over the obscured camera feed](docs/screenshots/good-posture.png) | ![Bad posture detected: slouched skeleton avatar over the obscured camera feed](docs/screenshots/bad-posture.png) |
 
-## How it works
+## Getting started
+
+**You need:** Windows 10 or 11 (x64), a webcam, and a DirectX 12-capable GPU (if yours isn't, the app tells you clearly at startup).
+
+**Camera placement:** put the camera to the side of you, at eye level or slightly above. A side view makes slouching obvious to the pose model; overhead angles weaken it.
+
+1. Download the latest installer (`Slouch.Tracker_<version>_x64-setup.exe`) from the [GitHub Releases](https://github.com/SSS135/slouch_tracker/releases) page.
+2. Run it and launch **Slouch Tracker**. No administrator rights needed.
+
+Windows SmartScreen will show a blue "Windows protected your PC" warning, because the build is unsigned. This is expected: click **More info**, then **Run anyway**.
+
+On first launch the app downloads its pose model (~245 MB) once, then never needs the network again. Installing on a machine without internet? See [Fully offline installation](#fully-offline-installation).
+
+## Using it
+
+The app is a single window: your camera view with a status badge, plus a slide-in panel with Settings, Collect, and Training tabs.
+
+**Teach it your posture.** Sit well and press `G` a few times; slouch and press `B`; step away and press `A`. A couple dozen frames of each is plenty to start. Then open the Training tab and press **Train** — your personal model deploys immediately, and from then on the app beeps when you hold a bad posture.
+
+| Key | Action |
+|-----|--------|
+| `G` | Capture a *good posture* frame |
+| `B` | Capture a *bad posture* frame |
+| `A` | Capture an *away* frame |
+| `C` | Clear sampled frames |
+| `U` | Undo last dataset change |
+
+The same captures work while the app is in the background via the global hotkeys `Ctrl+Win+G` / `Ctrl+Win+B` / `Ctrl+Win+A`, with a confirmation beep. The app keeps tracking from the system tray when you close the window, and it tells you when your model would benefit from retraining as your dataset grows.
+
+## Features
+
+- Your own personal detector: trained on your body, your chair, and your camera angle, not someone else's dataset.
+- Privacy mode: the live preview is obscured while detection keeps running.
+- Runs quietly in the tray, can start with Windows, and typically uses 1 to 2% CPU.
+- Global capture hotkeys that work while the app is unfocused.
+- Alerts only after posture stays bad for a delay you control.
+- Your dataset is portable: export and import it as a `.slouchpack` file.
+
+## Privacy
+
+- Everything runs locally: detection, feature extraction, and training happen on your own machine, with no telemetry. The only network use, ever, is the one-time pose-model download on first launch, and even that is avoidable by pre-placing the model (see [Fully offline installation](#fully-offline-installation)).
+- Your data stays on disk: frames, keypoints, feature vectors, thumbnails, settings, and trained models live in a local SQLite database under your user app-data directory.
+- Datasets leave the machine only when you export a `.slouchpack` file through a native save dialog.
+
+---
+
+## Under the hood
 
 <p align="center">
   <img src="./assets/readme/pipeline.svg" width="100%" alt="Detection pipeline: webcam frames go to RTMDet-nano person detection on CPU, then NLF-L pose estimation on DirectML producing 17 keypoints plus 3D depth, then your own in-app-trained classifier decides good, bad, or away — about 1 frame per second, entirely on this machine.">
 </p>
 
-RTMDet-nano finds the person on the CPU; NLF-L then estimates 17 keypoints plus 3D depth on the GPU through the DirectML execution provider, both running on native ONNX Runtime (the Rust `ort` crate). A classifier you train in-app on your own labeled frames makes the final call: good, bad, or away. Detection runs at ~1 fps in every window mode; the preview renders at ~30 fps while the window is focused. Typical CPU usage is 1 to 2%.
+RTMDet-nano finds the person on the CPU; NLF-L then estimates 17 keypoints plus 3D depth on the GPU through the DirectML execution provider, both running on native ONNX Runtime (the Rust `ort` crate). A classifier you train in-app on your own labeled frames makes the final call: good, bad, or away. Detection runs at ~1 fps in every window mode; the preview renders at ~30 fps while the window is focused.
+
+The training side is registry-driven: six classifier types (`mlp`, `knn`, `svm`, `kmeans_prototype`, `gaussian_nb`, `kmeans_logistic`) with auto-generated parameter controls, 12 selectable feature types (RTMDet features, NLF-L 3D-depth features, geometric and keypoint features), normalization (`z_score`/`layer`/`none`), dimensionality reduction (`pca`/`random_projection`/`none`), and optional k-fold cross-validation with reported metrics.
 
 Slouch Tracker is a Tauri 2 app: a Rust backend workspace (the `app` crate plus `slouch-domain`, `slouch-ml`, `slouch-vision`, `slouch-store`) with a deliberately thin Svelte 5 UI. The camera is owned natively (nokhwa, MJPEG) and previewed in the webview through a custom `slouchcam://` URI scheme; the frontend talks to Rust through generated [Specta](https://github.com/specta-rs/specta) bindings, with three raw-byte MessagePack commands reserved for bulk image data. See [specs.md](specs.md) for the full architecture.
 
-## Features
-
-- Train your own models: collect and label your own frames, then train a personalized classifier in-app — with optional k-fold cross-validation, reported metrics, and progress streamed live.
-- Six classifier types (`mlp`, `knn`, `svm`, `kmeans_prototype`, `gaussian_nb`, `kmeans_logistic`), with parameter controls generated from the classifier registry.
-- 12 selectable feature types (RTMDet features, NLF-L 3D-depth features, geometric and keypoint features), plus normalization (`z_score`/`layer`/`none`) and dimensionality reduction (`pca`/`random_projection`/`none`).
-- Fast data collection: capture frames with the `G` (good), `B` (bad), and `A` (away) keys, or with the global hotkeys `Ctrl+Win+G` / `Ctrl+Win+B` / `Ctrl+Win+A`, which work while the app is unfocused.
-- Local SQLite storage for frames, keypoints, feature vectors, thumbnails, settings, and trained models.
-- Dataset export and import as portable `.slouchpack` archives via native file dialogs.
-- Privacy mode: obscures the live preview while detection keeps running.
-- Focus-aware power behavior: EcoQoS efficiency mode when the window is backgrounded, with detection continuing at the rates above.
-
-## Installation
-
-**System requirements:** Windows 10 or 11 (x64) with a DirectX 12-capable GPU. Inference runs through the DirectML execution provider; if no compatible GPU is present the app reports a clear error on startup rather than falling back silently.
-
-**Camera placement:** for best detection quality, place the camera to the side of you, at eye level or slightly above. A side view makes slouching geometrically obvious to the pose model; strongly elevated or overhead angles weaken the depth-based posture cues.
-
-1. Download the latest installer (`Slouch.Tracker_<version>_x64-setup.exe`) from the [GitHub Releases](https://github.com/SSS135/slouch_tracker/releases) page.
-2. Run the installer and launch **Slouch Tracker**.
-
-### "Windows protected your PC" (SmartScreen)
-
-Release builds are unsigned (there is no code-signing certificate), so on first run Windows SmartScreen shows a blue "Windows protected your PC" dialog. This is expected. Click **More info**, then **Run anyway**. If you want to confirm the download is authentic, each release includes a `SHA256SUMS.txt` with the installer's hash.
+## Installation details
 
 ### About the installer
 
-- The installer is small. It bundles the person-detection model (RTMDet-nano, ~4 MB) and the native ONNX Runtime, but not the pose model. The first time you launch Slouch Tracker, it downloads the pose model (`nlf_l_crop_fp16.onnx`, ~245 MB) once from the project's [GitHub Releases](https://github.com/SSS135/slouch_tracker/releases), verifies it against a pinned SHA-256, and caches it in your app-data directory. This one-time download is the only network access the app ever makes; once it completes, all detection and training run fully offline. To prepare a machine that never touches the network, see [Fully offline installation](#fully-offline-installation) below.
+- The installer is small. It bundles the person-detection model (RTMDet-nano, ~4 MB) and the native ONNX Runtime, but not the pose model. The first time you launch Slouch Tracker, it downloads the pose model (`nlf_l_crop_fp16.onnx`, ~245 MB) once from the project's [GitHub Releases](https://github.com/SSS135/slouch_tracker/releases), verifies it against a pinned SHA-256, and caches it in your app-data directory. This one-time download is the only network access the app ever makes.
 - WebView2 runtime, at install time, on some systems: any system that already has the Microsoft WebView2 runtime (all of Windows 11 and virtually all of Windows 10) installs offline. On the rare stripped-down system without it, such as Windows 10 LTSC/IoT or a deliberately debloated install, the setup program downloads the small WebView2 runtime from Microsoft once. This is a Windows component fetched by the installer, separate from the pose-model download the app does on first launch.
 - Per-user install: installs for the current user, so no administrator prompt is required.
 - Your data survives uninstall. By default the uninstaller leaves your dataset, trained models, and settings on disk. Deleting them is opt-in: tick the *delete application data* checkbox in the uninstaller only if you want a full wipe.
+- Each release includes a `SHA256SUMS.txt` with the installer's hash if you want to verify your download.
 
 ### Fully offline installation
 
@@ -80,37 +107,6 @@ If a machine will never have internet access, place the pose model manually befo
 4. Install and launch **Slouch Tracker**. It checks this path before any network request:
    - If the file is present and the hash matches, the app starts normally and makes no network requests at all.
    - If the file is present but corrupt (hash mismatch), the app reports that the pose model is invalid and offers to re-download it; replace it with a correct copy to stay fully offline.
-
-## Usage
-
-The app is a single window: a live camera viewport with overlay controls, plus a slide-in panel with Settings, Collect, and Training tabs.
-
-Capture keys (while the app is focused):
-
-| Key | Action |
-|-----|--------|
-| `G` | Capture a *good posture* frame |
-| `B` | Capture a *bad posture* frame |
-| `A` | Capture an *away* frame |
-| `C` | Clear sampled frames |
-| `U` | Undo last dataset change |
-
-Global hotkeys (work while the app is unfocused): `Ctrl+Win+G` / `Ctrl+Win+B` / `Ctrl+Win+A` capture good / bad / away with an audio confirmation beep.
-
-Training workflow:
-
-1. Collect labeled frames for *good*, *bad*, and *away* postures.
-2. Open the Training tab, pick features, classifier, normalization, and reduction, and press **Train**.
-3. Review the cross-validation metrics. The trained model is deployed automatically for live detection.
-
-The app tracks whether the model needs retraining as you add data, so you can keep refining it as your dataset grows.
-
-## Privacy
-
-- Everything runs locally: detection, feature extraction, and training are native Rust on your own machine, with no telemetry. The only network use, ever, is the one-time pose-model download on first launch (see [About the installer](#about-the-installer)), and even that is avoidable by pre-placing the model (see [Fully offline installation](#fully-offline-installation)).
-- Your data stays on disk: frames, keypoints, feature vectors, thumbnails, settings, and trained models live in a local SQLite database under your user app-data directory.
-- Privacy mode obscures the live preview (blurred) while detection continues, so you can keep tracking without a visible camera feed on screen.
-- Datasets leave the machine only when you export a `.slouchpack` file through a native save dialog.
 
 ## Build from source
 
