@@ -49,16 +49,11 @@ Slouch Tracker is a Tauri 2 app: a Rust backend workspace (the `app` crate plus 
 **Camera placement:** for best detection quality, place the camera to the side of you, at eye level or slightly above. A side view makes slouching geometrically obvious to the pose model; strongly elevated or overhead angles weaken the depth-based posture cues.
 
 1. Download the latest installer (`Slouch.Tracker_<version>_x64-setup.exe`) from the [GitHub Releases](https://github.com/SSS135/slouch_tracker/releases) page.
-2. (Recommended) Verify the download against `SHA256SUMS.txt` on the same release:
-   ```powershell
-   Get-FileHash '.\Slouch.Tracker_1.0.0_x64-setup.exe' -Algorithm SHA256
-   ```
-   The printed hash must match the entry in `SHA256SUMS.txt`.
-3. Run the installer and launch **Slouch Tracker**.
+2. Run the installer and launch **Slouch Tracker**.
 
 ### "Windows protected your PC" (SmartScreen)
 
-Release builds are unsigned (there is no code-signing certificate), so on first run Windows SmartScreen shows a blue "Windows protected your PC" dialog. This is expected. Click **More info**, then **Run anyway**. Because the build is unsigned, verifying the SHA-256 against `SHA256SUMS.txt` (step 2 above) is the recommended way to confirm you have the authentic installer.
+Release builds are unsigned (there is no code-signing certificate), so on first run Windows SmartScreen shows a blue "Windows protected your PC" dialog. This is expected. Click **More info**, then **Run anyway**. If you want to confirm the download is authentic, each release includes a `SHA256SUMS.txt` with the installer's hash.
 
 ### About the installer
 
