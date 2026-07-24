@@ -274,35 +274,30 @@
       </div>
     {/if}
 
-    {#if postureResult}
+    <!-- Results render only when CV actually ran: auto-train (doCV: false) produces
+         metric-less results that would otherwise clutter the Overview with
+         "CV skipped" placeholder cards after every save. -->
+    {#if postureResult && postureResult.metrics.foldAccuracies.length > 0}
       <div class="result-card green-card">
         <strong>Posture Model Results</strong>
-        {#if postureResult.metrics.foldAccuracies.length > 0}
-          <span>CV Accuracy: {((postureResult.metrics.cvAccuracy ?? 0) * 100).toFixed(0)}% [{((postureResult.metrics.accuracyCiLow ?? 0) * 100).toFixed(0)}-{((postureResult.metrics.accuracyCiHigh ?? 0) * 100).toFixed(0)}%]</span>
-          <span>Balanced Accuracy: {((postureResult.metrics.balancedAccuracy ?? 0) * 100).toFixed(1)}%</span>
-          <span>Worst Fold: {((postureResult.metrics.worstFoldAccuracy ?? 0) * 100).toFixed(1)}%</span>
-          <span>MCC: {((postureResult.metrics.mcc ?? 0) * 100).toFixed(1)}%</span>
-          <span>F1 Score: {((postureResult.metrics.f1Score ?? 0) * 100).toFixed(1)}%</span>
-          {#if postureResult.metrics.cvType}<span class="muted">CV method: {postureResult.metrics.cvType}</span>{/if}
-        {:else}
-          <span class="warning-text">CV skipped - metrics unavailable</span>
-        {/if}
+        <span>CV Accuracy: {((postureResult.metrics.cvAccuracy ?? 0) * 100).toFixed(0)}% [{((postureResult.metrics.accuracyCiLow ?? 0) * 100).toFixed(0)}-{((postureResult.metrics.accuracyCiHigh ?? 0) * 100).toFixed(0)}%]</span>
+        <span>Balanced Accuracy: {((postureResult.metrics.balancedAccuracy ?? 0) * 100).toFixed(1)}%</span>
+        <span>Worst Fold: {((postureResult.metrics.worstFoldAccuracy ?? 0) * 100).toFixed(1)}%</span>
+        <span>MCC: {((postureResult.metrics.mcc ?? 0) * 100).toFixed(1)}%</span>
+        <span>F1 Score: {((postureResult.metrics.f1Score ?? 0) * 100).toFixed(1)}%</span>
+        {#if postureResult.metrics.cvType}<span class="muted">CV method: {postureResult.metrics.cvType}</span>{/if}
       </div>
     {/if}
 
-    {#if presenceResult}
+    {#if presenceResult && presenceResult.metrics.foldAccuracies.length > 0}
       <div class="result-card blue-card">
         <strong>Presence Model Results</strong>
-        {#if presenceResult.metrics.foldAccuracies.length > 0}
-          <span>CV Accuracy: {((presenceResult.metrics.cvAccuracy ?? 0) * 100).toFixed(0)}% [{((presenceResult.metrics.accuracyCiLow ?? 0) * 100).toFixed(0)}-{((presenceResult.metrics.accuracyCiHigh ?? 0) * 100).toFixed(0)}%]</span>
-          <span>Balanced Accuracy: {((presenceResult.metrics.balancedAccuracy ?? 0) * 100).toFixed(1)}%</span>
-          <span>Worst Fold: {((presenceResult.metrics.worstFoldAccuracy ?? 0) * 100).toFixed(1)}%</span>
-          <span>MCC: {((presenceResult.metrics.mcc ?? 0) * 100).toFixed(1)}%</span>
-          <span>F1 Score: {((presenceResult.metrics.f1Score ?? 0) * 100).toFixed(1)}%</span>
-          {#if presenceResult.metrics.cvType}<span class="muted">CV method: {presenceResult.metrics.cvType}</span>{/if}
-        {:else}
-          <span class="warning-text">CV skipped - metrics unavailable</span>
-        {/if}
+        <span>CV Accuracy: {((presenceResult.metrics.cvAccuracy ?? 0) * 100).toFixed(0)}% [{((presenceResult.metrics.accuracyCiLow ?? 0) * 100).toFixed(0)}-{((presenceResult.metrics.accuracyCiHigh ?? 0) * 100).toFixed(0)}%]</span>
+        <span>Balanced Accuracy: {((presenceResult.metrics.balancedAccuracy ?? 0) * 100).toFixed(1)}%</span>
+        <span>Worst Fold: {((presenceResult.metrics.worstFoldAccuracy ?? 0) * 100).toFixed(1)}%</span>
+        <span>MCC: {((presenceResult.metrics.mcc ?? 0) * 100).toFixed(1)}%</span>
+        <span>F1 Score: {((presenceResult.metrics.f1Score ?? 0) * 100).toFixed(1)}%</span>
+        {#if presenceResult.metrics.cvType}<span class="muted">CV method: {presenceResult.metrics.cvType}</span>{/if}
       </div>
     {/if}
   </Section>
