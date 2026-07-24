@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.0.0"
+version = "1.1.0"
 description = "Slouch Tracker desktop application"
 license = "MIT"
 repository = "https://github.com/SSS135/slouch_tracker"
