@@ -7,6 +7,7 @@ import {
   tauriInvokeRaw,
   waitForNativeReady,
 } from './helpers/native.js';
+import { skipOnboardingIfPresent } from './helpers/onboarding.js';
 
 /**
  * Real-camera capture smoke test.
@@ -174,6 +175,10 @@ async function waitForCaptureOutcome(timeoutMs: number): Promise<'saved' | 'fail
 describe('real-camera capture smoke', () => {
   before(async () => {
     await waitForNativeReady();
+    // In the ordered suite 10-launch-readiness already completed onboarding on
+    // this data dir; when this spec is run standalone against a fresh dir the
+    // first-run wizard would gate the capture UI, so dismiss it defensively.
+    await skipOnboardingIfPresent();
     // Wait for the real UI to mount its capture controls.
     await browser.waitUntil(
       async () => (await browser.$$('button[aria-label="Good"]')).length > 0,

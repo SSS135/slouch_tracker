@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // TrainingTab pulls its data from four context/hook modules and renders registry-driven
@@ -118,14 +118,21 @@ function renderTab(reservoirCount: number, totalSeen = reservoirCount) {
   return render(TrainingTab, { props: { onTrainingComplete: () => Promise.resolve() } });
 }
 
+// Feature/preprocessing/classifier/train controls sit behind the collapsed
+// "Training settings" disclosure; open it before asserting on those controls.
+async function expandTrainingSettings(): Promise<void> {
+  await fireEvent.click(screen.getByRole('button', { name: /training settings/i }));
+}
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
 
 describe('TrainingTab PCA reduction option label', () => {
-  it('reads as available (not a progress fraction) when the reservoir has enough samples', () => {
+  it('reads as available (not a progress fraction) when the reservoir has enough samples', async () => {
     const { container } = renderTab(1000, 1500);
+    await expandTrainingSettings();
 
     expect(screen.getByText('PCA (1000 samples available)')).toBeInTheDocument();
     expect(screen.queryByText(/PCA \(1000\/100 samples\)/)).not.toBeInTheDocument();
@@ -135,8 +142,9 @@ describe('TrainingTab PCA reduction option label', () => {
     expect(pcaInput).toBeEnabled();
   });
 
-  it('states the remaining requirement and stays disabled below the threshold', () => {
+  it('states the remaining requirement and stays disabled below the threshold', async () => {
     const { container } = renderTab(37);
+    await expandTrainingSettings();
 
     expect(screen.getByText('PCA (needs 100 samples, have 37)')).toBeInTheDocument();
 
@@ -145,8 +153,9 @@ describe('TrainingTab PCA reduction option label', () => {
     expect(pcaInput).toBeDisabled();
   });
 
-  it('shows the exact-threshold count as available and enables the option', () => {
+  it('shows the exact-threshold count as available and enables the option', async () => {
     const { container } = renderTab(100);
+    await expandTrainingSettings();
 
     expect(screen.getByText('PCA (100 samples available)')).toBeInTheDocument();
 
@@ -159,5 +168,37 @@ describe('TrainingTab PCA reduction option label', () => {
     expect(
       screen.getByText('Feature reservoir: 1000/1000 samples (1500 observed).'),
     ).toBeInTheDocument();
+  });
+});
+
+describe('TrainingTab training settings disclosure', () => {
+  it('keeps the configuration and train controls collapsed by default', () => {
+    renderTab(0);
+    const toggle = screen.getByRole('button', { name: /training settings/i });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    // The Train button is inside the disclosure, so it is out of the a11y tree until opened.
+    expect(screen.queryByRole('button', { name: 'Train' })).not.toBeInTheDocument();
+    // Overview + dataset controls stay visible above/below the disclosure.
+    expect(screen.getByText(/Feature reservoir:/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset Dataset' })).toBeInTheDocument();
+  });
+
+  it('reveals the training controls when expanded', async () => {
+    renderTab(0);
+    await expandTrainingSettings();
+    expect(screen.getByRole('button', { name: /training settings/i })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Train' })).toBeInTheDocument();
+    expect(screen.getByText('Random Projection')).toBeInTheDocument();
+  });
+
+  it('collapses again when the disclosure is toggled a second time', async () => {
+    renderTab(0);
+    await expandTrainingSettings();
+    expect(screen.getByRole('button', { name: 'Train' })).toBeInTheDocument();
+    await expandTrainingSettings();
+    expect(screen.queryByRole('button', { name: 'Train' })).not.toBeInTheDocument();
   });
 });

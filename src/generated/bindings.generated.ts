@@ -133,6 +133,7 @@ export type CameraSettings = {
 	tileMotionThreshold?: number | null,
 	claheTemporalAlpha?: number | null,
 	preprocessingDebugView?: boolean,
+	cameraIndex?: number,
 };
 
 export type ClassificationResult = {
@@ -470,6 +471,7 @@ export type UiSettings = {
 	alertDelaySeconds: number | null,
 	minimizeToTrayOnClose?: boolean,
 	startHiddenOnLogin?: boolean,
+	onboardingCompleted?: boolean,
 };
 
 export type UndoActionKind = "removeCapture" | "restoreFrame";

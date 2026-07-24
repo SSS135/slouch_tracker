@@ -1,6 +1,7 @@
 import { browser, expect } from '@wdio/globals';
 
 import { tauriInvoke, waitForNativeReady, expectOk } from './helpers/native.js';
+import { skipOnboarding, waitForOnboardingOverlay } from './helpers/onboarding.js';
 
 // DOM probes intentionally use execute() instead of getTitle()/$():
 // @wdio/tauri-service's auto window-focus hook intercepts title/element
@@ -21,6 +22,14 @@ describe('packaged native launch and readiness', () => {
   it('renders the Svelte shell inside the packaged webview', async () => {
     const title = await browser.execute(() => document.title);
     expect(title).toContain('Slouch Tracker');
+
+    // This suite runs against a wiped SLOUCH_APP_DATA_DIR (zero labeled frames,
+    // onboardingCompleted unset), so the first-run wizard overlay gates the
+    // shell. Skip it here: the persisted flag makes every later spec (fresh app
+    // processes on the same data dir) boot straight into the normal UI.
+    await waitForOnboardingOverlay();
+    await skipOnboarding();
+
     await browser.waitUntil(
       async () =>
         browser.execute(

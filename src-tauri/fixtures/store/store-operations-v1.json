@@ -240,7 +240,7 @@
         "away": 0,
         "unused": 0,
         "imbalanceRatio": 0,
-        "hasMinimumFrames": true,
+        "hasMinimumFrames": false,
         "hasAwayFrames": false
       },
       "frameById": "frame-b",

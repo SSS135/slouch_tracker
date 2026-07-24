@@ -393,6 +393,23 @@ fn computes_empty_balanced_and_imbalanced_statistics() {
 }
 
 #[test]
+fn minimum_frames_requires_three_per_class() {
+    let storage = storage();
+    add_frames(
+        &storage,
+        (0..2)
+            .map(|index| frame(format!("good-{index}"), FrameLabel::Good))
+            .chain((0..3).map(|index| frame(format!("bad-{index}"), FrameLabel::Bad))),
+    );
+    assert!(!storage.get_stats().unwrap().has_minimum_frames);
+
+    storage
+        .save_frame(frame("good-2", FrameLabel::Good))
+        .unwrap();
+    assert!(storage.get_stats().unwrap().has_minimum_frames);
+}
+
+#[test]
 fn stores_all_feature_types_and_preserves_exact_values() {
     let storage = storage();
     let mut gau = vec![0.0; GAU.metadata().dimensions];

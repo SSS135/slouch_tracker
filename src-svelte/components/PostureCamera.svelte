@@ -45,6 +45,8 @@
     onCanvasReady?: (ready: boolean) => void;
     canvasRef?: CanvasRefObject;
     latestFrameRef?: { current: PreviewFrameSource | null };
+    /** Ref object a parent can call to restart the native camera (e.g. after a camera-index change). */
+    cameraRestartRef?: { current: (() => Promise<void>) | null };
     paused?: boolean;
     privacyMode?: boolean;
     /** Show the preprocessed detector-input feed instead of the raw feed. */
@@ -65,6 +67,7 @@
     onCanvasReady,
     canvasRef: externalCanvasRef,
     latestFrameRef,
+    cameraRestartRef,
     paused = false,
     privacyMode = false,
     processedView = false,
@@ -187,6 +190,14 @@
 
   $effect(() => {
     onCameraError?.(camera.error);
+  });
+
+  $effect(() => {
+    if (!cameraRestartRef) return;
+    cameraRestartRef.current = () => camera.retry();
+    return () => {
+      cameraRestartRef.current = null;
+    };
   });
 
   $effect(() => {

@@ -37,6 +37,8 @@
     trackingPaused?: boolean;
     onToggleTracking?: () => void;
     toggleTrackingDisabled?: boolean;
+    /** Hide every overlay control (onboarding wizard mode) — only the camera and the paused overlay render. */
+    chromeHidden?: boolean;
   }
 
   let {
@@ -67,6 +69,7 @@
     trackingPaused = false,
     onToggleTracking,
     toggleTrackingDisabled = false,
+    chromeHidden = false,
   }: CameraViewportProps = $props();
 
   const cameraContext = useCameraContext();
@@ -124,93 +127,95 @@
     </div>
   {/if}
 
-  {#if onToggleTracking}
-    <div class="tracking-toggle-position">
-      <TrackingToggleButton
-        paused={trackingPaused}
-        disabled={toggleTrackingDisabled}
-        onToggle={onToggleTracking}
-      />
-    </div>
-  {/if}
-
-  {#if onSaveFrameAsGood && onSaveFrameAsBad && onSaveFrameAsAway}
-    <FrameListOverlay
-      {frames}
-      onSaveAsGood={onSaveFrameAsGood}
-      onSaveAsBad={onSaveFrameAsBad}
-      onSaveAsAway={onSaveFrameAsAway}
-      {onFramePreview}
-      {onFramePreviewClear}
-      {queuedFrameCount}
-      onHoverStart={onFrameListHoverStart}
-      onHoverEnd={onFrameListHoverEnd}
-    />
-  {/if}
-
-  {#if onUndo && canUndo}
-    <div class="undo-position">
-      <UndoButton
-        onUndo={onUndo}
-        {canUndo}
-        {lastAction}
-      />
-    </div>
-  {/if}
-
-  {#if onCaptureGood && onCaptureBad && onCaptureAway}
-    <CaptureButtonsOverlay
-      onCaptureGood={onCaptureGood}
-      onCaptureBad={onCaptureBad}
-      onCaptureAway={onCaptureAway}
-      disabled={!isSystemReady}
-      inferenceResult={activeInferenceResult}
-    />
-  {/if}
-
-  <div
-    class="status-position"
-    class:panel-open={!isPanelCollapsed}
-  >
-    <PostureStatusBadge
-      data={classification}
-      {hasModel}
-    />
-
-    {#if isTraining || isTrainingPipeline}
-      <div class="training-badge" role="status" aria-label="Training in progress">
-        <span class="training-spinner" aria-hidden="true"></span>
-        Training...
+  {#if !chromeHidden}
+    {#if onToggleTracking}
+      <div class="tracking-toggle-position">
+        <TrackingToggleButton
+          paused={trackingPaused}
+          disabled={toggleTrackingDisabled}
+          onToggle={onToggleTracking}
+        />
       </div>
     {/if}
-  </div>
 
-  {#if displayedPreviewFrame}
-    <div
-      class:visible={isPreviewVisible}
-      class="preview-overlay"
-      class:panel-open={!isPanelCollapsed}
-      style:pointer-events={isPreviewVisible ? 'auto' : 'none'}
-    >
-      <div
-        class="preview-content"
-        style={`max-width: ${previewMaxWidth}px; height: ${previewMaxHeight};`}
-      >
-        <img
-          class="preview-image"
-          src={displayedPreviewFrame.blobUrl}
-          alt="Frame preview"
+    {#if onSaveFrameAsGood && onSaveFrameAsBad && onSaveFrameAsAway}
+      <FrameListOverlay
+        {frames}
+        onSaveAsGood={onSaveFrameAsGood}
+        onSaveAsBad={onSaveFrameAsBad}
+        onSaveAsAway={onSaveFrameAsAway}
+        {onFramePreview}
+        {onFramePreviewClear}
+        {queuedFrameCount}
+        onHoverStart={onFrameListHoverStart}
+        onHoverEnd={onFrameListHoverEnd}
+      />
+    {/if}
+
+    {#if onUndo && canUndo}
+      <div class="undo-position">
+        <UndoButton
+          onUndo={onUndo}
+          {canUndo}
+          {lastAction}
         />
-        {#if displayedPreviewFrame.label && displayedPreviewFrame.label !== FrameLabel.UNUSED}
-          <span
-            class="preview-label"
-            style={`--badge-color: ${labelBadgeColor(displayedPreviewFrame.label)};`}
-          >
-            {displayedPreviewFrame.label === FrameLabel.GOOD ? 'Good Posture' : 'Bad Posture'}
-          </span>
-        {/if}
       </div>
+    {/if}
+
+    {#if onCaptureGood && onCaptureBad && onCaptureAway}
+      <CaptureButtonsOverlay
+        onCaptureGood={onCaptureGood}
+        onCaptureBad={onCaptureBad}
+        onCaptureAway={onCaptureAway}
+        disabled={!isSystemReady}
+        inferenceResult={activeInferenceResult}
+      />
+    {/if}
+
+    <div
+      class="status-position"
+      class:panel-open={!isPanelCollapsed}
+    >
+      <PostureStatusBadge
+        data={classification}
+        {hasModel}
+      />
+
+      {#if isTraining || isTrainingPipeline}
+        <div class="training-badge" role="status" aria-label="Training in progress">
+          <span class="training-spinner" aria-hidden="true"></span>
+          Training...
+        </div>
+      {/if}
     </div>
+
+    {#if displayedPreviewFrame}
+      <div
+        class:visible={isPreviewVisible}
+        class="preview-overlay"
+        class:panel-open={!isPanelCollapsed}
+        style:pointer-events={isPreviewVisible ? 'auto' : 'none'}
+      >
+        <div
+          class="preview-content"
+          style={`max-width: ${previewMaxWidth}px; height: ${previewMaxHeight};`}
+        >
+          <img
+            class="preview-image"
+            src={displayedPreviewFrame.blobUrl}
+            alt="Frame preview"
+          />
+          {#if displayedPreviewFrame.label && displayedPreviewFrame.label !== FrameLabel.UNUSED}
+            <span
+              class="preview-label"
+              style={`--badge-color: ${labelBadgeColor(displayedPreviewFrame.label)};`}
+            >
+              {displayedPreviewFrame.label === FrameLabel.GOOD ? 'Good Posture' : 'Bad Posture'}
+            </span>
+          {/if}
+        </div>
+      </div>
+    {/if}
   {/if}
 </div>
 

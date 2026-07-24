@@ -7,6 +7,7 @@ import { useCameraSettings } from '../useCameraSettings';
 const cameraDefaults = {
   cameraWidth: 800,
   cameraHeight: 600,
+  cameraIndex: 1,
   captureIntervalSeconds: 0.5,
   autoCaptureEnabled: true,
   autoCaptureIntervalSeconds: 2,
@@ -23,6 +24,7 @@ const uiDefaults = {
   alertDelaySeconds: 5,
   minimizeToTrayOnClose: true,
   startHiddenOnLogin: true,
+  onboardingCompleted: true,
 };
 
 function client() {
@@ -418,5 +420,49 @@ describe('useCameraSettings native persistence', () => {
     await result.resetSettings();
     expect(result.settings.minimizeToTrayOnClose).toBe(true);
     expect(result.settings.startHiddenOnLogin).toBe(true);
+  });
+
+  it('defaults cameraIndex and onboardingCompleted when native omits them', async () => {
+    const mock = client();
+    const { cameraIndex: _cameraIndex, ...cameraWithoutIndex } = cameraDefaults;
+    const { onboardingCompleted: _onboarding, ...uiWithoutOnboarding } = uiDefaults;
+    mock.client.getCameraSettings.mockResolvedValueOnce(cameraWithoutIndex);
+    mock.client.getUiSettings.mockResolvedValueOnce(uiWithoutOnboarding);
+    const result = mount(mock);
+    await loaded(result);
+
+    expect(result.settings.cameraIndex).toBe(0);
+    expect(result.settings.onboardingCompleted).toBe(false);
+  });
+
+  it('routes cameraIndex to the camera DTO and onboardingCompleted to the UI DTO', async () => {
+    const mock = client();
+    const result = mount(mock);
+    await loaded(result);
+
+    flushSync(() => result.updateSettings({ cameraIndex: 2, onboardingCompleted: false }));
+    await result.flush();
+
+    expect(mock.client.saveCameraSettings).toHaveBeenLastCalledWith({
+      ...cameraDefaults,
+      cameraIndex: 2,
+    });
+    expect(mock.client.saveUiSettings).toHaveBeenLastCalledWith({
+      ...uiDefaults,
+      onboardingCompleted: false,
+    });
+    expect(mock.readCameraSettings().cameraIndex).toBe(2);
+    expect(mock.readUiSettings().onboardingCompleted).toBe(false);
+  });
+
+  it('rejects a malformed cameraIndex before optimistic publication', async () => {
+    const mock = client();
+    const result = mount(mock);
+    await loaded(result);
+
+    flushSync(() => result.updateSettings({ cameraIndex: -1 }));
+    expect(result.settings.cameraIndex).toBe(1);
+    expect(result.error).toBe('Camera index must be a non-negative integer.');
+    expect(mock.client.saveCameraSettings).not.toHaveBeenCalled();
   });
 });

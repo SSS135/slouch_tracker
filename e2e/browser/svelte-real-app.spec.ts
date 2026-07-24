@@ -202,6 +202,7 @@ test('real app relabels and deletes a frame with authoritative native undo', asy
 
 test('real app resets the dataset and deactivates the stale model while preserving settings', async ({ page }) => {
   await page.getByRole('button', { name: 'Open control panel' }).click();
+  await page.getByRole('button', { name: 'Developer settings' }).click();
   await expect(page.getByText('Model Status')).toBeVisible();
   await page.getByRole('tab', { name: 'Training' }).click();
 
@@ -217,6 +218,7 @@ test('real app resets the dataset and deactivates the stale model while preservi
 
 test('real app completes the all-data reset through the production modal', async ({ page }) => {
   await page.getByRole('button', { name: 'Open control panel' }).click();
+  await page.getByRole('button', { name: 'Developer settings' }).click();
   await expect(page.getByText('Model Status')).toBeVisible();
 
   await page.getByRole('button', { name: 'Reset All Data' }).click();

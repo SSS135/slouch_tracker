@@ -24,6 +24,7 @@ use slouch_domain::{
     validate_posture_frame, BoundingBox, CameraSettings, DatasetStats,
     DimensionalityReductionConfig, DimensionalityReductionMethod, FeatureId, FrameLabel,
     PostureDataset, PostureFrame, Thumbnail, TrainingSettings, UiSettings,
+    MIN_TRAIN_FRAMES_PER_CLASS,
 };
 use slouch_ml::ported::types::SerializedModel;
 
@@ -533,7 +534,8 @@ impl DatasetStorage {
             } else {
                 good.abs_diff(bad) as f64 / classified as f64
             },
-            has_minimum_frames: good > 0 && bad > 0,
+            has_minimum_frames: good >= MIN_TRAIN_FRAMES_PER_CLASS
+                && bad >= MIN_TRAIN_FRAMES_PER_CLASS,
             has_away_frames: away > 0,
         })
     }

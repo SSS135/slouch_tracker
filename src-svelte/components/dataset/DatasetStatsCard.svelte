@@ -78,7 +78,7 @@
     {#if !hasNoDataWarning && hasInsufficientDataWarning}
       <div class="alert red" role="alert">
         <span class="icon" aria-hidden="true">⚠️</span>
-        <span>Need at least 5 frames per class to train (Good: {stats.good}, Bad: {stats.bad})</span>
+        <span>Need at least 3 frames per class to train (Good: {stats.good}, Bad: {stats.bad})</span>
       </div>
     {/if}
 

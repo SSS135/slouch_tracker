@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{FrameLabel, PostureFrame};
 
+pub const MIN_TRAIN_FRAMES_PER_CLASS: usize = 3;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CaptureAction {
@@ -73,7 +75,8 @@ impl DatasetStats {
         } else {
             stats.good.abs_diff(stats.bad) as f64 / classified as f64
         };
-        stats.has_minimum_frames = stats.good > 0 && stats.bad > 0;
+        stats.has_minimum_frames =
+            stats.good >= MIN_TRAIN_FRAMES_PER_CLASS && stats.bad >= MIN_TRAIN_FRAMES_PER_CLASS;
         stats.has_away_frames = stats.away > 0;
         stats
     }

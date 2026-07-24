@@ -11,6 +11,7 @@
   import { usePoseModelDownload } from '@/hooks/usePoseModelDownload.svelte';
   import { useNotification } from '@/hooks/useNotification';
   import { useFrameSampler, type CapturedFrame } from '@/hooks/useFrameSampler';
+  import { useOnboarding } from '@/hooks/useOnboarding.svelte';
   import type { PreviewFrameSource } from '@/services/dataset/thumbnailGenerator';
   import { useAutoCapture } from '@/hooks/useAutoCapture';
   import { useBackgroundProcessing } from '@/hooks/useBackgroundProcessing';
@@ -25,6 +26,7 @@
   import { MAX_BUFFER_SIZE } from '@/services/dataset/constants';
   import { FrameLabel, type CaptureAction } from '@/services/dataset/types';
   import CameraViewport from '@/components/unified/CameraViewport.svelte';
+  import OnboardingOverlay from '@/components/onboarding/OnboardingOverlay.svelte';
   import PoseModelDownloadScreen from '@/components/PoseModelDownloadScreen.svelte';
   import ConfirmationModal from '@/components/dataset/ConfirmationModal.svelte';
   import SettingsTab from '@/components/unified/SettingsTab.svelte';
@@ -67,6 +69,7 @@
 
   const canvasRef: ElementRef<HTMLCanvasElement> = { current: null };
   const previewFrameRef: ElementRef<PreviewFrameSource> = { current: null };
+  const cameraRestartRef: ElementRef<() => Promise<void>> = { current: null };
   const cameraSettings = useCameraSettings();
   const notification = useNotification();
   const datasetOps = useDatasetOperations();
@@ -87,6 +90,15 @@
     getPreviewFrame: () => previewFrameRef.current,
     get privacyMode() { return settings.privacyMode; },
     config: { maxBufferSize: MAX_BUFFER_SIZE },
+  });
+
+  const onboarding = useOnboarding({
+    settingsReady: () => cameraSettings.ready,
+    settings: () => settings,
+    updateSettings: cameraSettings.updateSettings,
+    flushSettings: cameraSettings.flush,
+    stats: () => datasetOps.stats.data,
+    restartCamera: () => cameraRestartRef.current?.() ?? Promise.resolve(),
   });
 
   const recentFrames = $derived(frameSampler.recentFrames);
@@ -196,10 +208,13 @@
   // trigger misses — app start with data already collected, a training-settings change,
   // or an earlier deploy that was superseded — so "our models auto train" holds without a
   // fresh capture. Purely reactive on already-fetched query state; no polling.
+  // Suppressed mid-wizard: auto-train would deploy a model and beep at the user while they
+  // deliberately slouch for the "bad" step; this effect fires as soon as the wizard closes.
   const retrainNeeded = $derived(
     cameraSettings.ready
     && datasetOps.stats.data?.hasMinimumFrames === true
-    && datasetOps.needsRetraining.data === true,
+    && datasetOps.needsRetraining.data === true
+    && !onboarding.active,
   );
   $effect(() => {
     if (!retrainNeeded) { autoTrainArmed = true; return; }
@@ -272,7 +287,7 @@
   async function refreshAndRetrain(): Promise<void> {
     await datasetOps.invalidateAll();
     const refreshed = await datasetOps.stats.refetch();
-    if (refreshed.data?.hasMinimumFrames) void autoTrain();
+    if (refreshed.data?.hasMinimumFrames && !onboarding.active) void autoTrain();
   }
 
   // Single training entry point shared by the save-triggered retrain and the reactive
@@ -322,6 +337,7 @@
       .then(async () => {
         if (frozenFrames) frozenFrames = frozenFrames.filter((item) => item.id !== frameId);
         replaceLastAction(frame, label);
+        onboarding.notifyFramePersisted(label);
         await refreshAndRetrain();
         if (showSaved) notification.showSuccess('Frame saved.');
       })
@@ -429,7 +445,7 @@
   usePostureSound(
     () => postureDataForSound,
     () => settings.alertVolume,
-    () => trainingState.isTraining,
+    () => trainingState.isTraining || onboarding.active,
     () => settings.alertDelaySeconds,
   );
 
@@ -505,6 +521,7 @@
         trackingPaused={trackingToggle.paused}
         onToggleTracking={trackingToggle.toggle}
         toggleTrackingDisabled={trackingToggle.disabled}
+        chromeHidden={onboarding.active}
       >
         <PostureCamera
           onInferenceResult={(result) => { inferenceResult = result; }}
@@ -512,6 +529,7 @@
           onCanvasReady={(ready) => { isCanvasReady = ready; }}
           onBackgroundClick={() => { if (!isPanelCollapsed) isPanelCollapsed = true; }}
           {canvasRef}
+          {cameraRestartRef}
           latestFrameRef={previewFrameRef}
           privacyMode={settings.privacyMode}
           {processedView}
@@ -524,21 +542,23 @@
     </ErrorBoundary>
   </div>
 
-  <button type="button" class:open={!isPanelCollapsed} class="panel-toggle" aria-label={isPanelCollapsed ? 'Open control panel' : 'Close control panel'} onclick={() => { isPanelCollapsed = !isPanelCollapsed; }}>
-    <!-- SVG chevron instead of a text glyph: font metrics placed the character off-center. -->
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-      <path d={isPanelCollapsed ? 'M10.5 3 5.5 8l5 5' : 'M5.5 3l5 5-5 5'} fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-    </svg>
-  </button>
-  <div class:collapsed={isPanelCollapsed} class="panel-shell" aria-hidden={isPanelCollapsed} inert={isPanelCollapsed}>
-    {#snippet runtimeContent()}
-      <SettingsTab {settings} onUpdateSettings={cameraSettings.updateSettings} onResetSettings={() => { resetModalOpen = true; }} isModelLoaded={hasModel} {processedView} onProcessedViewChange={(value) => { processedView = value; }} {fps} {modelInfo} />
-    {/snippet}
-    {#snippet trainingContent()}
-      <TrainingTab onTrainingComplete={handleTrainingComplete} onFramesChanged={() => { void datasetOps.invalidateAll(); }} onBeforeNativeReplace={prepareNativeReplace} onNativeStateChanged={reconcileNativeState} onFramePreview={(url, label) => { previewFrame = { blobUrl: url, label }; }} onFramePreviewClear={() => { previewFrame = null; }} />
-    {/snippet}
-    <ControlPanel {activeTab} onTabChange={(tab) => { activeTab = tab; }} collapsed={isPanelCollapsed} tabs={[{ id: 'runtime', label: 'Runtime Settings', content: runtimeContent }, { id: 'training', label: 'Training', content: trainingContent }]} />
-  </div>
+  {#if !onboarding.active}
+    <button type="button" class:open={!isPanelCollapsed} class="panel-toggle" aria-label={isPanelCollapsed ? 'Open control panel' : 'Close control panel'} onclick={() => { isPanelCollapsed = !isPanelCollapsed; }}>
+      <!-- SVG chevron instead of a text glyph: font metrics placed the character off-center. -->
+      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+        <path d={isPanelCollapsed ? 'M10.5 3 5.5 8l5 5' : 'M5.5 3l5 5-5 5'} fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+    </button>
+    <div class:collapsed={isPanelCollapsed} class="panel-shell" aria-hidden={isPanelCollapsed} inert={isPanelCollapsed}>
+      {#snippet runtimeContent()}
+        <SettingsTab {settings} onUpdateSettings={cameraSettings.updateSettings} onResetSettings={() => { resetModalOpen = true; }} onRunSetupAgain={() => { isPanelCollapsed = true; onboarding.begin(); }} isModelLoaded={hasModel} {processedView} onProcessedViewChange={(value) => { processedView = value; }} {fps} {modelInfo} />
+      {/snippet}
+      {#snippet trainingContent()}
+        <TrainingTab onTrainingComplete={handleTrainingComplete} onFramesChanged={() => { void datasetOps.invalidateAll(); }} onBeforeNativeReplace={prepareNativeReplace} onNativeStateChanged={reconcileNativeState} onFramePreview={(url, label) => { previewFrame = { blobUrl: url, label }; }} onFramePreviewClear={() => { previewFrame = null; }} />
+      {/snippet}
+      <ControlPanel {activeTab} onTabChange={(tab) => { activeTab = tab; }} collapsed={isPanelCollapsed} tabs={[{ id: 'runtime', label: 'Runtime Settings', content: runtimeContent }, { id: 'training', label: 'Training', content: trainingContent }]} />
+    </div>
+  {/if}
   {#if modelMetadataError}
     <div class="model-error" role="alert">
       <span>Failed to load active model metadata: {modelMetadataError}</span>
@@ -573,6 +593,16 @@
         Loading native camera settings…
       {/if}
     </div>
+  {:else if onboarding.active}
+    <OnboardingOverlay
+      {onboarding}
+      cameraOk={isCanvasReady && frameSampler.isLive}
+      personFound={inferenceResult?.personFound ?? false}
+      {captureReady}
+      {cameraError}
+      selectedCameraIndex={settings.cameraIndex}
+      onCapture={(label) => void captureWithLabel(label)}
+    />
   {/if}
 </div>
 

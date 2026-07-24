@@ -50,12 +50,12 @@ export interface TrainingConfigContextValue {
 // (logistic head), hiddenSize 64, maxIterations 350, learningRate 0.01, weightDecay 0.0373,
 // useClassWeights false, labelSmoothing 0.05. classifierConfig.params therefore carries no
 // overrides; defaultClassifierConfig assembles the full param set from the registry defaults.
-// Default posture features are the body-intrinsic 3D geometry pair; presence uses the
-// engineered detection geometry. All of it is user-changeable in the Training tab.
+// Default posture features are the body-intrinsic 3D trio (raw + geometry + torso-invariant);
+// presence uses the engineered detection geometry. All of it is user-changeable in the Training tab.
 export const DEFAULT_CONFIG: TrainingConfig = {
   classifierConfig: { classifierId: 'mlp', params: {} },
   dimReductionConfig: { method: 'pca', components: 32 },
-  postureFeatureTypes: ['posture_geometry_3d', 'torso_invariant_3d'],
+  postureFeatureTypes: ['posture_raw_3d', 'posture_geometry_3d', 'torso_invariant_3d'],
   presenceFeatureTypes: ['rtmdet_engineered'],
   normalizationMode: 'z_score',
   cvFolds: 5,

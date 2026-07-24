@@ -2178,7 +2178,7 @@ mod camera {
     /// 1280x720 at the highest fps <= 30 (see `mjpeg_format_rank`), falling back to
     /// the nearest lower resolution only when no 720p-class mode is offered.
     fn open_camera(settings: &CameraSettings) -> Result<(Camera, FrameFormat), String> {
-        let index = CameraIndex::Index(0);
+        let index = CameraIndex::Index(settings.camera_index);
         let base = RequestedFormat::new::<RgbFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
         let mut camera = Camera::new(index, base).map_err(|error| error.to_string())?;
 

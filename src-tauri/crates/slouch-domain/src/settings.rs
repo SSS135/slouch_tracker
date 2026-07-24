@@ -33,6 +33,10 @@ pub struct CameraSettings {
     // for tuning the accumulator.
     #[serde(default)]
     pub preprocessing_debug_view: bool,
+    // Which webcam to open (nokhwa device index). Serde default lets pre-field
+    // rows load under deny_unknown_fields.
+    #[serde(default)]
+    pub camera_index: u32,
 }
 
 impl Default for CameraSettings {
@@ -52,6 +56,7 @@ impl Default for CameraSettings {
             tile_motion_threshold: 1.5,
             clahe_temporal_alpha: 0.20,
             preprocessing_debug_view: false,
+            camera_index: 0,
         }
     }
 }
@@ -100,6 +105,9 @@ pub struct UiSettings {
     // tray. Same on-by-default legacy-deserialization requirement as above.
     #[serde(default = "default_true")]
     pub start_hidden_on_login: bool,
+    // Serde default keeps pre-field rows loading under deny_unknown_fields.
+    #[serde(default)]
+    pub onboarding_completed: bool,
 }
 
 fn default_true() -> bool {
@@ -121,6 +129,7 @@ impl Default for UiSettings {
             alert_delay_seconds: 5.0,
             minimize_to_tray_on_close: true,
             start_hidden_on_login: true,
+            onboarding_completed: false,
         }
     }
 }
@@ -194,6 +203,26 @@ mod tests {
         let ui: UiSettings = serde_json::from_str(legacy).expect("legacy UI settings load");
         assert!(ui.minimize_to_tray_on_close);
         assert!(ui.start_hidden_on_login);
+        ui.validate().expect("legacy UI settings valid");
+    }
+
+    #[test]
+    fn deserializes_legacy_camera_settings_without_camera_index() {
+        // A settings row persisted before the camera-index field existed must
+        // load with index 0, not error under deny_unknown_fields.
+        let legacy = r#"{"cameraWidth":800,"cameraHeight":600,"captureIntervalSeconds":1.0,"autoCaptureEnabled":true,"autoCaptureIntervalSeconds":2.0,"privacyMode":false,"claheStrength":2.5,"smoothingFrames":3,"showDetectionOverlay":true,"tileMotionThreshold":1.5,"claheTemporalAlpha":0.2,"preprocessingDebugView":false}"#;
+        let camera: CameraSettings = serde_json::from_str(legacy).expect("legacy settings load");
+        assert_eq!(camera.camera_index, 0);
+        camera.validate().expect("legacy settings valid");
+    }
+
+    #[test]
+    fn deserializes_legacy_ui_settings_without_onboarding_field() {
+        // A settings row persisted before the onboarding field existed must load
+        // with onboarding not completed, not error under deny_unknown_fields.
+        let legacy = r#"{"alertVolume":0.5,"alertDelaySeconds":10.0,"minimizeToTrayOnClose":true,"startHiddenOnLogin":true}"#;
+        let ui: UiSettings = serde_json::from_str(legacy).expect("legacy UI settings load");
+        assert!(!ui.onboarding_completed);
         ui.validate().expect("legacy UI settings valid");
     }
 

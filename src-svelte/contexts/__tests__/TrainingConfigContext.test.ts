@@ -35,6 +35,7 @@ const featureRegistry = [
   feature,
   { ...feature, id: 'keypoint_scores', name: 'Keypoint Scores', modelType: null },
   { ...feature, id: 'nlf_backbone_max', name: 'NLF Backbone Max', modelType: 'posture' },
+  { ...feature, id: 'posture_raw_3d', name: 'Posture Raw 3D', modelType: 'posture' },
   { ...feature, id: 'posture_geometry_3d', name: 'Posture Geometry 3D', modelType: 'posture' },
   { ...feature, id: 'torso_invariant_3d', name: 'Torso Invariant 3D', modelType: 'posture' },
 ];
@@ -86,7 +87,7 @@ describe('TrainingConfigContext native integration', () => {
     expect(value?.config).toMatchObject({
       classifierConfig: { classifierId: 'mlp' },
       dimReductionConfig: { method: 'pca', components: 32 },
-      postureFeatureTypes: ['posture_geometry_3d', 'torso_invariant_3d'],
+      postureFeatureTypes: ['posture_raw_3d', 'posture_geometry_3d', 'torso_invariant_3d'],
       presenceFeatureTypes: ['rtmdet_engineered'],
       normalizationMode: 'z_score',
       cvFolds: 5,
@@ -111,7 +112,7 @@ describe('TrainingConfigContext native integration', () => {
         },
       },
       dimReductionConfig: { method: 'pca', components: 32 },
-      postureFeatureTypes: ['posture_geometry_3d', 'torso_invariant_3d'],
+      postureFeatureTypes: ['posture_raw_3d', 'posture_geometry_3d', 'torso_invariant_3d'],
       presenceFeatureTypes: ['rtmdet_engineered'],
       normalizationMode: 'z_score',
       cvFolds: 7,

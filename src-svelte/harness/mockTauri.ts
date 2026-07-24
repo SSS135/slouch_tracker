@@ -130,6 +130,14 @@ export function installMockTauri(): () => void {
     ? { type: 'downloadRequired', totalBytes: POSE_MODEL_TOTAL_BYTES }
     : { type: 'ready', path: 'mock://nlf_l_crop_fp16.onnx' };
 
+  // First-run onboarding gate. Default seed = onboarding already completed, so every
+  // existing test/e2e boots straight into the normal shell; `?onboarding=fresh` seeds
+  // onboardingCompleted: false AND an empty dataset. The empty dataset is required:
+  // with labeled frames present the app takes the silent auto-complete path instead
+  // of showing the wizard.
+  const onboardingFresh = typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).get('onboarding') === 'fresh';
+
   let inferenceReady = false;
   let cameraSettings = {
     cameraWidth: 800,
@@ -144,13 +152,18 @@ export function installMockTauri(): () => void {
     claheTemporalAlpha: 0.20,
     preprocessingDebugView: false,
     showDetectionOverlay: false,
+    cameraIndex: 0,
   };
-  let uiSettings = { alertVolume: 0.3, alertDelaySeconds: 5, minimizeToTrayOnClose: true, startHiddenOnLogin: true };
+  let uiSettings = { alertVolume: 0.3, alertDelaySeconds: 5, minimizeToTrayOnClose: true, startHiddenOnLogin: true, onboardingCompleted: true };
   // Autostart is a registry-backed toggle natively; model it as in-memory state so
   // the real-app harness can mount SettingsTab (which reads it on mount) and toggle it.
   let autostartEnabled = false;
   let datasetVersion = 1;
   let frames: FrameMetadataDto[] = [{ ...initialFrame }];
+  if (onboardingFresh) {
+    uiSettings = { ...uiSettings, onboardingCompleted: false };
+    frames = [];
+  }
   let undoFrames: FrameMetadataDto[] | null = null;
   let undoRevision = 0;
   let activeModels: ActiveModelMetadata = {
@@ -325,8 +338,8 @@ export function installMockTauri(): () => void {
         datasetVersion = 0;
         activeModels = { posture: null, presence: null };
         trainingSettings = null;
-        cameraSettings = { ...cameraSettings, cameraWidth: 800, cameraHeight: 600, captureIntervalSeconds: 0.2, autoCaptureEnabled: false, autoCaptureIntervalSeconds: 2, privacyMode: true, claheStrength: 3.0, smoothingFrames: 5, tileMotionThreshold: 1.5, claheTemporalAlpha: 0.20, preprocessingDebugView: false, showDetectionOverlay: false };
-        uiSettings = { alertVolume: 0.3, alertDelaySeconds: 5, minimizeToTrayOnClose: true, startHiddenOnLogin: true };
+        cameraSettings = { ...cameraSettings, cameraWidth: 800, cameraHeight: 600, captureIntervalSeconds: 0.2, autoCaptureEnabled: false, autoCaptureIntervalSeconds: 2, privacyMode: true, claheStrength: 3.0, smoothingFrames: 5, tileMotionThreshold: 1.5, claheTemporalAlpha: 0.20, preprocessingDebugView: false, showDetectionOverlay: false, cameraIndex: 0 };
+        uiSettings = { alertVolume: 0.3, alertDelaySeconds: 5, minimizeToTrayOnClose: true, startHiddenOnLogin: true, onboardingCompleted: true };
         return snapshot();
       case 'get_training_status':
         return { running: finishTraining !== null };
@@ -366,7 +379,7 @@ export function installMockTauri(): () => void {
         cameraSettings = getArg<typeof cameraSettings>(args, 'settings');
         return null;
       case 'reset_camera_settings':
-        cameraSettings = { ...cameraSettings, cameraWidth: 800, cameraHeight: 600, captureIntervalSeconds: 0.2, autoCaptureEnabled: false, autoCaptureIntervalSeconds: 2, privacyMode: true, claheStrength: 3.0, smoothingFrames: 5, tileMotionThreshold: 1.5, claheTemporalAlpha: 0.20, preprocessingDebugView: false, showDetectionOverlay: false };
+        cameraSettings = { ...cameraSettings, cameraWidth: 800, cameraHeight: 600, captureIntervalSeconds: 0.2, autoCaptureEnabled: false, autoCaptureIntervalSeconds: 2, privacyMode: true, claheStrength: 3.0, smoothingFrames: 5, tileMotionThreshold: 1.5, claheTemporalAlpha: 0.20, preprocessingDebugView: false, showDetectionOverlay: false, cameraIndex: 0 };
         return cameraSettings;
       case 'get_ui_settings':
         return uiSettings;
@@ -374,7 +387,7 @@ export function installMockTauri(): () => void {
         uiSettings = getArg<typeof uiSettings>(args, 'settings');
         return null;
       case 'reset_ui_settings':
-        uiSettings = { alertVolume: 0.3, alertDelaySeconds: 5, minimizeToTrayOnClose: true, startHiddenOnLogin: true };
+        uiSettings = { alertVolume: 0.3, alertDelaySeconds: 5, minimizeToTrayOnClose: true, startHiddenOnLogin: true, onboardingCompleted: true };
         return uiSettings;
       case 'get_training_settings':
         return trainingSettings;

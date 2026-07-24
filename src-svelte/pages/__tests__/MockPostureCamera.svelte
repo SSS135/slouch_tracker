@@ -6,6 +6,8 @@
     onInferenceResult: (result: InferenceUiResult | null) => void;
     onFps: (fps: number) => void;
     onCanvasReady?: (ready: boolean) => void;
+    // Accepted but ignored: the mock has no native camera to restart.
+    cameraRestartRef?: { current: (() => Promise<void>) | null };
   }
 
   let { onInferenceResult, onFps, onCanvasReady }: Props = $props();

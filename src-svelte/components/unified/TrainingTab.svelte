@@ -58,12 +58,21 @@
 
   let resetModalOpen = $state(false);
   let cleanupModalOpen = $state(false);
+  // Feature/preprocessing/classifier/train controls live behind this disclosure so
+  // the tab opens on just the overview + dataset. Session-only UI state (not persisted);
+  // a fresh mount starts collapsed. Training still runs (auto-train or after expanding),
+  // and its progress/results surface in the always-visible Overview below.
+  let trainingSettingsExpanded = $state(false);
 
   const stats = $derived(datasetOps.stats.data ?? DEFAULT_STATS);
   const reservoir = $derived(datasetOps.reservoir.data ?? { count: 0, totalSeen: 0, maxSamples: 1000 });
   const pcaReady = $derived(reservoir.count >= 100);
   const statsLoading = $derived(datasetOps.stats.isLoading);
 
+  // Reactive fallback: if PCA is selected but the reservoir drops below the sample
+  // threshold, revert to random projection. Component-scoped reactive state (reads the
+  // reservoir + config, not any rendered control), so it keeps working while the
+  // Training settings disclosure is collapsed and its PCA radio is hidden.
   $effect(() => {
     if (datasetOps.reservoir.data && !pcaReady && config.dimReductionConfig.method === 'pca') {
       updateDimReductionConfig({ method: 'random_projection', components: 32 });
@@ -240,177 +249,195 @@
     {:else}
       <p class="extra-small-text muted">Feature reservoir: {reservoir.count}/{reservoir.maxSamples} samples ({reservoir.totalSeen} observed).</p>
     {/if}
-  </Section>
 
-  <Section title="Feature Types" subtitle="Select which feature vectors feed each classifier">
-    <FeatureMultiSelector
-      postureSelected={config.postureFeatureTypes}
-      presenceSelected={config.presenceFeatureTypes}
-      onPostureChange={updatePostureFeatureTypes}
-      onPresenceChange={updatePresenceFeatureTypes}
-      disabled={trainingState.isTraining || !trainingConfig.ready}
-    />
-  </Section>
-
-  <Section title="Preprocessing" subtitle="Feature normalization and dimensionality reduction">
-    <div class="section-stack">
-      <div class="control-stack">
-        <strong class="small-label">Feature Normalization</strong>
-        <RadioGroup
-          name="normalization-mode"
-          value={config.normalizationMode ?? 'layer'}
-          onChange={(value) => updateNormalizationMode(value as NormalizationMode)}
-          disabled={trainingState.isTraining || !trainingConfig.ready}
-          options={[
-            { value: 'none', label: 'None', description: 'No feature normalization' },
-            { value: 'layer', label: 'Layer Normalization', description: 'Normalize each sample independently (mean=0, std=1 per sample)' },
-            { value: 'z_score', label: 'Z-Score Normalization', description: 'Standardize each feature to mean=0, std=1', badge: 'Recommended', badgeColor: 'green' },
-            { value: 'calibrated', label: 'Calibrated (relative to good)', description: 'Center features on the good/present class so slouch reads as a consistent deviation' },
-          ]}
-        />
-        <HelpText text="Normalization improves model training stability. Z-score normalization is recommended for most use cases." />
+    <!-- Training status is surfaced here (not inside the collapsed disclosure) so an
+         auto-triggered or manual run — and its results — stay observable at all times. -->
+    {#if trainingState.isTraining}
+      <div class="training-progress" role="status" aria-live="polite">
+        <div class="inline-row">
+          <span class="spinner" aria-hidden="true"></span>
+          <span class="small-text">Training {trainingState.stage.replace('_', ' ')}: {Math.round(trainingState.progress)}%</span>
+        </div>
+        <progress aria-label="Training progress" max="100" value={trainingState.progress}></progress>
       </div>
+    {/if}
 
-      <div class="control-stack">
-        <strong class="small-label">Method:</strong>
-        <RadioGroup
-          options={[
-            { value: 'random_projection', label: 'Random Projection', description: 'Unsupervised, fast, preserves distances' },
-            { value: 'pca', label: pcaReady ? `PCA (${reservoir.count} samples available)` : `PCA (needs 100 samples, have ${reservoir.count})`, description: 'Unsupervised native dimensionality reduction', disabled: !pcaReady },
-            { value: 'none', label: 'None', description: 'Use all features' },
-          ]}
-          value={config.dimReductionConfig.method}
-          onChange={handleDimReductionMethodChange}
-          name="dimensionality-reduction-method"
-          disabled={trainingState.isTraining || !trainingConfig.ready}
-        />
+    {#if trainingState.error}
+      <div class="error-card preserve-lines" role="alert">{trainingState.error}</div>
+    {/if}
+
+    {#if trainingState.warnings.length > 0}
+      <div class="warning-card" role="status">
+        {#each trainingState.warnings as warning (warning)}
+          <div>{warning}</div>
+        {/each}
       </div>
+    {/if}
 
-      {#if config.dimReductionConfig.method === 'random_projection'}
-        <Slider
-          label="Dimensions"
-          value={config.dimReductionConfig.components}
-          minimumValue={1}
-          maximumValue={256}
-          fixedValues={[1, 2, 4, 8, 16, 32, 64, 128, 256]}
-          formatValue={(value) => String(value)}
-          onValueChange={(value) => handleDimReductionComponentsChange(String(value))}
-          helpText="Number of dimensions after reduction (power-of-2 steps)"
-          showTooltip
-          showMinMax
-          disabled={trainingState.isTraining || !trainingConfig.ready}
-        />
-      {/if}
+    {#if postureResult}
+      <div class="result-card green-card">
+        <strong>Posture Model Results</strong>
+        {#if postureResult.metrics.foldAccuracies.length > 0}
+          <span>CV Accuracy: {((postureResult.metrics.cvAccuracy ?? 0) * 100).toFixed(0)}% [{((postureResult.metrics.accuracyCiLow ?? 0) * 100).toFixed(0)}-{((postureResult.metrics.accuracyCiHigh ?? 0) * 100).toFixed(0)}%]</span>
+          <span>Balanced Accuracy: {((postureResult.metrics.balancedAccuracy ?? 0) * 100).toFixed(1)}%</span>
+          <span>Worst Fold: {((postureResult.metrics.worstFoldAccuracy ?? 0) * 100).toFixed(1)}%</span>
+          <span>MCC: {((postureResult.metrics.mcc ?? 0) * 100).toFixed(1)}%</span>
+          <span>F1 Score: {((postureResult.metrics.f1Score ?? 0) * 100).toFixed(1)}%</span>
+          {#if postureResult.metrics.cvType}<span class="muted">CV method: {postureResult.metrics.cvType}</span>{/if}
+        {:else}
+          <span class="warning-text">CV skipped - metrics unavailable</span>
+        {/if}
+      </div>
+    {/if}
 
-      {#if config.dimReductionConfig.method === 'pca'}
-        <Slider
-          label="Components"
-          value={config.dimReductionConfig.components}
-          minimumValue={1}
-          maximumValue={256}
-          fixedValues={[1, 2, 4, 8, 16, 32, 64, 128, 256]}
-          formatValue={(value) => String(value)}
-          onValueChange={(value) => handleDimReductionComponentsChange(String(value))}
-          helpText="Number of principal components (power-of-2 steps)"
-          showTooltip
-          showMinMax
-          disabled={trainingState.isTraining || !trainingConfig.ready}
-        />
-      {/if}
-
-      <HelpText text="Changing reduction settings requires retraining the model" />
-    </div>
+    {#if presenceResult}
+      <div class="result-card blue-card">
+        <strong>Presence Model Results</strong>
+        {#if presenceResult.metrics.foldAccuracies.length > 0}
+          <span>CV Accuracy: {((presenceResult.metrics.cvAccuracy ?? 0) * 100).toFixed(0)}% [{((presenceResult.metrics.accuracyCiLow ?? 0) * 100).toFixed(0)}-{((presenceResult.metrics.accuracyCiHigh ?? 0) * 100).toFixed(0)}%]</span>
+          <span>Balanced Accuracy: {((presenceResult.metrics.balancedAccuracy ?? 0) * 100).toFixed(1)}%</span>
+          <span>Worst Fold: {((presenceResult.metrics.worstFoldAccuracy ?? 0) * 100).toFixed(1)}%</span>
+          <span>MCC: {((presenceResult.metrics.mcc ?? 0) * 100).toFixed(1)}%</span>
+          <span>F1 Score: {((presenceResult.metrics.f1Score ?? 0) * 100).toFixed(1)}%</span>
+          {#if presenceResult.metrics.cvType}<span class="muted">CV method: {presenceResult.metrics.cvType}</span>{/if}
+        {:else}
+          <span class="warning-text">CV skipped - metrics unavailable</span>
+        {/if}
+      </div>
+    {/if}
   </Section>
 
-  <Section title="Classifier" subtitle="Select algorithm and parameters">
-    <ClassifierSelector
-      config={config.classifierConfig}
-      onChange={updateClassifierConfig}
-      disabled={trainingState.isTraining || !trainingConfig.ready}
-    />
-  </Section>
-
-  <Section title="Train Model">
-    <div class="control-stack">
+  <section class="disclosure-card">
+    <h2 class="collapsible-heading">
       <button
         type="button"
-        class="primary-button"
-        onclick={handleTrain}
-        disabled={!readyToTrain}
-        aria-busy={trainingState.isTraining}
+        class="collapsible-toggle"
+        aria-expanded={trainingSettingsExpanded}
+        aria-controls="training-settings-content"
+        onclick={() => { trainingSettingsExpanded = !trainingSettingsExpanded; }}
       >
-        {#if trainingState.isTraining}<span class="spinner" aria-hidden="true"></span>{/if}
-        {trainingState.isTraining ? 'Training…' : 'Train'}
+        <span>Training settings</span>
+        <span class="chevron" aria-hidden="true">{trainingSettingsExpanded ? '⌄' : '›'}</span>
       </button>
-      {#if trainingState.isTraining}
-        <button
-          type="button"
-          class="secondary-button warning-button"
-          onclick={() => { void training.cancel().catch((error: unknown) => showError(error instanceof Error ? error.message : 'Cancellation failed')); }}
-        >
-          Cancel training
-        </button>
-      {/if}
+    </h2>
+    <div id="training-settings-content" class="disclosure-content" hidden={!trainingSettingsExpanded}>
+      <Section title="Feature Types" subtitle="Select which feature vectors feed each classifier">
+        <FeatureMultiSelector
+          postureSelected={config.postureFeatureTypes}
+          presenceSelected={config.presenceFeatureTypes}
+          onPostureChange={updatePostureFeatureTypes}
+          onPresenceChange={updatePresenceFeatureTypes}
+          disabled={trainingState.isTraining || !trainingConfig.ready}
+        />
+      </Section>
 
-      {#if !stats.hasMinimumFrames}<HelpText text="Collect at least 1 frame per class to train." />{/if}
-      {#if config.postureFeatureTypes.length === 0}<HelpText text="Select at least one feature type for Posture model." />{/if}
-      {#if config.presenceFeatureTypes.length === 0}<HelpText text="Select at least one feature type for Presence model." />{/if}
-
-      {#if trainingState.error}
-        <div class="error-card preserve-lines" role="alert">{trainingState.error}</div>
-      {/if}
-
-      {#if trainingState.warnings.length > 0}
-        <div class="warning-card" role="status">
-          {#each trainingState.warnings as warning (warning)}
-            <div>{warning}</div>
-          {/each}
-        </div>
-      {/if}
-
-      {#if trainingState.isTraining}
-        <div class="training-progress" role="status" aria-live="polite">
-          <div class="inline-row">
-            <span class="spinner" aria-hidden="true"></span>
-            <span class="small-text">Training {trainingState.stage.replace('_', ' ')}: {Math.round(trainingState.progress)}%</span>
+      <Section title="Preprocessing" subtitle="Feature normalization and dimensionality reduction">
+        <div class="section-stack">
+          <div class="control-stack">
+            <strong class="small-label">Feature Normalization</strong>
+            <RadioGroup
+              name="normalization-mode"
+              value={config.normalizationMode ?? 'layer'}
+              onChange={(value) => updateNormalizationMode(value as NormalizationMode)}
+              disabled={trainingState.isTraining || !trainingConfig.ready}
+              options={[
+                { value: 'none', label: 'None', description: 'No feature normalization' },
+                { value: 'layer', label: 'Layer Normalization', description: 'Normalize each sample independently (mean=0, std=1 per sample)' },
+                { value: 'z_score', label: 'Z-Score Normalization', description: 'Standardize each feature to mean=0, std=1', badge: 'Recommended', badgeColor: 'green' },
+                { value: 'calibrated', label: 'Calibrated (relative to good)', description: 'Center features on the good/present class so slouch reads as a consistent deviation' },
+              ]}
+            />
+            <HelpText text="Normalization improves model training stability. Z-score normalization is recommended for most use cases." />
           </div>
-          <progress aria-label="Training progress" max="100" value={trainingState.progress}></progress>
-        </div>
-      {/if}
 
-      {#if postureResult}
-        <div class="result-card green-card">
-          <strong>Posture Model Results</strong>
-          {#if postureResult.metrics.foldAccuracies.length > 0}
-            <span>CV Accuracy: {((postureResult.metrics.cvAccuracy ?? 0) * 100).toFixed(0)}% [{((postureResult.metrics.accuracyCiLow ?? 0) * 100).toFixed(0)}-{((postureResult.metrics.accuracyCiHigh ?? 0) * 100).toFixed(0)}%]</span>
-            <span>Balanced Accuracy: {((postureResult.metrics.balancedAccuracy ?? 0) * 100).toFixed(1)}%</span>
-            <span>Worst Fold: {((postureResult.metrics.worstFoldAccuracy ?? 0) * 100).toFixed(1)}%</span>
-            <span>MCC: {((postureResult.metrics.mcc ?? 0) * 100).toFixed(1)}%</span>
-            <span>F1 Score: {((postureResult.metrics.f1Score ?? 0) * 100).toFixed(1)}%</span>
-            {#if postureResult.metrics.cvType}<span class="muted">CV method: {postureResult.metrics.cvType}</span>{/if}
-          {:else}
-            <span class="warning-text">CV skipped - metrics unavailable</span>
-          {/if}
-        </div>
-      {/if}
+          <div class="control-stack">
+            <strong class="small-label">Method:</strong>
+            <RadioGroup
+              options={[
+                { value: 'random_projection', label: 'Random Projection', description: 'Unsupervised, fast, preserves distances' },
+                { value: 'pca', label: pcaReady ? `PCA (${reservoir.count} samples available)` : `PCA (needs 100 samples, have ${reservoir.count})`, description: 'Unsupervised native dimensionality reduction', disabled: !pcaReady },
+                { value: 'none', label: 'None', description: 'Use all features' },
+              ]}
+              value={config.dimReductionConfig.method}
+              onChange={handleDimReductionMethodChange}
+              name="dimensionality-reduction-method"
+              disabled={trainingState.isTraining || !trainingConfig.ready}
+            />
+          </div>
 
-      {#if presenceResult}
-        <div class="result-card blue-card">
-          <strong>Presence Model Results</strong>
-          {#if presenceResult.metrics.foldAccuracies.length > 0}
-            <span>CV Accuracy: {((presenceResult.metrics.cvAccuracy ?? 0) * 100).toFixed(0)}% [{((presenceResult.metrics.accuracyCiLow ?? 0) * 100).toFixed(0)}-{((presenceResult.metrics.accuracyCiHigh ?? 0) * 100).toFixed(0)}%]</span>
-            <span>Balanced Accuracy: {((presenceResult.metrics.balancedAccuracy ?? 0) * 100).toFixed(1)}%</span>
-            <span>Worst Fold: {((presenceResult.metrics.worstFoldAccuracy ?? 0) * 100).toFixed(1)}%</span>
-            <span>MCC: {((presenceResult.metrics.mcc ?? 0) * 100).toFixed(1)}%</span>
-            <span>F1 Score: {((presenceResult.metrics.f1Score ?? 0) * 100).toFixed(1)}%</span>
-            {#if presenceResult.metrics.cvType}<span class="muted">CV method: {presenceResult.metrics.cvType}</span>{/if}
-          {:else}
-            <span class="warning-text">CV skipped - metrics unavailable</span>
+          {#if config.dimReductionConfig.method === 'random_projection'}
+            <Slider
+              label="Dimensions"
+              value={config.dimReductionConfig.components}
+              minimumValue={1}
+              maximumValue={256}
+              fixedValues={[1, 2, 4, 8, 16, 32, 64, 128, 256]}
+              formatValue={(value) => String(value)}
+              onValueChange={(value) => handleDimReductionComponentsChange(String(value))}
+              helpText="Number of dimensions after reduction (power-of-2 steps)"
+              showTooltip
+              showMinMax
+              disabled={trainingState.isTraining || !trainingConfig.ready}
+            />
           {/if}
+
+          {#if config.dimReductionConfig.method === 'pca'}
+            <Slider
+              label="Components"
+              value={config.dimReductionConfig.components}
+              minimumValue={1}
+              maximumValue={256}
+              fixedValues={[1, 2, 4, 8, 16, 32, 64, 128, 256]}
+              formatValue={(value) => String(value)}
+              onValueChange={(value) => handleDimReductionComponentsChange(String(value))}
+              helpText="Number of principal components (power-of-2 steps)"
+              showTooltip
+              showMinMax
+              disabled={trainingState.isTraining || !trainingConfig.ready}
+            />
+          {/if}
+
+          <HelpText text="Changing reduction settings requires retraining the model" />
         </div>
-      {/if}
+      </Section>
+
+      <Section title="Classifier" subtitle="Select algorithm and parameters">
+        <ClassifierSelector
+          config={config.classifierConfig}
+          onChange={updateClassifierConfig}
+          disabled={trainingState.isTraining || !trainingConfig.ready}
+        />
+      </Section>
+
+      <Section title="Train Model">
+        <div class="control-stack">
+          <button
+            type="button"
+            class="primary-button"
+            onclick={handleTrain}
+            disabled={!readyToTrain}
+            aria-busy={trainingState.isTraining}
+          >
+            {#if trainingState.isTraining}<span class="spinner" aria-hidden="true"></span>{/if}
+            {trainingState.isTraining ? 'Training…' : 'Train'}
+          </button>
+          {#if trainingState.isTraining}
+            <button
+              type="button"
+              class="secondary-button warning-button"
+              onclick={() => { void training.cancel().catch((error: unknown) => showError(error instanceof Error ? error.message : 'Cancellation failed')); }}
+            >
+              Cancel training
+            </button>
+          {/if}
+
+          {#if !stats.hasMinimumFrames}<HelpText text="Collect at least 3 frames per class to train." />{/if}
+          {#if config.postureFeatureTypes.length === 0}<HelpText text="Select at least one feature type for Posture model." />{/if}
+          {#if config.presenceFeatureTypes.length === 0}<HelpText text="Select at least one feature type for Presence model." />{/if}
+        </div>
+      </Section>
     </div>
-  </Section>
+  </section>
 
   <Section title="Dataset">
     <div class="button-row">
@@ -529,5 +556,49 @@
   .green-card { background: rgb(47 158 68 / 70%); border-color: rgb(105 219 124 / 45%); }
   .blue-card { background: rgb(25 113 194 / 70%); border-color: rgb(116 192 252 / 45%); }
   .warning-text { color: #ffec99; }
+
+  /* Collapsed "Training settings" disclosure — same mechanism as SettingsTab
+     (button-in-heading + chevron + hidden content guarded so display:flex does
+     not defeat the `hidden` attribute). Wraps the config sections as nested cards. */
+  .disclosure-card {
+    box-sizing: border-box;
+    border: 1px solid var(--mantine-color-default-border, #424242);
+    border-radius: var(--mantine-radius-lg, 16px);
+    padding: var(--mantine-spacing-md, 16px);
+    background: var(--mantine-color-dark-7, #242424);
+  }
+  .collapsible-heading { margin: 0; }
+  .collapsible-toggle {
+    display: flex;
+    width: 100%;
+    min-height: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--mantine-color-text, #c1c2c5);
+    font: inherit;
+    font-size: var(--mantine-font-size-md, 1rem);
+    line-height: 1.55;
+    font-weight: 700;
+    text-align: left;
+    cursor: pointer;
+  }
+  .collapsible-toggle:hover:not(:disabled),
+  .collapsible-toggle:focus-visible { filter: none; }
+  .collapsible-toggle .chevron {
+    color: var(--mantine-color-dimmed, #909296);
+    font-size: 1.25rem;
+    line-height: 1;
+  }
+  .disclosure-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--mantine-spacing-lg, 20px);
+    margin-top: var(--mantine-spacing-md, 16px);
+  }
+  .disclosure-content[hidden] { display: none; }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>

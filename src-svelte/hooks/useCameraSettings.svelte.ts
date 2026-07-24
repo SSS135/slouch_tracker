@@ -8,6 +8,7 @@ import { logger } from '../services/logging/logger';
 export interface CameraSettings {
   cameraWidth: number;
   cameraHeight: number;
+  cameraIndex: number;
   captureIntervalSeconds: number;
   alertVolume: number;
   autoCaptureEnabled: boolean;
@@ -22,6 +23,7 @@ export interface CameraSettings {
   showDetectionOverlay: boolean;
   minimizeToTrayOnClose: boolean;
   startHiddenOnLogin: boolean;
+  onboardingCompleted: boolean;
 }
 
 export interface CameraSettingsState {
@@ -38,6 +40,7 @@ export interface CameraSettingsState {
 const LOADING_SETTINGS: CameraSettings = {
   cameraWidth: 0,
   cameraHeight: 0,
+  cameraIndex: 0,
   captureIntervalSeconds: 0,
   alertVolume: 0,
   autoCaptureEnabled: false,
@@ -52,6 +55,7 @@ const LOADING_SETTINGS: CameraSettings = {
   showDetectionOverlay: false,
   minimizeToTrayOnClose: false,
   startHiddenOnLogin: false,
+  onboardingCompleted: false,
 };
 
 function requiredNumber(value: number | null, name: string): number {
@@ -65,6 +69,9 @@ function validateSettings(settings: CameraSettings): CameraSettings {
   if (!Number.isSafeInteger(settings.cameraWidth) || settings.cameraWidth <= 0
     || !Number.isSafeInteger(settings.cameraHeight) || settings.cameraHeight <= 0) {
     throw new Error('Camera dimensions must be positive safe integers.');
+  }
+  if (!Number.isSafeInteger(settings.cameraIndex) || settings.cameraIndex < 0) {
+    throw new Error('Camera index must be a non-negative integer.');
   }
   if (!Number.isFinite(settings.captureIntervalSeconds) || settings.captureIntervalSeconds <= 0
     || !Number.isFinite(settings.autoCaptureIntervalSeconds) || settings.autoCaptureIntervalSeconds <= 0
@@ -80,7 +87,8 @@ function validateSettings(settings: CameraSettings): CameraSettings {
     || typeof settings.showDetectionOverlay !== 'boolean'
     || typeof settings.preprocessingDebugView !== 'boolean'
     || typeof settings.minimizeToTrayOnClose !== 'boolean'
-    || typeof settings.startHiddenOnLogin !== 'boolean') {
+    || typeof settings.startHiddenOnLogin !== 'boolean'
+    || typeof settings.onboardingCompleted !== 'boolean') {
     throw new Error('Camera toggle settings are invalid.');
   }
   if (!Number.isFinite(settings.claheStrength)
@@ -126,6 +134,9 @@ function combine(camera: NativeCameraSettings, ui: NativeUiSettings): CameraSett
   return validateSettings({
     cameraWidth: camera.cameraWidth,
     cameraHeight: camera.cameraHeight,
+    // Optional in the generated bindings (serde default on the Rust field); a
+    // settings row from a prior app version omits it, so coalesce to camera 0.
+    cameraIndex: camera.cameraIndex ?? 0,
     captureIntervalSeconds: requiredNumber(camera.captureIntervalSeconds, 'capture interval'),
     alertVolume: requiredNumber(ui.alertVolume, 'alert volume'),
     autoCaptureEnabled: camera.autoCaptureEnabled,
@@ -147,6 +158,9 @@ function combine(camera: NativeCameraSettings, ui: NativeUiSettings): CameraSett
     // settings row that predates them omits the fields, so coalesce to on.
     minimizeToTrayOnClose: ui.minimizeToTrayOnClose ?? true,
     startHiddenOnLogin: ui.startHiddenOnLogin ?? true,
+    // Optional in the generated bindings (serde default on the Rust field); a
+    // settings row that predates onboarding omits it, so coalesce to not-done.
+    onboardingCompleted: ui.onboardingCompleted ?? false,
   });
 }
 
@@ -155,6 +169,7 @@ function split(settings: CameraSettings): { camera: NativeCameraSettings; ui: Na
     camera: {
       cameraWidth: settings.cameraWidth,
       cameraHeight: settings.cameraHeight,
+      cameraIndex: settings.cameraIndex,
       captureIntervalSeconds: settings.captureIntervalSeconds,
       autoCaptureEnabled: settings.autoCaptureEnabled,
       autoCaptureIntervalSeconds: settings.autoCaptureIntervalSeconds,
@@ -171,6 +186,7 @@ function split(settings: CameraSettings): { camera: NativeCameraSettings; ui: Na
       alertDelaySeconds: settings.alertDelaySeconds,
       minimizeToTrayOnClose: settings.minimizeToTrayOnClose,
       startHiddenOnLogin: settings.startHiddenOnLogin,
+      onboardingCompleted: settings.onboardingCompleted,
     },
   };
 }

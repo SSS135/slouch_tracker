@@ -49,6 +49,12 @@ function renderTab(
   });
 }
 
+// Camera, privacy, and developer-tool controls now live behind the collapsed
+// "Developer settings" disclosure; tests that assert on them must open it first.
+async function expandDeveloper(): Promise<void> {
+  await fireEvent.click(screen.getByRole('button', { name: /developer settings/i }));
+}
+
 beforeEach(() => {
   nativeMock.getAutostartEnabled.mockResolvedValue(false);
   nativeMock.setAutostartEnabled.mockResolvedValue(undefined);
@@ -59,9 +65,59 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('SettingsTab processed view toggle', () => {
-  it('renders the toggle with the detector-view hint', () => {
+describe('SettingsTab developer disclosure', () => {
+  it('keeps camera, privacy, and developer controls collapsed by default', () => {
     renderTab();
+    expect(screen.getByRole('button', { name: /developer settings/i })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    // Moved controls are removed from the accessibility tree until expanded.
+    expect(screen.queryByRole('checkbox', { name: /privacy mode/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /detection overlay/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('slider', { name: /motion threshold/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset All Data' })).not.toBeInTheDocument();
+    // Alert + startup controls stay visible above the disclosure.
+    expect(screen.getByRole('slider', { name: /audio volume/i })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /minimize to tray on close/i })).toBeInTheDocument();
+  });
+
+  it('reveals the moved camera and privacy controls when expanded', async () => {
+    renderTab();
+    await expandDeveloper();
+    expect(screen.getByRole('button', { name: /developer settings/i })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(screen.getByRole('checkbox', { name: /privacy mode/i })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /detection overlay/i })).toBeInTheDocument();
+    expect(screen.getByRole('slider', { name: /motion threshold/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset All Data' })).toBeInTheDocument();
+  });
+
+  it('collapses again when the disclosure is toggled a second time', async () => {
+    renderTab();
+    await expandDeveloper();
+    expect(screen.getByRole('checkbox', { name: /privacy mode/i })).toBeInTheDocument();
+    await expandDeveloper();
+    expect(screen.queryByRole('checkbox', { name: /privacy mode/i })).not.toBeInTheDocument();
+  });
+
+  it('still emits onUpdateSettings from a moved toggle after expanding', async () => {
+    const onUpdateSettings = vi.fn();
+    render(SettingsTab, {
+      props: { settings: baseSettings, onUpdateSettings, onResetSettings: vi.fn(), isModelLoaded: false },
+    });
+    await expandDeveloper();
+    await fireEvent.click(screen.getByRole('checkbox', { name: /privacy mode/i }));
+    expect(onUpdateSettings).toHaveBeenCalledWith({ privacyMode: true });
+  });
+});
+
+describe('SettingsTab processed view toggle', () => {
+  it('renders the toggle with the detector-view hint', async () => {
+    renderTab();
+    await expandDeveloper();
     const toggle = screen.getByRole('checkbox', { name: /show processed view/i });
     expect(toggle).toBeEnabled();
     expect(toggle).not.toBeChecked();
@@ -71,20 +127,23 @@ describe('SettingsTab processed view toggle', () => {
   it('reports toggle changes through onProcessedViewChange', async () => {
     const onProcessedViewChange = vi.fn();
     renderTab({ onProcessedViewChange });
+    await expandDeveloper();
     await fireEvent.click(screen.getByRole('checkbox', { name: /show processed view/i }));
     expect(onProcessedViewChange).toHaveBeenCalledWith(true);
   });
 
-  it('reflects an enabled processed view', () => {
+  it('reflects an enabled processed view', async () => {
     renderTab({ processedView: true });
+    await expandDeveloper();
     expect(screen.getByRole('checkbox', { name: /show processed view/i })).toBeChecked();
   });
 
-  it('is disabled and unchecked in privacy mode with an explanatory hint', () => {
+  it('is disabled and unchecked in privacy mode with an explanatory hint', async () => {
     renderTab({
       settings: { ...baseSettings, privacyMode: true },
       processedView: true,
     });
+    await expandDeveloper();
     const toggle = screen.getByRole('checkbox', { name: /show processed view/i });
     expect(toggle).toBeDisabled();
     expect(toggle).not.toBeChecked();
@@ -93,8 +152,9 @@ describe('SettingsTab processed view toggle', () => {
 });
 
 describe('SettingsTab preprocessing tuning controls', () => {
-  it('renders the motion threshold and CLAHE smoothing sliders with their help text', () => {
+  it('renders the motion threshold and CLAHE smoothing sliders with their help text', async () => {
     renderTab();
+    await expandDeveloper();
     expect(screen.getByRole('slider', { name: /motion threshold/i })).toBeInTheDocument();
     expect(screen.getByRole('slider', { name: /clahe smoothing/i })).toBeInTheDocument();
     expect(screen.getByText(/lower = stricter/i)).toBeInTheDocument();
@@ -106,6 +166,7 @@ describe('SettingsTab preprocessing tuning controls', () => {
     render(SettingsTab, {
       props: { settings: baseSettings, onUpdateSettings, onResetSettings: vi.fn(), isModelLoaded: false },
     });
+    await expandDeveloper();
     await fireEvent.input(screen.getByRole('slider', { name: /motion threshold/i }), {
       target: { value: '10' },
     });
@@ -117,38 +178,43 @@ describe('SettingsTab preprocessing tuning controls', () => {
     render(SettingsTab, {
       props: { settings: baseSettings, onUpdateSettings, onResetSettings: vi.fn(), isModelLoaded: false },
     });
+    await expandDeveloper();
     await fireEvent.input(screen.getByRole('slider', { name: /clahe smoothing/i }), {
       target: { value: '0.5' },
     });
     expect(onUpdateSettings).toHaveBeenCalledWith({ claheTemporalAlpha: 0.5 });
   });
 
-  it('reflects the tuning slider values from settings', () => {
+  it('reflects the tuning slider values from settings', async () => {
     renderTab({ settings: { ...baseSettings, tileMotionThreshold: 7.5, claheTemporalAlpha: 0.3 } });
+    await expandDeveloper();
     expect(screen.getByText('7.5')).toBeInTheDocument();
     expect(screen.getByText('0.30')).toBeInTheDocument();
   });
 });
 
 describe('SettingsTab CLAHE smoothing gating', () => {
-  it('disables the CLAHE smoothing slider and explains why when CLAHE is off', () => {
+  it('disables the CLAHE smoothing slider and explains why when CLAHE is off', async () => {
     renderTab({ settings: { ...baseSettings, claheStrength: 0 } });
+    await expandDeveloper();
     expect(screen.getByRole('slider', { name: /clahe smoothing/i })).toBeDisabled();
     expect(screen.getByText(/clahe is off \(strength 0\), so this has no effect/i)).toBeInTheDocument();
     // The motion-threshold slider is independent of CLAHE and stays enabled.
     expect(screen.getByRole('slider', { name: /motion threshold/i })).toBeEnabled();
   });
 
-  it('enables the CLAHE smoothing slider and explains the flicker-only effect when CLAHE is on', () => {
+  it('enables the CLAHE smoothing slider and explains the flicker-only effect when CLAHE is on', async () => {
     renderTab({ settings: { ...baseSettings, claheStrength: 3.5 } });
+    await expandDeveloper();
     expect(screen.getByRole('slider', { name: /clahe smoothing/i })).toBeEnabled();
     expect(screen.getByText(/no visible change on a static, evenly-lit scene/i)).toBeInTheDocument();
   });
 });
 
 describe('SettingsTab preprocessing debug view toggle', () => {
-  it('renders the debug view toggle off by default with its help text', () => {
+  it('renders the debug view toggle off by default with its help text', async () => {
     renderTab();
+    await expandDeveloper();
     const toggle = screen.getByRole('checkbox', { name: /preprocessing debug view/i });
     expect(toggle).not.toBeChecked();
     expect(screen.getByText(/tint tiles by accumulation depth/i)).toBeInTheDocument();
@@ -159,19 +225,22 @@ describe('SettingsTab preprocessing debug view toggle', () => {
     render(SettingsTab, {
       props: { settings: baseSettings, onUpdateSettings, onResetSettings: vi.fn(), isModelLoaded: false },
     });
+    await expandDeveloper();
     await fireEvent.click(screen.getByRole('checkbox', { name: /preprocessing debug view/i }));
     expect(onUpdateSettings).toHaveBeenCalledWith({ preprocessingDebugView: true });
   });
 
-  it('reflects an enabled debug view', () => {
+  it('reflects an enabled debug view', async () => {
     renderTab({ settings: { ...baseSettings, preprocessingDebugView: true } });
+    await expandDeveloper();
     expect(screen.getByRole('checkbox', { name: /preprocessing debug view/i })).toBeChecked();
   });
 });
 
 describe('SettingsTab detection overlay toggle', () => {
-  it('renders the detection overlay toggle off by default with its diagnostic hint', () => {
+  it('renders the detection overlay toggle off by default with its diagnostic hint', async () => {
     renderTab();
+    await expandDeveloper();
     const toggle = screen.getByRole('checkbox', { name: /detection overlay/i });
     expect(toggle).not.toBeChecked();
     expect(
@@ -189,12 +258,14 @@ describe('SettingsTab detection overlay toggle', () => {
         isModelLoaded: false,
       },
     });
+    await expandDeveloper();
     await fireEvent.click(screen.getByRole('checkbox', { name: /detection overlay/i }));
     expect(onUpdateSettings).toHaveBeenCalledWith({ showDetectionOverlay: true });
   });
 
-  it('reflects an enabled detection overlay', () => {
+  it('reflects an enabled detection overlay', async () => {
     renderTab({ settings: { ...baseSettings, showDetectionOverlay: true } });
+    await expandDeveloper();
     expect(screen.getByRole('checkbox', { name: /detection overlay/i })).toBeChecked();
   });
 });
@@ -241,6 +312,50 @@ describe('SettingsTab start-on-login toggle', () => {
 
     await waitFor(() => expect(screen.getByText(/access is denied/i)).toBeInTheDocument());
     expect(toggle).not.toBeChecked();
+  });
+});
+
+describe('SettingsTab run setup again', () => {
+  it('renders the button with its help text and calls the callback on click', async () => {
+    const onRunSetupAgain = vi.fn();
+    render(SettingsTab, {
+      props: {
+        settings: baseSettings,
+        onUpdateSettings: vi.fn(),
+        onResetSettings: vi.fn(),
+        isModelLoaded: false,
+        onRunSetupAgain,
+      },
+    });
+    await expandDeveloper();
+    expect(screen.getByText(/reopens the first-run setup wizard/i)).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Run Setup Again' }));
+    expect(onRunSetupAgain).toHaveBeenCalledOnce();
+  });
+
+  it('does not trigger the destructive reset handler', async () => {
+    const onRunSetupAgain = vi.fn();
+    const onResetSettings = vi.fn();
+    render(SettingsTab, {
+      props: {
+        settings: baseSettings,
+        onUpdateSettings: vi.fn(),
+        onResetSettings,
+        isModelLoaded: false,
+        onRunSetupAgain,
+      },
+    });
+    await expandDeveloper();
+    await fireEvent.click(screen.getByRole('button', { name: 'Run Setup Again' }));
+    expect(onResetSettings).not.toHaveBeenCalled();
+  });
+
+  it('stays a harmless no-op when the callback prop is absent', async () => {
+    renderTab();
+    await expandDeveloper();
+    await fireEvent.click(screen.getByRole('button', { name: 'Run Setup Again' }));
+    expect(screen.getByRole('button', { name: 'Run Setup Again' })).toBeInTheDocument();
   });
 });
 

@@ -16,4 +16,11 @@ export const PERSISTED_CAMERA_SETTINGS = {
   claheStrength: 1.25,
   smoothingFrames: 6,
   showDetectionOverlay: true,
+  // get_camera_settings serializes the FULL CameraSettings struct, so the strict
+  // toEqual in 31-persistence-restart-verify needs every serde-defaulted field
+  // present too. Values match slouch-domain's Rust defaults.
+  tileMotionThreshold: 1.5,
+  claheTemporalAlpha: 0.2,
+  preprocessingDebugView: false,
+  cameraIndex: 0,
 };

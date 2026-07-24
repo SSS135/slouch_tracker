@@ -40,8 +40,8 @@ const mocks = vi.hoisted(() => {
       clearFrames: vi.fn(),
       removeFrame: vi.fn(),
     },
-    settings: {
-      settings: {
+    settings: (() => {
+      const values = {
         autoCaptureEnabled: false,
         autoCaptureIntervalSeconds: 5,
         captureIntervalSeconds: 1,
@@ -49,6 +49,7 @@ const mocks = vi.hoisted(() => {
         alertDelaySeconds: 5,
         cameraWidth: 800,
         cameraHeight: 600,
+        cameraIndex: 0,
         privacyMode: false,
         claheStrength: 3.5,
         smoothingFrames: 1,
@@ -56,15 +57,21 @@ const mocks = vi.hoisted(() => {
         claheTemporalAlpha: 0.15,
         preprocessingDebugView: false,
         showDetectionOverlay: false,
-      },
-      ready: true,
-      error: null,
-      updateSettings: vi.fn(),
-      resetSettings: vi.fn(),
-      reload: vi.fn(),
-      reconcile: vi.fn(),
-      flush: vi.fn().mockResolvedValue(undefined),
-    },
+        onboardingCompleted: true,
+      };
+      return {
+        settings: values,
+        ready: true,
+        error: null,
+        // Mirrors the real hook's optimistic apply so the onboarding gate reads
+        // the updated flags immediately after updateSettings.
+        updateSettings: vi.fn((updates: Partial<typeof values>) => { Object.assign(values, updates); }),
+        resetSettings: vi.fn(),
+        reload: vi.fn(),
+        reconcile: vi.fn(),
+        flush: vi.fn().mockResolvedValue(undefined),
+      };
+    })(),
     autoCaptureHook: vi.fn(),
     postureChangeHook: vi.fn(),
     notification: {
@@ -74,7 +81,7 @@ const mocks = vi.hoisted(() => {
       showConfirm: vi.fn(),
     },
     dataset: {
-      stats: { data: null as null | { hasMinimumFrames: boolean }, refetch: vi.fn() },
+      stats: { data: null as null | { hasMinimumFrames: boolean; good?: number; bad?: number; away?: number }, refetch: vi.fn() },
       frames: { data: [] },
       needsRetraining: { data: false as boolean, refetch: vi.fn() } as { data: boolean; refetch: ReturnType<typeof vi.fn> },
       canUndo: { data: { available: false, depth: 0, nextAction: null, revision: 0 } },
@@ -110,6 +117,7 @@ const mocks = vi.hoisted(() => {
       onTrackingStateChanged: vi.fn().mockResolvedValue(vi.fn()),
       getAutostartEnabled: vi.fn().mockResolvedValue(false),
       setAutostartEnabled: vi.fn().mockResolvedValue(undefined),
+      listCameras: vi.fn().mockResolvedValue([]),
     },
     nativeApp: {
       status: { inferenceReady: true } as { inferenceReady: boolean } | null,
@@ -181,6 +189,9 @@ beforeEach(() => {
   mocks.settings.error = null;
   mocks.settings.settings.autoCaptureEnabled = false;
   mocks.settings.settings.showDetectionOverlay = false;
+  mocks.settings.settings.onboardingCompleted = true;
+  mocks.settings.settings.cameraIndex = 0;
+  mocks.native.listCameras.mockResolvedValue([]);
   mocks.nativeApp.status = { inferenceReady: true };
   mocks.nativeApp.error = null;
   mocks.settings.resetSettings.mockResolvedValue(undefined);
@@ -500,6 +511,7 @@ describe('PostureTrackerApp native view integration', () => {
   it('resets native dataset and settings only after confirmation', async () => {
     await renderReady();
     await fireEvent.click(screen.getByRole('button', { name: 'Open control panel' }));
+    await fireEvent.click(screen.getByRole('button', { name: /developer settings/i }));
     await fireEvent.click(screen.getByRole('button', { name: 'Reset All Data' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
     await waitFor(() => expect(mocks.dataset.resetAllData.mutateAsync).toHaveBeenCalledTimes(1));
@@ -553,6 +565,7 @@ describe('PostureTrackerApp status badge model state', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Load inference A' }));
     await waitFor(() => expect(screen.queryByText('No Model Trained')).not.toBeInTheDocument());
     await fireEvent.click(screen.getByRole('button', { name: 'Open control panel' }));
+    await fireEvent.click(screen.getByRole('button', { name: /developer settings/i }));
     await fireEvent.click(screen.getByRole('button', { name: 'Reset All Data' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
     await waitFor(() => expect(mocks.dataset.resetAllData.mutateAsync).toHaveBeenCalled());
@@ -583,6 +596,7 @@ describe('PostureTrackerApp status badge model state', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Load away inference' }));
     await waitFor(() => expect(screen.getByText('Person Away')).toBeInTheDocument());
     await fireEvent.click(screen.getByRole('button', { name: 'Open control panel' }));
+    await fireEvent.click(screen.getByRole('button', { name: /developer settings/i }));
     await fireEvent.click(screen.getByRole('button', { name: 'Reset All Data' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
     await waitFor(() => expect(mocks.dataset.resetAllData.mutateAsync).toHaveBeenCalled());
@@ -780,5 +794,112 @@ describe('PostureTrackerApp first-run pose-model gate', () => {
     await renderReady();
     expect(screen.queryByRole('dialog', { name: 'Setting up posture detection' })).not.toBeInTheDocument();
     expect(screen.queryByText(/one-time download of the pose-detection model/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('PostureTrackerApp onboarding wizard', () => {
+  function seedFirstRun(): void {
+    mocks.settings.settings.onboardingCompleted = false;
+    mocks.dataset.stats.data = { hasMinimumFrames: false, good: 0, bad: 0, away: 0 };
+  }
+
+  it('never shows the wizard when onboarding is already completed', async () => {
+    await renderReady();
+    expect(screen.queryByTestId('onboarding-overlay')).not.toBeInTheDocument();
+  });
+
+  it('silently completes onboarding for an existing install with labeled frames', async () => {
+    mocks.settings.settings.onboardingCompleted = false;
+    mocks.dataset.stats.data = { hasMinimumFrames: false, good: 2, bad: 0, away: 0 };
+    await renderReady();
+    await waitFor(() => expect(mocks.settings.updateSettings).toHaveBeenCalledWith({ onboardingCompleted: true }));
+    expect(screen.queryByTestId('onboarding-overlay')).not.toBeInTheDocument();
+  });
+
+  it('opens the wizard on a true first run and hides the control-panel chrome', async () => {
+    seedFirstRun();
+    await renderReady();
+    expect(screen.getByTestId('onboarding-overlay')).toBeInTheDocument();
+    expect(screen.getByText('Select your camera')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open control panel' })).not.toBeInTheDocument();
+  });
+
+  it('stays undecided while stats are not yet fetched', async () => {
+    mocks.settings.settings.onboardingCompleted = false;
+    mocks.dataset.stats.data = null;
+    await renderReady();
+    expect(screen.queryByTestId('onboarding-overlay')).not.toBeInTheDocument();
+    expect(mocks.settings.updateSettings).not.toHaveBeenCalledWith({ onboardingCompleted: true });
+  });
+
+  it('completes and closes the wizard on Skip setup', async () => {
+    seedFirstRun();
+    await renderReady();
+    await fireEvent.click(screen.getByRole('button', { name: 'Skip setup' }));
+    expect(mocks.settings.updateSettings).toHaveBeenCalledWith({ onboardingCompleted: true });
+    await waitFor(() => expect(screen.queryByTestId('onboarding-overlay')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Open control panel' })).toBeInTheDocument();
+  });
+
+  it('changes the camera through the wizard camera step with a settings flush', async () => {
+    seedFirstRun();
+    mocks.native.listCameras.mockResolvedValue([
+      { index: '0', name: 'Integrated Camera', description: 'internal' },
+      { index: '1', name: 'USB Camera', description: 'usb' },
+    ]);
+    await renderReady();
+    const select = await screen.findByRole('combobox');
+    await fireEvent.change(select, { target: { value: '1' } });
+    await waitFor(() => expect(mocks.settings.updateSettings).toHaveBeenCalledWith({ cameraIndex: 1 }));
+    expect(mocks.settings.flush).toHaveBeenCalled();
+  });
+
+  it('advances the step heading as captures are persisted', async () => {
+    seedFirstRun();
+    await renderReady();
+    await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(screen.getByText('Capture good posture')).toBeInTheDocument();
+    for (let capture = 1; capture <= 5; capture += 1) {
+      await fireEvent.click(screen.getByRole('button', { name: 'Capture frame' }));
+      await waitFor(() => expect(mocks.frameSampler.saveFrame).toHaveBeenCalledTimes(capture));
+    }
+    await waitFor(() => expect(screen.getByText('Capture bad posture')).toBeInTheDocument());
+  });
+
+  it('finishes the wizard when the optional away step is skipped', async () => {
+    seedFirstRun();
+    await renderReady();
+    await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    for (let capture = 1; capture <= 10; capture += 1) {
+      await fireEvent.click(screen.getByRole('button', { name: 'Capture frame' }));
+      await waitFor(() => expect(mocks.frameSampler.saveFrame).toHaveBeenCalledTimes(capture));
+    }
+    await waitFor(() => expect(screen.getByText('Capture away frames')).toBeInTheDocument());
+    await fireEvent.click(screen.getByRole('button', { name: 'Skip this step' }));
+    expect(mocks.settings.updateSettings).toHaveBeenCalledWith({ onboardingCompleted: true });
+    await waitFor(() => expect(screen.queryByTestId('onboarding-overlay')).not.toBeInTheDocument());
+  });
+
+  it('suppresses auto-train while the wizard is running', async () => {
+    seedFirstRun();
+    mocks.dataset.stats.refetch.mockResolvedValue({ data: { hasMinimumFrames: true } });
+    await renderReady();
+    await fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Capture frame' }));
+    await waitFor(() => expect(mocks.dataset.invalidateAll).toHaveBeenCalled());
+    await Promise.resolve();
+    expect(mocks.training.trainAndDeploy).not.toHaveBeenCalled();
+  });
+
+  it('reopens the wizard from Run Setup Again in the settings panel', async () => {
+    await renderReady();
+    expect(screen.queryByTestId('onboarding-overlay')).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Open control panel' }));
+    await fireEvent.click(screen.getByRole('button', { name: /developer settings/i }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Run Setup Again' }));
+    await waitFor(() => expect(screen.getByTestId('onboarding-overlay')).toBeInTheDocument());
+    expect(mocks.settings.updateSettings).toHaveBeenCalledWith({ onboardingCompleted: false });
+    expect(screen.getByText('Select your camera')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open control panel' })).not.toBeInTheDocument();
   });
 });

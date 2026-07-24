@@ -39,6 +39,7 @@ fn file_backed_sqlite_settings_survive_restart_and_reset_independently() {
         alert_delay_seconds: 12.0,
         minimize_to_tray_on_close: false,
         start_hidden_on_login: false,
+        ..UiSettings::default()
     };
 
     {
